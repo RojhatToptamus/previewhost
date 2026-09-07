@@ -1,0 +1,7 @@
+{
+  "name": "node-example",
+  "type": "command",
+  "cwd": ".",
+  "command": ["node", "server.mjs"],
+  "readyPath": "/ready"
+}

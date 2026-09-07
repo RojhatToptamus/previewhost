@@ -1,0 +1,5 @@
+{
+  "name": "example",
+  "type": "static",
+  "directory": "./site"
+}

@@ -1,0 +1,6 @@
+previewd includes HTTP forwarding and process-lifecycle behavior adapted from Task Monki.
+Task Monki: https://github.com/RojhatToptamus/task-monki
+Copyright (c) 2026 Rojhat Toptamus, licensed under the MIT License in LICENSE.
+
+Portless was inspected and exercised as an implementation reference.
+Portless code, branding, certificate tools and route storage are not bundled.

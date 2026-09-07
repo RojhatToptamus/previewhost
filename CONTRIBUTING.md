@@ -1,0 +1,50 @@
+# Contributing
+
+## Develop
+
+Use Node.js 22.23 or later. Native tests need macOS with `ps` and `lsof`.
+The tests use temporary source directories, loopback ports, and real child processes.
+
+```sh
+npm ci
+npm run typecheck
+npm test
+git diff --check
+npm pack --dry-run
+```
+
+`npm test` builds the package and runs colocated Node tests serially. Native tests
+skip on unsupported platforms. A skipped test does not establish platform support.
+Some sandbox environments require explicit permission for local listeners and
+process inspection.
+
+## Change the product
+
+Trace the public method, authoritative owner, and cleanup path before editing.
+Prefer a small direct change. Keep runtime behavior in the library.
+The daemon, CLI, and MCP adapter must call the same public methods.
+
+Add tests for meaningful regressions. Use real processes and sockets when their
+lifecycle is the risk. Every test must release its own temporary resources even
+if an assertion fails. Never stop unrelated processes to make a test pass.
+
+For a contract change, exercise the library, CLI, and MCP consumers. For a package
+change, install a fresh tarball in a separate consumer. Verify its ESM import,
+TypeScript declarations, executable, and native supervisor path.
+
+Document only workflows that you exercise. Record the tested operating system,
+Node version, framework, and agent client. Keep proposed support separate.
+Do not infer real host compatibility from an SDK test alone.
+
+## Keep the repository small
+
+Current behavior belongs in tracked documentation. Research, private reviews,
+plans, fixtures, benchmark results, and screenshots belong in ignored `.local/`.
+Do not add credentials, tokens, generated output, or test artifacts to the package.
+
+Before finishing a change, inspect the complete diff and package inventory.
+Remove duplicated state, unused options, speculative abstractions, and stale docs.
+Every retained timer, process, limit, and state field needs a current consumer.
+
+The project uses the MIT license. Preserve required attribution in `LICENSE` and
+`NOTICE` when you adapt external code.
