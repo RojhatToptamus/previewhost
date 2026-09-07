@@ -2,9 +2,10 @@
 
 Local HTTP previews for applications and coding agents.
 
-previewd serves static files, runs a development server, or attaches to an existing
-loopback server. Each preview gets a URL. Replacement keeps that URL and changes
-the route only after the candidate is ready.
+previewd serves static files, runs development servers across repositories, and
+connects them to local PostgreSQL, Redis, or existing services. Each preview gets
+a URL. An environment replaces its application routes together after every
+candidate service is ready.
 
 The TypeScript library owns the runtime. A foreground daemon shares that runtime
 with the CLI and MCP tools. An application can use any interface without a model
@@ -55,7 +56,7 @@ In another terminal, use the packaged example:
 ```
 
 `start` returns JSON with the ready URL. Open that URL in a browser.
-Source paths in a JSON file resolve relative to that file.
+Source paths in a JSON or YAML file resolve relative to that file.
 
 ## Run a development server
 
@@ -73,9 +74,51 @@ Then run the packaged Node example:
 ./node_modules/.bin/previewd stop node-example
 ```
 
-`--allow-exec` grants ordinary execution as your user. It is not a sandbox.
+`--allow-exec` grants ordinary execution as your user and explicit database
+deletion/recovery operations. It is not a sandbox.
 The command receives `PORT`, `HOST=127.0.0.1`, and `PREVIEW_URL`.
 Dependencies must already exist. previewd does not install them.
+
+## Run a multi-repository environment
+
+An environment connects services from separate live directories. The numeric
+URL reaches its `primary` service. Each HTTP service also gets a browser alias,
+such as `shared-notes--api.localhost`, on the same preview port.
+
+The packaged [multi-repository example](examples/multi-repo/README.md) contains a
+frontend, two backends, PostgreSQL, and Redis. The backends share the same data.
+Its README lists the Docker image prerequisites and startup commands.
+
+```yaml
+name: shop
+type: environment
+primary: web
+services:
+  database: {type: postgres}
+  api:
+    type: command
+    cwd: ../backend
+    command: [node, server.mjs]
+    env:
+      DATABASE_URL: {service: database}
+      ALLOWED_ORIGIN: {browserUrl: web}
+    readyPath: /ready
+  web:
+    type: command
+    cwd: ../frontend
+    command: [node, server.mjs]
+    env:
+      API_URL: {service: api}
+      PUBLIC_API_URL: {browserUrl: api}
+```
+
+Managed databases require an explicit private `--data-dir`, local Docker Engine,
+and execution permission. `--env NAME` selects an owner environment input for
+`{fromEnv: NAME}` references. No `.env` file loads automatically.
+
+Stop preserves database data. `previewd delete-data NAME` permanently removes a
+stopped environment's owned data after host authorization. Attached databases
+remain under their original owner.
 
 ## Embed the library
 
@@ -98,17 +141,21 @@ try {
 
 For a long-lived application, keep the runtime open until application shutdown.
 The packaged [library example](examples/library.mjs) performs one request and then closes it.
+`loadPreviewSpec(file)` uses the same JSON/YAML file loader as the CLI.
 
 ## Behavior
 
 - Names identify previews. Attempt IDs identify individual starts and replacements.
 - Failed startup leaves no public listener. Candidate failure before replacement cutover keeps the active preview.
 - If old-resource cleanup fails after cutover, the new route stays active and reports incomplete cleanup.
-- Stop closes owned listeners and native process groups. Attached servers remain running.
+- Stop closes owned listeners, native process groups, and managed database containers. Database data remains available for the next start.
+- Attached HTTP servers and databases remain running.
 - Source directories remain live and caller-owned. Stop never deletes them.
 - URLs stay stable across replacement, but can change after stop or daemon restart.
 - A disconnected CLI or MCP client leaves daemon previews running.
-- Runtime state stays in memory. Restart does not restore previews or adopt old processes.
+- Application attempts and routes stay in memory. Restart does not restore native previews.
+- Private data records retain exact database ownership. Recovery removes owned containers and preserves their volumes.
+- An uncertain Docker creation can require operator recovery. Status retains the error and cleanup authority.
 
 ## Documentation
 

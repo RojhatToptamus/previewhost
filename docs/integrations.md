@@ -16,10 +16,10 @@ require macOS process tools, but Linux and Windows behavior remains unverified.
 | Integration | Verified behavior | Boundary |
 | --- | --- | --- |
 | ESM library | Static, command, attach, replacement, cancellation, stop, and close | One runtime per owner |
-| CLI and daemon | Shared previews, JSON input/output, authentication, and shutdown | Foreground daemon must already run |
-| MCP SDK | Discovery and calls through current and older protocol handshakes | Host-specific approval UI remains outside previewd |
-| Codex App Server 0.146.0 | Nine-tool discovery, start, wait, HTTP request, list, and stop | Direct App Server tool calls. No model turn or desktop UI test |
-| Cursor Agent 2026.08.25-3e8eec8 | Nine-tool discovery and clean MCP process exit | Tool invocation, model use, and IDE behavior remain unverified |
+| CLI and daemon | JSON/YAML environment startup, service outcomes, selected owner inputs, authentication, and shutdown | Foreground daemon must already run |
+| MCP SDK | Environment start/wait/replace/stop. Both protocol eras discover tools and return tool errors | Host-specific approval UI remains outside previewd |
+| Codex App Server 0.146.0 | Three applications with PostgreSQL/Redis; replacement, cancellation, stop, and data deletion | Direct MCP calls and independent HTTP checks. No model turn or desktop UI test |
+| Cursor Agent 2026.08.25-3e8eec8 | One headless model turn; three applications with PostgreSQL/Redis; replacement and stop | Twelve actual previewd calls and independent HTTP/data checks. IDE behavior remains unverified |
 | Task Monki | Real HTTP dependency approval, readiness, replacement, and independent stop | Engine embedding and production UI integration remain unverified |
 
 Additional client and framework results appear in their sections. Client versions
@@ -45,10 +45,17 @@ For a custom owner, add `--endpoint` and `--token-file` to the MCP arguments.
 An absolute executable path avoids differences between GUI and shell PATH values.
 The token value does not belong in this configuration.
 
-Codex verification used its installed App Server with an ephemeral thread and
-direct MCP calls. All nine tools appeared. A static preview reached ready,
-served content, appeared in the list, and stopped with its listener closed.
-The test did not change user configuration or start a model turn.
+Codex App Server 0.146.0 discovered all ten tools from a clean package installation.
+Direct MCP calls started the three-application example with owned PostgreSQL and Redis.
+Independent HTTP requests wrote a note through the API and read it through reporting.
+Replacement kept the public URL and both database values while all three applications switched to v2.
+Canceling a pending v3 candidate preserved v2. Stop retained data; explicit
+`preview_delete_data` removed it. The test preserved user configuration and used
+no model turn. The Codex desktop UI remains unverified.
+
+The [multi-repository example](../examples/multi-repo/README.md) describes owner
+configuration for native applications and managed databases. The same MCP
+configuration sends its complete environment spec through one start operation.
 
 See the [official Codex MCP configuration reference](https://developers.openai.com/codex/mcp/).
 
@@ -70,9 +77,16 @@ Use this project-level `.cursor/mcp.json` configuration in Cursor:
 Start the daemon separately. Use the host approval controls to enable the server
 and its tools. Native execution also requires the daemon launch permission.
 
-Cursor Agent verification discovered all nine tools with temporary project
-configuration and explicit server approval. Its CLI has no direct model-free
-tool-call command. Invocation, model use, and Cursor IDE behavior remain unverified.
+Cursor Agent 2026.08.25-3e8eec8 discovered all ten tools and completed one headless model turn.
+The turn made twelve previewd calls through inspect, start, wait, get, list,
+logs, replace, and stop. Independent HTTP requests verified a PostgreSQL note
+and Redis cache value before and after replacement. All three applications
+switched to v2 at the same public URL.
+
+Stop retained both databases. A separate public client reopened the environment
+and verified both values before deleting the fixture data. Only previewd's MCP
+server was enabled. Temporary project settings preserved global configuration.
+Cursor IDE behavior remains unverified.
 
 Other stdio MCP hosts can use the same executable and arguments. previewd supports
 tool discovery without a running daemon. Actual tool operations require the daemon.
@@ -107,10 +121,11 @@ Dependencies must already exist in the selected directory. Use explicit argument
 for the allocated port and loopback binding. The daemon needs `--allow-exec`.
 
 Vite 8.2.2 and Next.js 16.3.4 passed Chrome 152 checks through previewd on Node 22.23.1.
-Both pages rendered, accepted a button click, and reflected source changes through
-the public WebSocket connection. Desktop and mobile screenshots showed no framework
-error overlay. The browser reported no console errors after fixture favicon setup.
-Python 3.14.6 passed an HTTP request and native process cleanup check.
+Both also passed environment checks through `<name>--web.localhost` aliases.
+The pages accepted button clicks and reflected source changes through their alias WebSocket connections.
+Desktop and mobile checks showed no framework error overlay. The browser reported
+no page or console errors. Python 3.14.6 passed another HTTP request and native
+process cleanup check.
 
 ### Vite
 

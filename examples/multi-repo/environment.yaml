@@ -1,0 +1,43 @@
+name: shared-notes
+type: environment
+primary: frontend
+timeoutMs: 60000
+services:
+  database:
+    type: postgres
+  cache:
+    type: redis
+  api:
+    type: command
+    cwd: ./api
+    command: [node, server.mjs]
+    readyPath: /ready
+    env:
+      DATABASE_URL: { service: database }
+      REDIS_URL: { service: cache }
+      FRONTEND_ORIGIN: { browserUrl: frontend }
+      FRONTEND_NUMERIC_ORIGIN: { publicUrl: frontend }
+      REVISION: v1
+  reporting:
+    type: command
+    cwd: ./reporting
+    command: [node, server.mjs]
+    readyPath: /ready
+    env:
+      DATABASE_URL: { service: database }
+      REDIS_URL: { service: cache }
+      API_URL: { service: api }
+      FRONTEND_ORIGIN: { browserUrl: frontend }
+      FRONTEND_NUMERIC_ORIGIN: { publicUrl: frontend }
+      REVISION: v1
+  frontend:
+    type: command
+    cwd: ./frontend
+    command: [node, server.mjs]
+    readyPath: /ready
+    env:
+      API_URL: { service: api }
+      REPORTING_URL: { service: reporting }
+      PUBLIC_API_URL: { browserUrl: api }
+      PUBLIC_REPORTING_URL: { browserUrl: reporting }
+      REVISION: v1

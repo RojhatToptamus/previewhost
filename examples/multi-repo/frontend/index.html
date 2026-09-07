@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shared notes · previewd example</title>
+    <link rel="stylesheet" href="/style.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">previewd / multi-repository example</p>
+        <h1>Shared notes</h1>
+        <p class="intro">Write through the API. Read the same PostgreSQL data and Redis cache through a separate reporting service.</p>
+      </header>
+      <div class="service-line" aria-label="Service revisions">
+        <span id="frontend-revision">Web: loading</span>
+        <span id="api-revision">API: loading</span>
+        <span id="reporting-revision">Reporting: loading</span>
+      </div>
+      <section aria-labelledby="write-title">
+        <h2 id="write-title">Add a note</h2>
+        <form id="note-form">
+          <label for="note">Note</label>
+          <div class="form-row">
+            <input id="note" name="note" maxlength="160" required placeholder="Something worth keeping" autocomplete="off">
+            <button id="save" type="submit" disabled>Save note</button>
+          </div>
+        </form>
+        <p id="save-status" role="status" aria-live="polite"></p>
+      </section>
+      <div class="results">
+        <section aria-labelledby="notes-title">
+          <div class="section-heading"><h2 id="notes-title">Recent notes</h2><button id="refresh" class="quiet" type="button">Refresh</button></div>
+          <p id="api-error" class="error" role="alert" hidden></p>
+          <p id="empty-notes">Loading notes…</p>
+          <ol id="notes"></ol>
+        </section>
+        <section class="report" aria-labelledby="report-title">
+          <h2 id="report-title">Shared data check</h2>
+          <p id="reporting-error" class="error" role="alert" hidden></p>
+          <dl>
+            <dt>Notes in PostgreSQL</dt><dd id="total-notes">—</dd>
+            <dt>Latest note in Redis</dt><dd id="cached-note">No cached note yet.</dd>
+          </dl>
+          <p class="hint">Reporting reads the resources that the API writes.</p>
+        </section>
+      </div>
+      <footer>Data stays after replacement and stop. Use <code>delete-data</code> to remove this environment’s stored notes.</footer>
+    </main>
+  </body>
+</html>

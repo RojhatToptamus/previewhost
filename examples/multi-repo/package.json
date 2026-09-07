@@ -1,0 +1,18 @@
+{
+  "name": "previewd-multi-repo-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "previewd serve --root . --allow-exec --data-dir .local/data --token-file .local/token",
+    "start": "previewd start --file environment.yaml --token-file .local/token",
+    "replace": "previewd replace --file environment.yaml --token-file .local/token",
+    "status": "previewd get shared-notes --token-file .local/token",
+    "stop": "previewd stop shared-notes --token-file .local/token",
+    "delete-data": "previewd delete-data shared-notes --token-file .local/token",
+    "shutdown": "previewd shutdown --token-file .local/token"
+  },
+  "dependencies": {
+    "pg": "^8.23.0",
+    "redis": "^6.2.1"
+  }
+}

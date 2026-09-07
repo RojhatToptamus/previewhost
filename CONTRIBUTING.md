@@ -18,6 +18,18 @@ skip on unsupported platforms. A skipped test does not establish platform suppor
 Some sandbox environments require explicit permission for local listeners and
 process inspection.
 
+Real database tests require local Docker and cached `postgres:17-alpine` and
+`redis:7-alpine` images. Select the local socket explicitly:
+
+```sh
+PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify
+```
+
+Without that variable, the real database suites skip. The remaining data tests
+use isolated Unix sockets to exercise interrupted mutations and ownership checks.
+Each real test creates its own containers and volumes, then removes only those
+objects. Do not point verification at a shared or remote database.
+
 ## Change the product
 
 Trace the public method, authoritative owner, and cleanup path before editing.
