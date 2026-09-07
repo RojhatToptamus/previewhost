@@ -112,7 +112,9 @@ test('late authorization cannot resurrect a stopped attempt and callback mutatio
   let release!: (allowed: boolean) => void;
   let entered!: () => void;
   let approvalEntered = new Promise<void>((resolve) => { entered = resolve; });
-  const { runtime, spec, directory } = await fixture(t, ({ spec: inspected }) => {
+  const { runtime, spec, directory } = await fixture(t, (request) => {
+    if (!('spec' in request)) return false;
+    const inspected = request.spec;
     if (inspected.type === 'static') inspected.directory = path.join(directory, 'two');
     entered();
     return new Promise<boolean>((resolve) => { release = resolve; });

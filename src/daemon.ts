@@ -148,7 +148,8 @@ export async function startDaemon(options: { runtime: OwnedRuntime; port?: numbe
       case 'wait': { const p = parse(requestSchemas.wait, value); return runtime.wait(p.name, p.attemptId, { timeoutMs: p.timeoutMs, signal }); }
       case 'logs': { const p = parse(requestSchemas.logs, value); return runtime.logs(p.name, p.attemptId, p.maxBytes); }
       case 'cancel': { const p = parse(requestSchemas.cancel, value); return runtime.cancel(p.name, p.attemptId); }
-      case 'stop': return runtime.stop(parse(requestSchemas.stop, value).name);
+      case 'stop': { const p = parse(requestSchemas.stop, value); return runtime.stop(p.name, { afterEngineRestart: p.afterEngineRestart }); }
+      case 'deleteData': return runtime.deleteData(parse(requestSchemas.deleteData, value).name);
       default: throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
     }
   }

@@ -26,6 +26,7 @@ export async function startNative(input: {
   url: string;
   signal: AbortSignal;
   appendLog(text: string): void;
+  redactions?: string[];
   onResource(resource: NativeResource): void;
 }): Promise<NativeResource> {
   if (process.platform !== 'darwin') {
@@ -51,6 +52,7 @@ export async function startNative(input: {
     target: { port, hostHeader: `127.0.0.1:${port}` },
     exited,
     stop,
+    assertRunning: ensureStarting,
     async verifyListener() {
       ensureStarting();
       if (!group) throw new PreviewError('START_FAILED', 'The native supervisor is no longer running.');
@@ -157,7 +159,7 @@ export async function startNative(input: {
         type: 'configure', command: argv,
         cwd: input.spec.cwd,
         env: commandEnvironment(input.spec.env, port, input.url),
-        redactions: Object.values(input.spec.env),
+        redactions: [...Object.values(input.spec.env), ...(input.redactions ?? [])],
       }),
     ]);
     ensureStarting();

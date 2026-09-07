@@ -38,6 +38,25 @@ test('CLI file and stdin workflows share the daemon, resolve paths once, and ret
   input.stdin.end(JSON.stringify({ name: 'stdin-site', type: 'static', directory: 'site' }));
   assert.equal((await ended)[0], 0, stderr);
   assert.equal(JSON.parse(stdout).spec.directory, await realpath(join(directory, 'site')));
+  const environmentFile = join(directory, 'environment.yaml');
+  await mkdir(join(directory, 'api site'));
+  await writeFile(join(directory, 'api site', 'index.html'), 'API preview');
+  await writeFile(environmentFile, `name: cli-environment
+type: environment
+primary: web
+services:
+  web: {type: static, directory: ./site}
+  api: {type: static, directory: './api site'}
+`);
+  const environment = JSON.parse((await execute(process.execPath, [cli, 'start', '--file', environmentFile, ...common])).stdout);
+  assert.equal(environment.state, 'ready');
+  assert.equal(environment.services.web.state, 'ready');
+  assert.equal(environment.services.api.state, 'ready');
+  assert.equal(await (await fetch(environment.url)).text(), 'CLI preview');
+  assert.equal(new URL(environment.services.api.browserUrl).hostname, 'cli-environment--api.localhost');
+  const stoppedEnvironment = JSON.parse((await execute(process.execPath, [cli, 'stop', 'cli-environment', ...common])).stdout);
+  assert.equal(stoppedEnvironment.active, undefined);
+  await assert.rejects(fetch(environment.url));
   const deniedFile = join(directory, 'denied.json');
   await writeFile(deniedFile, JSON.stringify({ name: 'denied', type: 'command', cwd: directory,
     command: [process.execPath, '-e', 'throw new Error("must not run")'], env: { PRIVATE_VALUE: 'do-not-display-this-secret' } }));
@@ -54,7 +73,10 @@ test('CLI file and stdin workflows share the daemon, resolve paths once, and ret
 test('the foreground CLI owns its daemon and explicit shutdown ends it without a hidden child owner', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'previewd serve '));
   const tokenFile = join(directory, 'private', 'token');
-  const owner = spawn(process.execPath, [cli, 'serve', '--root', directory, '--token-file', tokenFile, '--port', '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const secret = 'selected-owner-input-must-stay-private';
+  const owner = spawn(process.execPath, [cli, 'serve', '--root', directory, '--env', 'PREVIEWD_SELECTED_INPUT', '--token-file', tokenFile, '--port', '0'], {
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PREVIEWD_SELECTED_INPUT: secret, PREVIEWD_UNSELECTED_INPUT: 'not-selected' },
+  });
   const exit = once(owner, 'exit');
   let stderr = '';
   owner.stderr.on('data', (data) => { stderr += data; });
@@ -67,9 +89,19 @@ test('the foreground CLI owns its daemon and explicit shutdown ends it without a
   lines.close();
   const info = JSON.parse(line);
   assert.equal(info.execution, 'disabled');
+  assert.deepEqual(info.inputKeys, ['PREVIEWD_SELECTED_INPUT']);
+  assert.ok(!line.includes(secret));
   const client = connectPreviewDaemon({ endpoint: info.endpoint, tokenFile });
   t.after(() => client.close());
   assert.deepEqual(await client.list(), []);
+  const environment = { name: 'inputs', type: 'environment' as const, primary: 'api', services: {
+    api: { type: 'command' as const, cwd: directory, command: [process.execPath, '-e', 'process.exit(99)'],
+      env: { TOKEN: { fromEnv: 'PREVIEWD_SELECTED_INPUT' } } },
+  } };
+  const description = await client.inspect(environment);
+  assert.ok(!JSON.stringify(description).includes(secret));
+  environment.services.api.env.TOKEN.fromEnv = 'PREVIEWD_UNSELECTED_INPUT';
+  await assert.rejects(client.inspect(environment), { code: 'INVALID_INPUT' });
   await client.shutdown();
   assert.equal((await exit)[0], 0, stderr);
   await assert.rejects(client.list(), { code: 'DAEMON_UNAVAILABLE' });

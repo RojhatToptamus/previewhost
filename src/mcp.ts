@@ -7,7 +7,7 @@ import { failure, PreviewError } from './errors.js';
 /** All tools call the same public API; the MCP host owns tool approval UI. */
 export function createMcpServer(client: PreviewApi): McpServer {
   const server = new McpServer({ name: 'previewd', version: '0.1.0' }, {
-    instructions: 'Manage local HTTP previews through an explicitly started previewd daemon. Start or replace returns an attempt: wait for its id before using the URL. A wait timeout does not stop startup. Cancel requires the exact attempt id; stop affects the named preview. Disconnecting leaves previews running. Commands require the daemon owner to enable execution. Never retry a mutation automatically after a connection error; inspect get/list first.',
+    instructions: 'Manage local previews and application environments through an explicitly started previewd daemon. Start or replace returns an attempt. Wait for its id before using the URL. A wait timeout does not stop startup. Cancel requires the exact attempt id. Stop preserves database data. Delete data only after an explicit user request with preview_delete_data. Set afterEngineRestart only after the operator confirms an actual local Docker Engine restart. Disconnecting leaves previews running. Commands, managed databases, data deletion, and recovery require owner authorization. After a connection error, inspect get/list before another mutation.',
   });
   let active = 0;
   let waits = 0;
@@ -32,23 +32,23 @@ export function createMcpServer(client: PreviewApi): McpServer {
   const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
   const cleanup = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
   server.registerTool('preview_inspect', {
-    description: 'Validate a preview spec and describe its source, command, and cleanup without starting or approving it.',
+    description: 'Validate one preview or environment spec and describe sources, commands, bindings, and cleanup. Does not start resources or grant permission. Environment values and database credentials are omitted.',
     inputSchema: requestSchemas.inspect, annotations: read,
   }, ({ spec }) => run('request', () => client.inspect(spec)));
   server.registerTool('preview_start', {
-    description: 'Start a named preview. Returns a starting attempt; use preview_wait with its id. Execution must already be permitted by the daemon owner.',
+    description: 'Start a named preview or environment. Returns a starting attempt. Use preview_wait with its id. An environment becomes ready only after all its services. Execution and managed databases require daemon owner permission.',
     inputSchema: requestSchemas.start, annotations: write,
   }, ({ spec }) => run('request', () => client.start(spec)));
   server.registerTool('preview_replace', {
-    description: 'Prepare a replacement while keeping the active route. Wait for the returned candidate id. Failure before cutover keeps the old preview.',
+    description: 'Prepare a replacement while keeping active routes. All environment services become ready before the routes change together. Shared database data stays in place. Wait for the returned candidate id. Candidate failure keeps the old preview.',
     inputSchema: requestSchemas.replace, annotations: { ...write, destructiveHint: true },
   }, ({ name, spec }) => run('request', () => client.replace(name, spec)));
   server.registerTool('preview_list', {
-    description: 'List bounded current preview observations. Use after a lost start or replace response before retrying.',
+    description: 'List bounded preview observations and retained database data, including names restored after owner restart. Use after a lost mutation response before retrying.',
     inputSchema: requestSchemas.list, annotations: read,
   }, () => run('request', () => client.list()));
   server.registerTool('preview_get', {
-    description: 'Read the active attempt, candidate, latest outcome, and any incomplete cleanup for a name.',
+    description: 'Read active/candidate attempts, per-service outcomes, the latest result, retained database data, and incomplete cleanup for a name. Database credentials are omitted.',
     inputSchema: requestSchemas.get, annotations: read,
   }, ({ name }) => run('request', () => client.get(name)));
   server.registerTool('preview_wait', {
@@ -64,9 +64,13 @@ export function createMcpServer(client: PreviewApi): McpServer {
     inputSchema: requestSchemas.cancel, annotations: cleanup,
   }, ({ name, attemptId }) => run('cleanup', () => client.cancel(name, attemptId)));
   server.registerTool('preview_stop', {
-    description: 'Stop the named preview and join all owned cleanup. Attached external servers and caller source files remain owned by their original owner.',
+    description: 'Stop the named preview and join owned application/container cleanup. Preserves database data, attached services, and source files. Set afterEngineRestart only after the operator confirms an actual local Engine restart. This resolves an absent indeterminate creation and requires recovery authorization. It never restarts Docker.',
     inputSchema: requestSchemas.stop, annotations: cleanup,
-  }, ({ name }) => run('cleanup', () => client.stop(name)));
+  }, ({ name, afterEngineRestart }) => run('cleanup', () => client.stop(name, { afterEngineRestart })));
+  server.registerTool('preview_delete_data', {
+    description: 'Permanently delete a stopped environment\'s verified owned database data. Requires an explicit user request and daemon owner authorization. Rejects live applications or unresolved cleanup. Never deletes attached databases or source directories. Stop alone preserves data.',
+    inputSchema: requestSchemas.deleteData, annotations: cleanup,
+  }, ({ name }) => run('request', () => client.deleteData(name)));
   return server;
 }
 

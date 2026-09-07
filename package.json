@@ -34,11 +34,15 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
+    "pg": "^8.23.0",
+    "redis": "^6.2.1",
+    "yaml": "^2.9.0",
     "zod": "^4.2.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^22.19.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.9.3"
   }
 }

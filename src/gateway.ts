@@ -10,6 +10,8 @@ import type { HttpTarget } from './resources.js';
 export interface Gateway {
   readonly url: string;
   setTarget(target: HttpTarget | undefined): void;
+  /** Hostnames without ports. The complete map is validated before publication. */
+  setRoutes(routes: Readonly<Record<string, HttpTarget>> | undefined): void;
   drain(target: HttpTarget): Promise<void>;
   close(): Promise<void>;
 }
@@ -29,7 +31,8 @@ interface TargetWork {
 
 /** An IPv4 loopback HTTP gateway. Target object identity owns its in-flight work. */
 export async function createGateway(options: { onError?: (error: Error) => void } = {}): Promise<Gateway> {
-  let active: HttpTarget | undefined;
+  let active: ReadonlyMap<string, HttpTarget> | undefined;
+  let knownAuthorities = new Set<string>();
   let authority = '';
   let bound = false;
   let closing: Promise<void> | undefined;
@@ -64,27 +67,15 @@ export async function createGateway(options: { onError?: (error: Error) => void 
     server.listen(0, '127.0.0.1');
   });
   authority = `127.0.0.1:${port}`;
+  knownAuthorities.add(authority);
   bound = true;
 
   return {
     url: `http://${authority}`,
     setTarget(target) {
-      if (closing) {
-        if (!target) return;
-        throw new PreviewError('CLOSED', 'The preview gateway is closed.');
-      }
-      if (target) {
-        if (!Number.isInteger(target.port) || target.port < 1 || target.port > 65_535
-          || !/^(?:127\.0\.0\.1|localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.localhost):[0-9]+$/.test(target.hostHeader)
-          || Number(target.hostHeader.split(':')[1]) !== target.port) {
-          throw new PreviewError('INVALID_INPUT', 'The preview target must be an IPv4 loopback HTTP authority.');
-        }
-        if (target.port === port) {
-          throw new PreviewError('INVALID_INPUT', 'A preview cannot attach to its own public listener.');
-        }
-      }
-      active = target;
+      setRoutes(target ? { '127.0.0.1': target } : undefined);
     },
+    setRoutes,
     async drain(target) {
       const pending = work.get(target);
       if (!pending) return;
@@ -105,6 +96,33 @@ export async function createGateway(options: { onError?: (error: Error) => void 
     },
     close,
   };
+
+  function setRoutes(routes: Readonly<Record<string, HttpTarget>> | undefined): void {
+    if (closing) {
+      if (!routes) return;
+      throw new PreviewError('CLOSED', 'The preview gateway is closed.');
+    }
+    if (!routes) { active = undefined; return; }
+    if (!Object.hasOwn(routes, '127.0.0.1') || Object.keys(routes).length > limits.environmentServices + 1) {
+      throw new PreviewError('INVALID_INPUT', 'The gateway needs one numeric entry and a bounded set of service routes.');
+    }
+    const next = new Map<string, HttpTarget>();
+    for (const [hostname, target] of Object.entries(routes)) {
+      if (hostname !== '127.0.0.1' && !/^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\.localhost$/.test(hostname)) {
+        throw new PreviewError('INVALID_INPUT', 'A browser route must be a single .localhost label.');
+      }
+      if (!Number.isInteger(target.port) || target.port < 1 || target.port > 65_535
+        || !/^(?:127\.0\.0\.1|localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.localhost):[0-9]+$/.test(target.hostHeader)
+        || Number(target.hostHeader.split(':')[1]) !== target.port) {
+        throw new PreviewError('INVALID_INPUT', 'The preview target must be an IPv4 loopback HTTP authority.');
+      }
+      if (target.port === port) throw new PreviewError('INVALID_INPUT', 'A preview cannot attach to its own public listener.');
+      next.set(`${hostname}:${port}`, target);
+    }
+    // Requests cannot interleave with validation and this synchronous assignment.
+    knownAuthorities = new Set(next.keys());
+    active = next;
+  }
 
   function trackSocket(socket: net.Socket): void {
     sockets.add(socket);
@@ -163,7 +181,8 @@ export async function createGateway(options: { onError?: (error: Error) => void 
   }
 
   function admission(request: IncomingMessage): { status: number; message: string } | undefined {
-    if (singleHeader(request, 'host') !== authority) return { status: 421, message: 'Unknown preview Host.' };
+    const requestedAuthority = singleHeader(request, 'host');
+    if (!requestedAuthority || !knownAuthorities.has(requestedAuthority)) return { status: 421, message: 'Unknown preview Host.' };
     if (!request.url?.startsWith('/') || request.url.startsWith('//') || /[\x00-\x20\x7f#]/.test(request.url)) {
       return { status: 400, message: 'Use an origin-relative request path.' };
     }
@@ -172,7 +191,7 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       return { status: 400, message: 'Invalid proxy hop header.' };
     }
     if (Number(hops ?? 0) >= maxHops) return { status: 508, message: 'Preview proxy loop detected.' };
-    if (!active || closing) return { status: 503, message: 'The preview is not ready.' };
+    if (!active?.has(requestedAuthority) || closing) return { status: 503, message: 'The preview is not ready.' };
     // One TCP connection can pipeline many requests before any response arrives.
     let pendingRequests = 0;
     for (const pending of work.values()) pendingRequests += pending.cleanups.size;
@@ -180,7 +199,7 @@ export async function createGateway(options: { onError?: (error: Error) => void 
     return undefined;
   }
 
-  function headers(request: IncomingMessage, target: HttpTarget): http.OutgoingHttpHeaders {
+  function headers(request: IncomingMessage, target: HttpTarget, publicAuthority: string): http.OutgoingHttpHeaders {
     const result = stripHopByHop(request.headers);
     for (const key of Object.keys(result)) {
       if (key === 'forwarded' || key === 'x-real-ip' || key.startsWith('x-forwarded-')) delete result[key];
@@ -188,7 +207,7 @@ export async function createGateway(options: { onError?: (error: Error) => void 
     return {
       ...result,
       host: target.hostHeader,
-      'x-forwarded-host': authority,
+      'x-forwarded-host': publicAuthority,
       'x-forwarded-port': String(port),
       'x-forwarded-proto': 'http',
       'x-forwarded-for': request.socket.remoteAddress ?? '127.0.0.1',
@@ -196,13 +215,13 @@ export async function createGateway(options: { onError?: (error: Error) => void 
     };
   }
 
-  function responseHeaders(source: IncomingHttpHeaders, target: HttpTarget): http.OutgoingHttpHeaders {
+  function responseHeaders(source: IncomingHttpHeaders, target: HttpTarget, publicAuthority: string): http.OutgoingHttpHeaders {
     const result = stripHopByHop(source);
     if (typeof result.location === 'string') {
       try {
         const location = new URL(result.location);
         if (!location.username && !location.password && location.origin === new URL(`http://${target.hostHeader}`).origin) {
-          location.host = authority;
+          location.host = publicAuthority;
           result.location = location.toString();
         }
       } catch { /* A relative or non-URL Location is already forwarded unchanged. */ }
@@ -217,10 +236,11 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       sendError(response, rejected.status, rejected.message);
       return;
     }
-    const target = active!;
+    const publicAuthority = singleHeader(request, 'host')!;
+    const target = active!.get(publicAuthority)!;
     const upstream = http.request({
       host: '127.0.0.1', port: target.port, method: request.method,
-      path: request.url, headers: headers(request, target), agent: false,
+      path: request.url, headers: headers(request, target, publicAuthority), agent: false,
     });
     let done = false;
     const deadline = setTimeout(() => upstream.destroy(new Error('Upstream headers timed out.')), limits.headerTimeoutMs);
@@ -250,7 +270,7 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       incoming.once('aborted', fail);
       if (done) { incoming.destroy(); return; }
       try {
-        response.writeHead(incoming.statusCode ?? 502, responseHeaders(incoming.headers, target));
+        response.writeHead(incoming.statusCode ?? 502, responseHeaders(incoming.headers, target, publicAuthority));
       } catch { fail(); return; }
       incoming.pipe(response);
     });
@@ -273,8 +293,9 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       socket.end(serializeHeaders(rejected?.status ?? 400, { connection: 'close', 'content-length': 0 }), () => socket.destroy());
       return;
     }
-    const target = active!;
-    const outgoingHeaders = headers(request, target);
+    const publicAuthority = singleHeader(request, 'host')!;
+    const target = active!.get(publicAuthority)!;
+    const outgoingHeaders = headers(request, target, publicAuthority);
     outgoingHeaders.connection = 'Upgrade';
     outgoingHeaders.upgrade = 'websocket';
     // Upgrade bytes are tunnel data, not an HTTP request body.
@@ -318,7 +339,7 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       answered = true;
       clearTimeout(deadline);
       peer = upstreamSocket;
-      const result = responseHeaders(incoming.headers, target);
+      const result = responseHeaders(incoming.headers, target, publicAuthority);
       result.connection = 'Upgrade';
       result.upgrade = 'websocket';
       delete result['content-length'];
@@ -334,7 +355,7 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       if (done) { incoming.destroy(); return; }
       answered = true;
       clearTimeout(deadline);
-      const result = responseHeaders(incoming.headers, target);
+      const result = responseHeaders(incoming.headers, target, publicAuthority);
       result.connection = 'close';
       socket.write(serializeHeaders(incoming.statusCode ?? 502, result));
       incoming.once('error', destroy);

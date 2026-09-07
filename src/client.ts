@@ -141,7 +141,8 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
     wait: (name, attemptId, opts = {}) => call('wait', { name, attemptId, timeoutMs: opts.timeoutMs }, opts.signal),
     logs: (name, attemptId, maxBytes) => call('logs', { name, attemptId, maxBytes }),
     cancel: (name, attemptId) => call('cancel', { name, attemptId }),
-    stop: (name) => call('stop', { name }),
+    stop: (name, opts = {}) => call('stop', { name, afterEngineRestart: opts.afterEngineRestart }),
+    deleteData: (name) => call('deleteData', { name }),
     shutdown: async () => { await call('shutdown', {}); },
     close: async () => {
       closed = true;

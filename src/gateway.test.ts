@@ -272,6 +272,43 @@ test('forwards WebSocket rejection bodies and terminates truncated HTTP response
   assert.equal((await request(proxy.url)).body, 'still-working');
 });
 
+test('publishes all browser routes together and drains only the retired alias streams', async (t) => {
+  const old = await backend(t, (_incoming, response) => response.end('old'));
+  let forwardedHost = '';
+  old.server.on('upgrade', (incoming, socket) => {
+    forwardedHost = String(incoming.headers['x-forwarded-host']);
+    socket.on('data', () => {});
+    socket.on('end', () => socket.destroy());
+    socket.write(acceptUpgrade(incoming));
+  });
+  const next = await backend(t, (_incoming, response) => response.end('next'));
+  const proxy = await gateway(t, old.target);
+  const port = new URL(proxy.url).port;
+  const alias = `http://shop--api.localhost:${port}`;
+  proxy.setRoutes({ '127.0.0.1': old.target, 'shop--api.localhost': old.target });
+  const stream = await rawClient(t, proxy.url);
+  stream.socket.write(upgradeRequest(alias));
+  await eventually(() => stream.text.includes('101'), 'alias WebSocket is established');
+  assert.equal(forwardedHost, new URL(alias).host);
+  assert.throws(() => proxy.setRoutes({
+    '127.0.0.1': next.target, 'shop--api.localhost': next.target,
+    'invalid.remote': next.target,
+  }), /localhost label/);
+  assert.equal((await request(proxy.url)).body, 'old');
+  assert.equal((await request(proxy.url, { headers: { host: new URL(alias).host } })).body, 'old');
+  proxy.setRoutes({ '127.0.0.1': next.target, 'shop--api.localhost': next.target });
+  assert.equal((await request(proxy.url)).body, 'next');
+  assert.equal((await request(proxy.url, { headers: { host: new URL(alias).host } })).body, 'next');
+  assert.equal(stream.socket.destroyed, false, 'cutover retains the established old stream until drain');
+  await proxy.drain(old.target);
+  await eventually(() => stream.socket.destroyed && old.sockets.size === 0, 'old alias stream is drained');
+  assert.equal((await request(proxy.url)).body, 'next');
+  proxy.setRoutes(undefined);
+  assert.equal((await request(proxy.url, { headers: { host: new URL(alias).host } })).status, 503);
+  assert.equal((await request(proxy.url, { headers: { host: `unknown.localhost:${port}` } })).status, 421);
+  assert.equal(old.server.listening, true, 'an externally owned backend is never stopped');
+});
+
 test('bounds stalled HTTP headers and WebSocket handshakes while keeping active streamed bodies alive', { timeout: 15_000 }, async (t) => {
   const upstream = await backend(t, (incoming, response) => {
     if (incoming.url === '/events') {

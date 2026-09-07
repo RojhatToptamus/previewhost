@@ -16,13 +16,13 @@ const mime: Record<string, string> = {
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.map': 'application/json',
 };
 
-export async function startStatic(directory: string, spa: boolean): Promise<Resource> {
+export async function startStatic(directory: string, spa: boolean, privateDirectory?: string): Promise<Resource> {
   const sockets = new Set<Socket>();
   let stopping: Promise<void> | undefined;
   let lost!: (error: Error) => void;
   const exited = new Promise<Error>((resolve) => { lost = resolve; });
   const server = http.createServer((request, response) => {
-    void serve(directory, spa, request, response).catch(() => {
+    void serve(directory, spa, privateDirectory, request, response).catch(() => {
       if (response.headersSent) response.destroy();
       else { response.writeHead(500); response.end('File could not be read.'); }
     });
@@ -47,7 +47,7 @@ export async function startStatic(directory: string, spa: boolean): Promise<Reso
   };
 }
 
-async function serve(directory: string, spa: boolean, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+async function serve(directory: string, spa: boolean, privateDirectory: string | undefined, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
   const error = (status: number, message: string) => { response.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' }); response.end(message); };
   if (request.method !== 'GET' && request.method !== 'HEAD') { response.setHeader('allow', 'GET, HEAD'); error(405, 'Method not allowed.'); return; }
   const raw = request.url ?? '/';
@@ -62,7 +62,7 @@ async function serve(directory: string, spa: boolean, request: http.IncomingMess
   let filename = path.join(directory, ...segments);
   try {
     filename = await fs.realpath(filename);
-    if (!isWithin(directory, filename)) { error(403, 'Path is not available.'); return; }
+    if (!isWithin(directory, filename) || privateDirectory && isWithin(privateDirectory, filename)) { error(403, 'Path is not available.'); return; }
     if ((await fs.stat(filename)).isDirectory()) {
       if (!decoded.endsWith('/')) {
         response.writeHead(301, { location: `${rawPath}/${question < 0 ? '' : raw.slice(question)}` }); response.end(); return;
@@ -74,7 +74,8 @@ async function serve(directory: string, spa: boolean, request: http.IncomingMess
     if (!spa || path.extname(decoded)) { error(404, 'File not found.'); return; }
     try { filename = await fs.realpath(path.join(directory, 'index.html')); } catch { error(404, 'File not found.'); return; }
   }
-  if (!isWithin(directory, filename) || path.relative(directory, filename).split(path.sep).some((part) => part.startsWith('.'))) { error(403, 'Path is not available.'); return; }
+  if (!isWithin(directory, filename) || privateDirectory && isWithin(privateDirectory, filename)
+    || path.relative(directory, filename).split(path.sep).some((part) => part.startsWith('.'))) { error(403, 'Path is not available.'); return; }
   if (!(await fs.stat(filename)).isFile()) { error(404, 'File not found.'); return; }
   let file: fs.FileHandle;
   try { file = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); } catch { error(404, 'File not found.'); return; }
