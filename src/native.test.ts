@@ -7,8 +7,7 @@ import http from 'node:http';
 import childProcess, { spawn, fork, type ChildProcess } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { startNative, type NativeResource } from './native.js';
-import type { CommandSpec } from './contracts.js';
+import { startNative, type NativeResource, type NativeCommandSpec as CommandSpec } from './native.js';
 
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
 const server = `

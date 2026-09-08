@@ -1,11 +1,12 @@
 import type { ErrorCode, Failure } from './contracts.js';
 
 export class PreviewError extends Error {
-  constructor(public readonly code: ErrorCode, message: string) {
+  constructor(public readonly code: ErrorCode, message: string,
+    private readonly details: Pick<Failure, 'requirements' | 'outcome'> = {}) {
     super(message.slice(0, 1024));
     this.name = 'PreviewError';
   }
-  toJSON(): Failure { return { code: this.code, message: this.message }; }
+  toJSON(): Failure { return { code: this.code, message: this.message, ...this.details }; }
 }
 export function failure(error: unknown, fallback: ErrorCode = 'START_FAILED'): Failure {
   return error instanceof PreviewError ? error.toJSON() : {

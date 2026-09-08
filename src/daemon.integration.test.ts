@@ -115,6 +115,34 @@ test('private token files reject symlinks, broad permissions, and unsafe directo
   assert.doesNotThrow(() => connectPreviewDaemon({ endpoint: 'http://127.0.0.1:80' }));
 });
 
+test('daemon token directories are excluded from existing and future static previews, including aliases', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewd private source '));
+  const privateDirectory = join(directory, 'private');
+  await mkdir(privateDirectory, { mode: 0o700 });
+  await writeFile(join(directory, 'index.html'), 'public');
+  await writeFile(join(privateDirectory, 'index.html'), 'private');
+  const runtime = await createPreviewRuntime({ allowedRoots: [directory] });
+  let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
+  t.after(async () => { await (daemon?.close() ?? runtime.close()); await rm(directory, { recursive: true, force: true }); });
+  const before = await runtime.start({ name: 'before', type: 'static', directory: privateDirectory });
+  const existing = await runtime.wait('before', before.candidate!.id);
+  assert.equal(existing.state, 'ready');
+  daemon = await startDaemon({ runtime, port: 0, tokenFile: join(privateDirectory, 'token') });
+  await symlink(privateDirectory, join(directory, 'alias'));
+  await symlink(join(privateDirectory, 'token'), join(directory, 'token-alias'));
+  const started = await runtime.start({ name: 'site', type: 'environment', primary: 'web',
+    services: { web: { type: 'static', directory } } });
+  const ready = await runtime.wait('site', started.candidate!.id);
+  assert.equal(ready.state, 'ready');
+  assert.equal(await (await fetch(ready.url!)).text(), 'public');
+  for (const path of ['/private/token', '/alias/token', '/token-alias']) {
+    assert.equal((await fetch(new URL(path, ready.url))).status, 403);
+  }
+  assert.equal((await fetch(existing.url!)).status, 403);
+  await assert.rejects(runtime.inspect({ name: 'private', type: 'static', directory: privateDirectory }), { code: 'SOURCE_DENIED' });
+  await assert.rejects(runtime.inspect({ name: 'alias', type: 'static', directory: join(directory, 'alias') }), { code: 'SOURCE_DENIED' });
+});
+
 test('unexpected control upgrades and truncated responses reject and release their connections', { timeout: 3_000 }, async (t) => {
   const f = await fixture(t);
   const sockets = new Set<Socket>();

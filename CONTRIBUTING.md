@@ -4,6 +4,8 @@
 
 Use Node.js 22.23 or later. Native tests need macOS with `ps` and `lsof`.
 The tests use temporary source directories, loopback ports, and real child processes.
+The native Keychain build requires Xcode Command Line Tools (`clang` and `codesign`).
+Terminal regression tests use `/usr/bin/python3` to own disposable PTYs.
 
 ```sh
 npm ci
@@ -30,6 +32,12 @@ use isolated Unix sockets to exercise interrupted mutations and ownership checks
 Each real test creates its own containers and volumes, then removes only those
 objects. Do not point verification at a shared or remote database.
 
+Secret and database tests use disposable Keychains through a test-only helper.
+The fixture immediately restores and verifies the original Keychain search list.
+It never reads personal credentials. Keep production Keychain access out of tests;
+use `src/testSupport/keychain.ts` whenever a test can open managed data or secrets.
+The production binary accepts no test Keychain selector.
+
 ## Change the product
 
 Trace the public method, authoritative owner, and cleanup path before editing.
@@ -42,7 +50,7 @@ if an assertion fails. Never stop unrelated processes to make a test pass.
 
 For a contract change, exercise the library, CLI, and MCP consumers. For a package
 change, install a fresh tarball in a separate consumer. Verify its ESM import,
-TypeScript declarations, executable, and native supervisor path.
+TypeScript declarations, executable, native supervisor path, and packaged Keychain helper.
 
 Document only workflows that you exercise. Record the tested operating system,
 Node version, framework, and agent client. Keep proposed support separate.

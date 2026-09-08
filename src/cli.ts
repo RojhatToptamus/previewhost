@@ -6,11 +6,13 @@ import { limits, type PreviewSpec } from './contracts.js';
 import { loadPreviewSpec, readPreviewSpec } from './config.js';
 import { startDaemon } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
+import { listSecrets, removeSecret, setSecret, validateSecretId } from './secrets.js';
+import { readSecretInput } from './secret-input.js';
 
 const help = `previewd — local previews and application environments
 
 Owner:
-  previewd serve [--root DIR ...] [--allow-exec] [--env NAME ...]
+  previewd serve [--root DIR ...] [--allow-exec] [--env NAME ...] [--secret ID ...]
                  [--data-dir DIR] [--docker-socket PATH] [--port 9400] [--token-file PATH]
   previewd mcp [--endpoint http://127.0.0.1:9400] [--token-file PATH]
 
@@ -27,6 +29,14 @@ Preview operations:
   previewd delete-data NAME
   previewd shutdown
 
+Secrets:
+  previewd secrets setup --file spec.yaml [--reopen]
+  previewd secrets edit ID
+  previewd secrets status REQUEST_ID
+  previewd secrets set ID [--stdin]
+  previewd secrets list
+  previewd secrets remove ID
+
 All client commands accept --endpoint and --token-file. The default token file is
 ~/.local/share/previewd/token. Serve stays in the foreground; its default allowed
 root is the current directory. --allow-exec grants native execution, managed
@@ -34,6 +44,13 @@ database operations, and explicit data deletion/recovery. It is not a sandbox.
 --env NAME selects that host environment value once at startup. Values stay out
 of status. Managed PostgreSQL/Redis require --data-dir and local Docker images.
 --docker-socket selects a local Engine socket and requires --data-dir.
+--secret ID selects an exact macOS Keychain entry for {secret: ID} bindings.
+--allow-exec selects no secrets by itself. Private browser setup/edit needs owner
+authorization. Save starts nothing; retry the ordinary preview operation afterward.
+Set/list/remove work without a daemon. Set uses hidden terminal input or bounded
+UTF-8 stdin, never an argument value. Stdin preserves whitespace and newlines.
+Terminal Enter submits; bracketed paste preserves pasted newlines. Ctrl-C cancels.
+An edit affects future readers; running applications retain their delivered values.
 
 Use --file - (or omit --file with piped stdin) to read JSON. Source paths in a file
 resolve relative to that file; stdin paths resolve relative to the current directory.
@@ -68,12 +85,13 @@ async function readSpec(file: string | undefined, signal: AbortSignal): Promise<
 async function main(): Promise<void> {
   let parsed: ReturnType<typeof parseCliArgs>;
   try { parsed = parseCliArgs(); }
-  catch (error) { throw new PreviewError('INVALID_INPUT', error instanceof Error ? error.message : 'Invalid command arguments.'); }
+  catch { throw new PreviewError('INVALID_INPUT', 'Invalid command arguments. Run previewd --help.'); }
   const { values, positionals } = parsed;
   const command = positionals[0];
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
+  if (command === 'secrets') { await secretCommand(positionals.slice(1), values); return; }
   const accepted: Record<string, string[]> = {
-    serve: ['root', 'allow-exec', 'env', 'data-dir', 'docker-socket', 'port', 'token-file'],
+    serve: ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket', 'port', 'token-file'],
     mcp: ['endpoint', 'token-file'],
     inspect: ['file', 'endpoint', 'token-file'],
     start: ['file', 'no-wait', 'timeout-ms', 'endpoint', 'token-file'],
@@ -106,7 +124,7 @@ async function main(): Promise<void> {
     const dataDirectory = values['data-dir'] ? resolve(values['data-dir']) : undefined;
     const dockerSocket = values['docker-socket'] ? resolve(values['docker-socket']) : undefined;
     if (dockerSocket && !dataDirectory) throw new PreviewError('INVALID_INPUT', '--docker-socket requires --data-dir.');
-    const runtime = await createPreviewRuntime({ allowedRoots, inputs, dataDirectory, dockerSocket,
+    const runtime = await createPreviewRuntime({ allowedRoots, inputs, secretIds: values.secret, dataDirectory, dockerSocket,
       ...(values['allow-exec'] ? { authorize: () => true } : {}),
     });
     let daemon: Awaited<ReturnType<typeof startDaemon>>;
@@ -122,7 +140,7 @@ async function main(): Promise<void> {
       detach(); process.stderr.write(`${JSON.stringify({ error: failure(error) })}\n`); process.exitCode = 1;
     });
     process.stdout.write(`${JSON.stringify({ endpoint: daemon.endpoint, tokenFile, allowedRoots, execution: values['allow-exec'] ? 'enabled' : 'disabled',
-      inputKeys: Object.keys(inputs).sort(), dataDirectory, dockerSocket })}\n`);
+      inputKeys: Object.keys(inputs).sort(), secretIds: values.secret ?? [], dataDirectory, dockerSocket })}\n`);
     return;
   }
   if (command === 'mcp') {
@@ -149,7 +167,7 @@ async function main(): Promise<void> {
           if (!id) throw new PreviewError('START_FAILED', 'The daemon returned no attempt id. Use get/list before retrying.');
           attempt = { name: spec.name, attemptId: id };
           const outcome = await client.wait(spec.name, id, { timeoutMs });
-          if (outcome.state !== 'ready') throw new PreviewError(outcome.error?.code ?? 'CLOSED', outcome.error?.message ?? `The preview attempt is ${outcome.state}.`);
+          if (outcome.state !== 'ready') throw new PreviewError(outcome.error?.code ?? 'CLOSED', outcome.error?.message ?? `The preview attempt is ${outcome.state}.`, outcome.error);
           result = outcome;
         }
         break;
@@ -173,11 +191,49 @@ async function main(): Promise<void> {
   }
 }
 
+async function secretCommand(positionals: string[], values: ReturnType<typeof parseCliArgs>['values']): Promise<void> {
+  const command = positionals[0];
+  const accepted: Record<string, string[]> = {
+    setup: ['file', 'endpoint', 'token-file', 'reopen'], edit: ['endpoint', 'token-file'], status: ['endpoint', 'token-file'],
+    set: ['stdin'], list: [], remove: [],
+  };
+  if (!Object.hasOwn(accepted, command) || Object.keys(values).some((key) => !accepted[command].includes(key))
+    || positionals.length !== (['setup', 'list'].includes(command) ? 1 : 2)) {
+    throw new PreviewError('INVALID_INPUT', 'Invalid secrets command arguments. Values belong only in hidden terminal input or --stdin. Run previewd --help.');
+  }
+  if (['set', 'edit', 'remove'].includes(command)) validateSecretId(positionals[1]);
+  const controller = new AbortController();
+  let client: ReturnType<typeof connectPreviewDaemon> | undefined;
+  const interrupt = () => { process.exitCode = 130; controller.abort(); void client?.close(); };
+  process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
+  try {
+    let result: unknown;
+    if (command === 'set') {
+      const value = await readSecretInput(values.stdin === true, controller.signal);
+      await setSecret(positionals[1], value, { signal: controller.signal, interactive: true });
+      result = { saved: positionals[1] };
+    } else if (command === 'remove') {
+      await removeSecret(positionals[1], { signal: controller.signal, interactive: true });
+      result = { removed: positionals[1] };
+    } else if (command === 'list') result = await listSecrets({ signal: controller.signal });
+    else {
+      client = connectPreviewDaemon({ endpoint: values.endpoint, tokenFile: values['token-file'] });
+      result = command === 'setup' ? await client.secretsSetup(await readSpec(values.file, controller.signal), { reopen: values.reopen, signal: controller.signal }) :
+        command === 'edit' ? await client.secretsEdit(positionals[1], { signal: controller.signal }) : await client.secretsStatus(positionals[1]);
+    }
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  } finally {
+    process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt);
+    await client?.close();
+  }
+}
+
 function parseCliArgs() {
   return parseArgs({ allowPositionals: true, options: {
     help: { type: 'boolean', short: 'h' }, root: { type: 'string', multiple: true },
     'allow-exec': { type: 'boolean' }, port: { type: 'string' },
-    env: { type: 'string', multiple: true }, 'data-dir': { type: 'string' }, 'docker-socket': { type: 'string' },
+    env: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'data-dir': { type: 'string' }, 'docker-socket': { type: 'string' },
+    stdin: { type: 'boolean' }, reopen: { type: 'boolean' },
     'after-engine-restart': { type: 'boolean' },
     endpoint: { type: 'string' }, 'token-file': { type: 'string' },
     file: { type: 'string', short: 'f' }, 'no-wait': { type: 'boolean' },

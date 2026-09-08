@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   previewSpecSchema, type EffectiveSpec, type EnvironmentService, type EnvironmentSpec,
-  type PreviewDescription, type PreviewSpec,
+  type PreviewDescription, type PreviewSpec, type ScalarValue,
 } from './contracts.js';
 import { PreviewError } from './errors.js';
 import type { HttpTarget } from './resources.js';
@@ -35,7 +35,7 @@ export async function canonicalDirectory(directory: string): Promise<string> {
   }
 }
 
-export async function normalizeSpec(spec: EffectiveSpec, roots: string[], inputs: Readonly<Record<string, string>> = {}, privateDirectory?: string): Promise<EffectiveSpec> {
+export async function normalizeSpec(spec: EffectiveSpec, roots: string[], inputs: Readonly<Record<string, string>> = {}, privateDirectories: ReadonlySet<string> = new Set()): Promise<EffectiveSpec> {
   if (spec.type === 'attach') return spec;
   if (spec.type === 'environment') {
     const services = Object.fromEntries(await Promise.all(Object.entries(spec.services).map(async ([id, service]) => {
@@ -44,23 +44,26 @@ export async function normalizeSpec(spec: EffectiveSpec, roots: string[], inputs
           if (typeof value === 'object' && 'fromEnv' in value) resolveInput(value, inputs);
         }
       } else if (service.type === 'external-postgres' || service.type === 'external-redis') {
-        validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', resolveInput(service.url, inputs));
+        if (typeof service.url === 'string' || 'fromEnv' in service.url) {
+          validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', resolveInput(service.url, inputs));
+        }
       }
       if (service.type !== 'static' && service.type !== 'command') return [id, service];
       const directory = await allowedDirectory(service.type === 'static' ? service.directory : service.cwd, roots);
-      if (service.type === 'static') checkStaticSource(directory, privateDirectory);
+      if (service.type === 'static') checkStaticSource(directory, privateDirectories);
       return [id, service.type === 'static' ? { ...service, directory } : { ...service, cwd: directory }];
     })));
     return { ...spec, services };
   }
   const directory = await allowedDirectory(spec.type === 'static' ? spec.directory : spec.cwd, roots);
-  if (spec.type === 'static') checkStaticSource(directory, privateDirectory);
+  if (spec.type === 'static') checkStaticSource(directory, privateDirectories);
+  else for (const value of Object.values(spec.env)) if (typeof value === 'object' && 'fromEnv' in value) resolveInput(value, inputs);
   return spec.type === 'static' ? { ...spec, directory } : { ...spec, cwd: directory };
 }
 
-function checkStaticSource(directory: string, privateDirectory?: string): void {
-  if (privateDirectory && isWithin(privateDirectory, directory)) {
-    throw new PreviewError('SOURCE_DENIED', 'The private data directory cannot be served as a static source.');
+function checkStaticSource(directory: string, privateDirectories: ReadonlySet<string>): void {
+  if ([...privateDirectories].some((root) => isWithin(root, directory))) {
+    throw new PreviewError('SOURCE_DENIED', 'An owner-private directory cannot be served as a static source.');
   }
 }
 
@@ -129,7 +132,7 @@ export function environmentDependencies(spec: EnvironmentSpec): Map<string, stri
     const dependencies = new Set<string>();
     if (service.type === 'command') {
       for (const value of Object.values(service.env)) {
-        if (typeof value === 'string' || 'fromEnv' in value) continue;
+        if (typeof value === 'string' || 'fromEnv' in value || 'secret' in value) continue;
         const target = 'service' in value ? value.service : 'publicUrl' in value ? value.publicUrl : value.browserUrl;
         if (!Object.hasOwn(spec.services, target)) throw new PreviewError('INVALID_INPUT', `Service ${id} refers to missing service ${target}.`);
         if ('service' in value) dependencies.add(target);
@@ -154,10 +157,31 @@ export function environmentDependencies(spec: EnvironmentSpec): Map<string, stri
   return graph;
 }
 
-export function resolveInput(value: string | { fromEnv: string }, inputs: Readonly<Record<string, string>>): string {
+export function resolveInput(value: ScalarValue, inputs: Readonly<Record<string, string>>, secrets: Readonly<Record<string, string>> = {}): string {
   if (typeof value === 'string') return value;
+  if ('secret' in value) {
+    if (!Object.hasOwn(secrets, value.secret)) throw new PreviewError('SECRET_REQUIRED', 'A required secret was not resolved.');
+    return secrets[value.secret];
+  }
   if (!Object.hasOwn(inputs, value.fromEnv)) throw new PreviewError('INVALID_INPUT', `Required owner input ${value.fromEnv} was not supplied.`);
   return inputs[value.fromEnv];
+}
+
+export function validateResolvedInputs(spec: EffectiveSpec, inputs: Readonly<Record<string, string>>, secrets: Readonly<Record<string, string>>): void {
+  if (spec.type === 'command') validateEnvironmentSize(Object.fromEntries(Object.entries(spec.env).map(([key, value]) => [key, resolveInput(value, inputs, secrets)])));
+  if (spec.type === 'environment') for (const service of Object.values(spec.services)) {
+    if (service.type === 'external-postgres' || service.type === 'external-redis') {
+      validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', resolveInput(service.url, inputs, secrets));
+    } else if (service.type === 'command') {
+      const values = Object.fromEntries(Object.entries(service.env).map(([key, value]) => [key,
+        typeof value === 'string' || 'fromEnv' in value || 'secret' in value ? resolveInput(value, inputs, secrets) : '']));
+      validateEnvironmentSize(values);
+    }
+  }
+}
+
+export function validateEnvironmentSize(values: Record<string, string>): void {
+  if (Buffer.byteLength(JSON.stringify(values)) > 65_536) throw new PreviewError('INVALID_INPUT', 'The resolved service environment exceeds 64 KiB.');
 }
 
 export function sameSources(before: EffectiveSpec, after: EffectiveSpec): boolean {

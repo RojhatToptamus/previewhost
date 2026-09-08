@@ -15,8 +15,9 @@ export async function startEnvironment(input: {
   spec: EnvironmentSpec;
   url: string;
   inputs: Readonly<Record<string, string>>;
+  secrets?: Readonly<Record<string, string>>;
   databases: Readonly<Record<string, DatabaseBinding>>;
-  privateDirectory?: string;
+  privateDirectories?: ReadonlySet<string>;
   signal: AbortSignal;
   appendLog(text: string): void;
   serviceStatus(id: string, status: ServiceStatus): void;
@@ -89,8 +90,8 @@ export async function startEnvironment(input: {
   }
 
   function environmentValue(value: EnvironmentValue): DatabaseBinding {
-    if (typeof value === 'string' || 'fromEnv' in value) {
-      const url = resolveInput(value, input.inputs);
+    if (typeof value === 'string' || 'fromEnv' in value || 'secret' in value) {
+      const url = resolveInput(value, input.inputs, input.secrets);
       return { url, redactions: [url] };
     }
     if ('browserUrl' in value) return { url: browserUrl(value.browserUrl), redactions: [] };
@@ -115,7 +116,7 @@ export async function startEnvironment(input: {
           if (!binding) throw new PreviewError('START_FAILED', `Database ${id} is not available.`);
           connections.set(id, binding);
         } else if (service.type === 'external-postgres' || service.type === 'external-redis') {
-          const url = resolveInput(service.url, input.inputs);
+          const url = resolveInput(service.url, input.inputs, input.secrets);
           await probeDatabase(service.type === 'external-postgres' ? 'postgres' : 'redis', url, {
             signal: controller.signal, timeoutMs: service.timeoutMs,
           });
@@ -123,7 +124,7 @@ export async function startEnvironment(input: {
         } else {
           let native: NativeResource | undefined;
           if (service.type === 'static') {
-            own(id, await startStatic(service.directory, service.spa, input.privateDirectory));
+            own(id, await startStatic(service.directory, service.spa, input.privateDirectories));
           } else if (service.type === 'attach') {
             const target = attachmentTarget(service.url);
             if (target.port === Number(port)) throw new PreviewError('INVALID_INPUT', 'An environment cannot attach to its own public listener.');

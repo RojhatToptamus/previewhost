@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
   limits, nameSchema, requestSchemas, type AttemptResult, type AttemptSummary, type EffectiveSpec, type Failure,
-  type LogResult, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions,
+  type LogResult, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
 } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
-import { attachmentTarget, canonicalDirectory, describeSpec, normalizeSpec, parseSpec, sameSources } from './spec.js';
+import { attachmentTarget, canonicalDirectory, describeSpec, normalizeSpec, parseSpec, resolveInput, sameSources, validateResolvedInputs } from './spec.js';
 import { createGateway, type Gateway } from './gateway.js';
 import { startStatic } from './static.js';
 import { startNative } from './native.js';
@@ -12,6 +12,7 @@ import { waitForHttp } from './readiness.js';
 import type { Resource } from './resources.js';
 import { startEnvironment } from './environment.js';
 import { createDataOwner, type DataOwner } from './data.js';
+import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
 
 interface Attempt {
   summary: AttemptSummary;
@@ -37,7 +38,13 @@ interface Slot {
   control?: AbortController;
 }
 
-export interface PreviewRuntime extends PreviewApi { close(): Promise<void> }
+export interface PreviewRuntime extends PreviewApi {
+  /** Excludes an owner's private directory from current and future static previews. */
+  protectDirectory(directory: string): Promise<void>;
+  /** Validates and authorizes a private form without reading values or starting code. */
+  prepareSecretSetup(input: PreviewSpec | string, signal: AbortSignal): Promise<SecretSetupContext>;
+  close(): Promise<void>;
+}
 
 export async function createPreviewRuntime(options: RuntimeOptions): Promise<PreviewRuntime> {
   if (!options || !Array.isArray(options.allowedRoots) || options.allowedRoots.length < 1 || options.allowedRoots.length > 32) {
@@ -45,31 +52,72 @@ export async function createPreviewRuntime(options: RuntimeOptions): Promise<Pre
   }
   const roots = [...new Set(await Promise.all(options.allowedRoots.map(canonicalDirectory)))];
   const inputs = { ...options.inputs };
+  if (options.secretIds !== undefined && (!Array.isArray(options.secretIds) || options.secretIds.length > limits.secrets)) {
+    throw new PreviewError('INVALID_INPUT', `Select at most ${limits.secrets} secret names.`);
+  }
+  for (const id of options.secretIds ?? []) validateSecretId(id);
+  const secretIds = new Set(options.secretIds ?? []);
   if (Object.keys(inputs).length > 128 || Object.entries(inputs).some(([key, value]) =>
     !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || typeof value !== 'string' || value.length > 4096 || value.includes('\0'))) {
     throw new PreviewError('INVALID_INPUT', 'Owner inputs must be at most 128 named strings of at most 4096 characters.');
   }
   if (options.dockerSocket && !options.dataDirectory) throw new PreviewError('INVALID_INPUT', 'dockerSocket requires a dataDirectory.');
   const data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket }) : undefined;
-  return new Runtime(roots, options.authorize, inputs, data);
+  return new Runtime(roots, options.authorize, inputs, secretIds, data);
 }
 
 class Runtime implements PreviewRuntime {
   private readonly slots = new Map<string, Slot>();
+  private readonly privateDirectories = new Set<string>();
   private closed = false;
   private closing?: Promise<void>;
   constructor(
     private readonly roots: string[], private readonly authorize: RuntimeOptions['authorize'],
-    private readonly inputs: Readonly<Record<string, string>>, private readonly data?: DataOwner,
+    private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: ReadonlySet<string>, private readonly data?: DataOwner,
   ) {
+    if (data) this.privateDirectories.add(data.directory);
     for (const name of data?.names() ?? []) this.slots.set(name, { name, cleanup: new Set() });
+  }
+
+  async protectDirectory(directory: string): Promise<void> {
+    this.assertOpen();
+    const canonical = await canonicalDirectory(directory);
+    this.assertOpen();
+    if (!this.privateDirectories.has(canonical) && this.privateDirectories.size >= 32) {
+      throw new PreviewError('INVALID_INPUT', 'At most 32 private directories can be protected.');
+    }
+    this.privateDirectories.add(canonical);
   }
 
   async inspect(input: PreviewSpec) {
     this.assertOpen();
-    const spec = await normalizeSpec(parseSpec(input), this.roots, this.inputs, this.data?.directory);
+    const spec = await normalizeSpec(parseSpec(input), this.roots, this.inputs, this.privateDirectories);
     this.assertOpen();
-    return describeSpec(spec);
+    const secrets = secretRequirements(spec, this.secretIds);
+    return { ...describeSpec(spec), ...(secrets.length ? { secrets } : {}) };
+  }
+
+  async prepareSecretSetup(input: PreviewSpec | string, signal: AbortSignal): Promise<SecretSetupContext> {
+    this.assertOpen();
+    throwIfAborted(signal);
+    const mode = typeof input === 'string' ? 'edit' : 'missing';
+    if (typeof input === 'string') validateSecretId(input);
+    const spec = typeof input === 'string' ? undefined : await abortable(normalizeSpec(parseSpec(input), this.roots, this.inputs, this.privateDirectories), signal);
+    const requirements = spec ? secretRequirements(spec, this.secretIds) : [{ id: input as string, selected: this.secretIds.has(input as string), bindings: [] }];
+    requireSelected(requirements);
+    if (!this.authorize || !await abortable(Promise.resolve(this.authorize({ operation: 'secrets-setup', mode,
+      ids: requirements.map((item) => item.id), ...(spec ? { spec: structuredClone(spec) } : {}), signal })), signal)) {
+      throw new PreviewError('EXECUTION_DENIED', 'The owner did not authorize this private secret form.');
+    }
+    this.assertOpen();
+    if (spec) {
+      const checked = await abortable(normalizeSpec(spec, this.roots, this.inputs, this.privateDirectories), signal);
+      if (!sameSources(spec, checked)) throw new PreviewError('SOURCE_DENIED', 'The source directory changed during authorization.');
+    }
+    throwIfAborted(signal);
+    const sources = spec?.type === 'command' ? [spec.cwd] : spec?.type === 'static' ? [spec.directory] : spec?.type === 'environment'
+      ? Object.values(spec.services).flatMap((service) => service.type === 'command' ? [service.cwd] : service.type === 'static' ? [service.directory] : []) : [];
+    return { mode, ...(spec ? { name: spec.name } : {}), sources: [...new Set(sources)].sort(), requirements };
   }
 
   async start(input: PreviewSpec): Promise<PreviewStatus> {
@@ -170,7 +218,8 @@ class Runtime implements PreviewRuntime {
     const slot = this.slot(name);
     if (isLive(slot)) throw new PreviewError('BUSY', 'Stop the environment and resolve application cleanup before deleting data.');
     if (!this.data?.status(name)) throw new PreviewError('NOT_FOUND', 'This name has no retained database data.');
-    if (this.data.status(name)?.cleanup) throw new PreviewError('CLEANUP_INCOMPLETE', 'Resolve retained cleanup with stop before deleting data.');
+    const cleanup = this.data.status(name)?.cleanup;
+    if (cleanup && cleanup.operation !== 'remove-credential') throw new PreviewError('CLEANUP_INCOMPLETE', 'Resolve retained cleanup with stop before deleting data.');
     const controller = new AbortController();
     slot.control = controller;
     const operation = Promise.resolve().then(async () => {
@@ -220,11 +269,12 @@ class Runtime implements PreviewRuntime {
     const signal = attempt.controller.signal;
     let committed = false;
     let timedOut = false;
+    let secrets: Record<string, string> = {};
     const deadline = input.type === 'environment' ? setTimeout(() => {
       timedOut = true; attempt.controller.abort();
     }, input.timeoutMs) : undefined;
     try {
-      const spec = await abortable(normalizeSpec(input, this.roots, this.inputs, this.data?.directory), signal);
+      const spec = await abortable(normalizeSpec(input, this.roots, this.inputs, this.privateDirectories), signal);
       this.admitted(slot, attempt);
       if (this.authorize) {
         const approved = await abortable(Promise.resolve(this.authorize({ operation, spec: structuredClone(spec), signal })), signal);
@@ -234,10 +284,13 @@ class Runtime implements PreviewRuntime {
       }
       this.admitted(slot, attempt);
       // Recheck the selected directory after approval; never silently switch to a new symlink target.
-      const checked = await abortable(normalizeSpec(spec, this.roots, this.inputs, this.data?.directory), signal);
+      const checked = await abortable(normalizeSpec(spec, this.roots, this.inputs, this.privateDirectories), signal);
       if (!sameSources(spec, checked)) {
         throw new PreviewError('SOURCE_DENIED', 'The source directory changed during authorization.');
       }
+      this.admitted(slot, attempt);
+      secrets = await resolveSecrets(secretRequirements(spec, this.secretIds), signal);
+      validateResolvedInputs(spec, this.inputs, secrets);
       this.admitted(slot, attempt);
       if (!slot.gateway) {
         slot.gateway = await createGateway({ onError: (error) => this.gatewayFailed(slot, error) });
@@ -245,14 +298,15 @@ class Runtime implements PreviewRuntime {
       this.admitted(slot, attempt);
       let verifyListener: (() => Promise<void>) | undefined;
       if (spec.type === 'static') {
-        attempt.resource = await startStatic(spec.directory, spec.spa, this.data?.directory);
+        attempt.resource = await startStatic(spec.directory, spec.spa, this.privateDirectories);
       } else if (spec.type === 'attach') {
         const target = attachmentTarget(spec.url);
         if (target.port === Number(new URL(slot.gateway.url).port)) throw new PreviewError('INVALID_INPUT', 'A preview cannot attach to its own public listener.');
         attempt.resource = { target, stop: async () => {} };
       } else if (spec.type === 'command') {
         const resource = await startNative({
-          spec, url: slot.gateway.url, signal,
+          spec: { ...spec, env: Object.fromEntries(Object.entries(spec.env).map(([key, value]) => [key, resolveInput(value, this.inputs, secrets)])) },
+          url: slot.gateway.url, signal,
           appendLog: (text) => appendLog(attempt, text),
           onResource: (resource) => { attempt.resource = resource; },
         });
@@ -267,7 +321,7 @@ class Runtime implements PreviewRuntime {
         this.admitted(slot, attempt);
         attempt.summary.services = {};
         attempt.resource = await startEnvironment({
-          spec, url: slot.gateway.url, inputs: this.inputs, databases: bindings, signal, privateDirectory: this.data?.directory,
+          spec, url: slot.gateway.url, inputs: this.inputs, secrets, databases: bindings, signal, privateDirectories: this.privateDirectories,
           appendLog: (text) => appendLog(attempt, text),
           serviceStatus: (id, status) => { attempt.summary.services![id] = status; },
           onResource: (resource) => { attempt.resource = resource; },
@@ -305,7 +359,7 @@ class Runtime implements PreviewRuntime {
         attempt.controller.abort();
         attempt.summary.state = canceled ? 'canceled' : 'failed';
         if (attempt.summary.state !== 'canceled') attempt.summary.error = attempt.failure ?? (timedOut
-          ? { code: 'TIMEOUT', message: 'The environment startup deadline expired.' } : redactedFailure(error, input, this.inputs));
+          ? { code: 'TIMEOUT', message: 'The environment startup deadline expired.' } : redactedFailure(error, input, this.inputs, secrets));
         slot.latest = attempt;
         await this.cleanupAttempt(slot, attempt).catch(() => {});
       } else {
@@ -418,7 +472,7 @@ class Runtime implements PreviewRuntime {
       const attempts = new Set([slot.active, slot.candidate, ...slot.cleanup]);
       for (const attempt of attempts) if (attempt && (attempt.resource || attempt.summary.state === 'starting')) reserved += attempt.nodes;
       const data = this.data?.status(slot.name);
-      if (!slot.active && !slot.candidate && (data?.running || data?.cleanup)) reserved += data.resources.length;
+      if (!slot.active && !slot.candidate && (data?.running || data?.cleanup && data.cleanup.operation !== 'remove-credential')) reserved += data.resources.length;
     }
     if (reserved + nodeCost(spec) > limits.liveNodes) throw new PreviewError('BUSY', `At most ${limits.liveNodes} service slots can be active, starting, or awaiting cleanup.`);
   }
@@ -491,12 +545,12 @@ function appendLog(attempt: Attempt, text: string): void {
   attempt.truncated ||= combined.length > limits.logBytes;
   attempt.log = combined.subarray(Math.max(0, combined.length - limits.logBytes));
 }
-function redactedFailure(error: unknown, spec: EffectiveSpec, inputs: Readonly<Record<string, string>> = {}) {
+function redactedFailure(error: unknown, spec: EffectiveSpec, inputs: Readonly<Record<string, string>> = {}, secrets: Readonly<Record<string, string>> = {}) {
   const result = failure(error);
-  const values = spec.type === 'command' ? Object.values(spec.env) : spec.type === 'environment'
+  const values = spec.type === 'command' ? Object.values(spec.env).filter((value): value is string => typeof value === 'string') : spec.type === 'environment'
     ? Object.values(spec.services).flatMap((service) => service.type === 'command' ? Object.values(service.env).filter((value): value is string => typeof value === 'string') :
       (service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'string' ? [service.url] : []) : [];
-    for (const value of [...values, ...Object.values(inputs)].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    for (const value of [...values, ...Object.values(inputs), ...Object.values(secrets)].filter(Boolean).sort((a, b) => b.length - a.length)) {
       const utf8 = Buffer.from(value).toString('utf8');
       result.message = result.message.replaceAll(value, '[redacted]').replaceAll(utf8, '[redacted]').replaceAll(encodeURIComponent(utf8), '[redacted]');
     }

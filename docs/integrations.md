@@ -17,9 +17,9 @@ require macOS process tools, but Linux and Windows behavior remains unverified.
 | --- | --- | --- |
 | ESM library | Static, command, attach, replacement, cancellation, stop, and close | One runtime per owner |
 | CLI and daemon | JSON/YAML environment startup, service outcomes, selected owner inputs, authentication, and shutdown | Foreground daemon must already run |
-| MCP SDK | Environment start/wait/replace/stop. Both protocol eras discover tools and return tool errors | Host-specific approval UI remains outside previewd |
-| Codex App Server 0.146.0 | Three applications with PostgreSQL/Redis; replacement, cancellation, stop, and data deletion | Direct MCP calls and independent HTTP checks. No model turn or desktop UI test |
-| Cursor Agent 2026.08.25-3e8eec8 | One headless model turn; three applications with PostgreSQL/Redis; replacement and stop | Twelve actual previewd calls and independent HTTP/data checks. IDE behavior remains unverified |
+| MCP SDK | Environment lifecycle and private secret setup/status. Both protocol eras discover tools and return tool errors | Host-specific approval UI remains outside previewd |
+| Codex App Server 0.146.0 | Three-application database lifecycle; private secret setup and retry | Database checks use direct MCP; secret checks use a `gpt-5.5` model session. Desktop UI remains unverified |
+| Cursor Agent | Three-application database lifecycle; private secret setup and retry | Headless model sessions on the versions named below. IDE behavior remains unverified |
 | Task Monki | Real HTTP dependency approval, readiness, replacement, and independent stop | Engine embedding and production UI integration remain unverified |
 
 Additional client and framework results appear in their sections. Client versions
@@ -45,7 +45,8 @@ For a custom owner, add `--endpoint` and `--token-file` to the MCP arguments.
 An absolute executable path avoids differences between GUI and shell PATH values.
 The token value does not belong in this configuration.
 
-Codex App Server 0.146.0 discovered all ten tools from a clean package installation.
+The current clean package exposes twelve MCP tools, including secret setup/status.
+Codex App Server 0.146.0 discovered the ten preview tools in the database scenario.
 Direct MCP calls started the three-application example with owned PostgreSQL and Redis.
 Independent HTTP requests wrote a note through the API and read it through reporting.
 Replacement kept the public URL and both database values while all three applications switched to v2.
@@ -91,6 +92,31 @@ Cursor IDE behavior remains unverified.
 Other stdio MCP hosts can use the same executable and arguments. previewd supports
 tool discovery without a running daemon. Actual tool operations require the daemon.
 Host and model combinations that do not appear in the verified table remain unverified.
+
+### Private secret setup
+
+Codex App Server 0.146.0 with `gpt-5.5` and Cursor Agent
+2026.09.02-c22c1a3 with `Auto` each completed eleven previewd calls:
+inspect, failed start/wait, private setup/status, fresh start/wait, get, logs,
+stop, and get. Independent checks verified that Save started no application.
+The ordinary retry delivered the supplied value, and logs redacted it.
+Captured client transcripts contained neither that value nor the private form
+grant or control bearer.
+
+These host tests used synthetic storage and intercepted owner entry. Separate
+tests used disposable macOS Keychains and the rendered Chrome 152 owner form.
+Browser checks covered validation, saving, edit/cancel, partial saves, expiry,
+keyboard focus, a 1280 × 1000 light viewport, and a 390 × 844 dark viewport.
+They found no overflow or application error; an expired grant returned the expected 401.
+
+The installed Codex version could not run `gpt-6-astra`: its backend required a
+newer client. The passing test used the compatible `gpt-5.5` catalog entry without
+changing global settings. Cursor `Auto` did not report its underlying model.
+
+The packaged helper executes as arm64 and as x86_64 under Rosetta. Native Intel
+hardware and interactive reapproval after an update were not tested. Changing
+the helper's code or architecture slice can require an owner access decision;
+see [Keychain access and updates](security.md#stored-secrets-and-private-entry).
 
 ## Task Monki
 

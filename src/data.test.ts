@@ -1,4 +1,5 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
+import { testKeychain } from './testSupport/keychain.js';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { Socket } from 'node:net';
@@ -10,6 +11,10 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createDataOwner, type DataOwner } from './data.js';
+beforeEach(async (t) => {
+  assert.ok('mock' in t, 'The isolated Keychain must belong to a test context.');
+  if (process.platform === 'darwin') await testKeychain(t);
+});
 import { createPreviewRuntime } from './runtime.js';
 
 const mac = { skip: process.platform !== 'darwin' };

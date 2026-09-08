@@ -1,13 +1,13 @@
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { connectPreviewDaemon, type ClientOptions } from './client.js';
-import { limits, requestSchemas, type PreviewApi } from './contracts.js';
+import { limits, requestSchemas, secretRequestSchemas, type PreviewApi, type SecretSetupApi } from './contracts.js';
 import { failure, PreviewError } from './errors.js';
 
 /** All tools call the same public API; the MCP host owns tool approval UI. */
-export function createMcpServer(client: PreviewApi): McpServer {
+export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi, 'secretsSetup' | 'secretsStatus'>>): McpServer {
   const server = new McpServer({ name: 'previewd', version: '0.1.0' }, {
-    instructions: 'Manage local previews and application environments through an explicitly started previewd daemon. Start or replace returns an attempt. Wait for its id before using the URL. A wait timeout does not stop startup. Cancel requires the exact attempt id. Stop preserves database data. Delete data only after an explicit user request with preview_delete_data. Set afterEngineRestart only after the operator confirms an actual local Docker Engine restart. Disconnecting leaves previews running. Commands, managed databases, data deletion, and recovery require owner authorization. After a connection error, inspect get/list before another mutation.',
+    instructions: 'Manage local previews and application environments through an explicitly started previewd daemon. Start or replace returns an attempt. Wait for its id before using the URL. A wait timeout does not stop startup. Cancel requires the exact attempt id. Stop preserves database data. Delete data only after an explicit user request with preview_delete_data. Set afterEngineRestart only after the operator confirms an actual local Docker Engine restart. Disconnecting leaves previews running. Commands, managed databases, data deletion, and recovery require owner authorization. After a connection error, inspect get/list before another mutation. Bind stored credentials with {secret: ID}. Never ask for secret values in chat or tool arguments. For SECRET_REQUIRED, use preview_secrets_setup when available, let the owner complete the private browser form, check preview_secrets_status, then retry normal start/replace with the current spec. Saving does not start code. SECRET_DENIED requires the owner to select the exact IDs; a locked store requires owner unlock.',
   });
   let active = 0;
   let waits = 0;
@@ -71,6 +71,16 @@ export function createMcpServer(client: PreviewApi): McpServer {
     description: 'Permanently delete a stopped environment\'s verified owned database data. Requires an explicit user request and daemon owner authorization. Rejects live applications or unresolved cleanup. Never deletes attached databases or source directories. Stop alone preserves data.',
     inputSchema: requestSchemas.deleteData, annotations: cleanup,
   }, ({ name }) => run('request', () => client.deleteData(name)));
+  if (client.secretsSetup && client.secretsStatus) {
+    server.registerTool('preview_secrets_setup', {
+      description: 'Open the owner’s private local browser form for missing selected secret names in this spec. Returns public request metadata only. Never supply credential values. Requires daemon owner setup authorization. If browser opening fails, ask the owner to use previewd secrets set with hidden input. Existing entries are never overwritten. Saving starts no code; retry ordinary start/replace after checking status.',
+      inputSchema: secretRequestSchemas.setup.omit({ reopen: true }), annotations: write,
+    }, ({ spec }, context) => run('request', () => client.secretsSetup!(spec, { signal: context.mcpReq.signal })));
+    server.registerTool('preview_secrets_status', {
+      description: 'Read the public result of a private secret setup request. No values are read or returned. Complete records observed presence or completed writes, not issuer validity or later read permission. On completion, retry normal startup with the current spec. A partial unknown write outcome requires a fresh setup check.',
+      inputSchema: secretRequestSchemas.status, annotations: read,
+    }, ({ id }) => run('request', () => client.secretsStatus!(id)));
+  }
   return server;
 }
 

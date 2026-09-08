@@ -10,6 +10,7 @@ daemon client implement `PreviewApi`.
 const runtime = await createPreviewRuntime({
   allowedRoots: ['/absolute/frontend', '/absolute/backend'],
   inputs: { API_TOKEN: hostSelectedToken },
+  secretIds: ['shop/dev/token'],
   dataDirectory: '/absolute/private-preview-data',
   authorize: async (request) => hostApproval(request),
 });
@@ -32,6 +33,10 @@ remain symbolic in this request.
 For `delete-data` and `recover-data`, the request contains `operation`, `name`,
 `resources`, and `signal`. The resource summary contains service names and types,
 without credentials. Callbacks must narrow `operation` before they access `spec`.
+
+For `secrets-setup`, the request contains `mode` (`missing` or `edit`), exact `ids`,
+and `signal`. Missing-value setup also supplies the symbolic `spec`.
+Both modes require owner authorization. A form grant never authorizes execution.
 
 Commands, managed databases, data deletion, and exceptional recovery require
 authorization. An absent callback grants none of these operations. Static and
@@ -88,6 +93,10 @@ The environment inherits only `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`,
 `LC_ALL`, and `TERM`. Explicit `env` values override these values.
 `PORT`, `HOST`, and `PREVIEW_URL` are reserved for previewd.
 Other host environment values require explicit `env` entries.
+Standalone command entries accept literals, `{fromEnv: NAME}`, and `{secret: ID}`.
+Resolved `env` entries are limited to 64 KiB of UTF-8 JSON.
+This corrects the earlier code-unit count: large multibyte
+literal environments can now exceed the limit.
 
 ```json
 {
@@ -150,6 +159,7 @@ fields but no per-service `name`. Owned resource types are `postgres` and
 | --- | --- |
 | `"literal"` | The supplied string. |
 | `{fromEnv: "NAME"}` | An exact key from `RuntimeOptions.inputs`. |
+| `{secret: "ID"}` | One selected user Keychain entry, read once for this attempt. |
 | `{service: "api"}` | The candidate HTTP origin or database connection URL. This reference waits for that service. |
 | `{publicUrl: "web"}` | The stable numeric URL. Only the primary service supports this reference. |
 | `{browserUrl: "api"}` | The stable browser alias for an HTTP service. |
@@ -174,7 +184,7 @@ services:
 ```
 
 This fragment belongs inside an environment with a primary HTTP service.
-The URL can also be a literal string. It requires exact `127.0.0.1`, an explicit
+The URL can also be a literal string or `{secret: ID}`. It requires exact `127.0.0.1`, an explicit
 port, and a valid database path. PostgreSQL also requires an explicit username.
 PostgreSQL uses `postgres:` or `postgresql:`.
 Redis uses `redis:`. A supplied Redis username also requires a nonempty password.
@@ -207,6 +217,8 @@ Environment attempts also contain a `services` map. Each entry reports `type`,
 are `waiting`, `starting`, `ready`, `failed`, and `stopped`.
 `data` reports retained resource names/types, `running`, and an optional cleanup
 error. It never contains passwords or database connection URLs.
+Credential-only deletion debt adds `data.cleanup.operation: "remove-credential"`.
+Stop can complete with that durable debt. Explicit `deleteData` retries it.
 
 Attempt states are `starting`, `ready`, `failed`, `canceled`, `stopped`, and
 `cleanup-incomplete`. `AttemptResult` adds `name` and the URL when that attempt
@@ -234,8 +246,8 @@ At most 128 inactive names remain. Unknown or expired attempt IDs return
 Up to 128 retained data records remain independently of that application history.
 They appear in `get`/`list` after owner restart.
 
-`deleteData` requires no active/candidate application or unresolved cleanup.
-It removes only verified owned volumes and their private records. It never
+`deleteData` requires no active/candidate application or unresolved Docker cleanup.
+It removes verified owned volumes, exact credentials, and their private records. It never
 removes an attached database, source directory, image, or unrelated Docker object.
 
 For an absent indeterminate Docker creation, normal stop retains the uncertainty.
@@ -269,7 +281,7 @@ previewd delete-data shop
 
 All client commands accept `--endpoint` and `--token-file`. Their defaults are
 `http://127.0.0.1:9400` and `~/.local/share/previewd/token`.
-`serve` accepts repeated `--root`, repeated `--env`, `--data-dir`,
+`serve` accepts repeated `--root`, repeated `--env`, repeated `--secret`, `--data-dir`,
 `--docker-socket`, `--allow-exec`, `--port`, and `--token-file`.
 Its default root is the current directory. Port `0` selects an available control
 port, which the startup JSON reports.
@@ -282,6 +294,69 @@ that directory. The runtime does not create data ownership by default.
 `--allow-exec` grants native execution, managed database operations, and explicit
 data deletion/recovery through the trusted daemon. `stop --after-engine-restart`
 requests only the exceptional recovery described above. It never implies data deletion.
+
+## Stored secrets
+
+Select exact names through `RuntimeOptions.secretIds` or repeated `serve --secret ID`.
+The selection is copied at owner creation and defaults to empty. Names match
+`[A-Za-z0-9][A-Za-z0-9._/-]{0,127}`. Slashes have no inheritance or filesystem meaning.
+Specs bind these names to standalone command fields, environment command fields,
+or external database URLs. Unselected names fail before storage access.
+
+Inspect returns `secrets: [{id, selected, bindings: [{service?, key}]}]` without
+reading Keychain values. Start/replace resolves each required ID once, after
+authorization and source checks, before candidate resources or databases start.
+Only declared recipients receive each value. Failed replacement preserves active routes.
+
+```sh
+previewd secrets setup --file preview.yaml
+previewd secrets setup --file preview.yaml --reopen
+previewd secrets edit shop/dev/token
+previewd secrets status REQUEST_ID
+previewd secrets set shop/dev/token
+previewd secrets set shop/dev/token --stdin
+previewd secrets list
+previewd secrets remove shop/dev/token
+```
+
+Setup/edit/status use the daemon and accept `--endpoint` and `--token-file`.
+Set/list/remove operate directly on user entries without a daemon and never change
+its selection. They cannot modify internal database credentials.
+
+Set creates or replaces one item. Hidden terminal entry supports backspace, Ctrl-U,
+Ctrl-C, and bracketed paste. Enter submits outside a paste. `--stdin` requires a
+pipe and preserves all UTF-8 bytes, including whitespace, newlines, and a leading BOM.
+Each value needs 1–4096 valid UTF-8 bytes without NUL. Values are never accepted in
+arguments or normal output. There is no value-read/export command.
+
+Missing-value setup adds only absent entries. Explicit edit updates an existing
+entry and fails if it disappeared. Every field is validated before saving begins.
+Writes are atomic per item, with no cross-item transaction or ordering guarantee.
+Partial results keep successful writes. A dispatched write without a confirmed
+response reports `error.outcome: "unknown"`; absence of a response is not rollback.
+
+The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id)`, and
+`secretsEdit(id, {signal?})`. Results include public `id`, `mode`, optional `name`,
+`sources`, `requirements`, `expiresAt`, `browser`, `state`, `saved`, `alreadyPresent`,
+`remaining`, and optional `error`. No result contains a private URL or capability.
+States are `pending`, `saving`, `complete`, `partial`, `canceled`, and `expired`.
+Remaining names have unconfirmed writes; they are not necessarily absent.
+`complete` reports observed presence or completed writes, not issuer validity or
+future read permission. `browser: "failed"` means use hidden CLI input or `--reopen`.
+A fresh setup rechecks availability after CLI entry and invalidates an obsolete form.
+
+Saving starts nothing. Check status, then retry ordinary start/replace with the
+current spec. Closing or expiring a form starts nothing. Daemon restart loses
+grants and setup history. Canceling an in-flight setup stops its preparation;
+disconnecting after a grant is issued does not revoke that form automatically.
+
+Updates affect later resolutions. Running applications can retain old values.
+For coupled credentials, cancel pending starts and stop all consuming daemons,
+update the entries, then restart. previewd has no cross-daemon consumer registry.
+Local removal is not revocation at the credential issuer.
+
+User entries use macOS Keychain through a packaged native helper. Static/attach
+and explicit-input library use do not load it. See [storage and recovery](security.md).
 
 ## HTTP and MCP
 
@@ -297,12 +372,21 @@ client, the library client, or the CLI. This is not a browser control API.
 
 MCP tools use the names `preview_inspect`, `preview_start`, `preview_replace`,
 `preview_list`, `preview_get`, `preview_wait`, `preview_logs`, `preview_cancel`,
-`preview_stop`, and `preview_delete_data`. Arguments match the HTTP method arguments.
+`preview_stop`, `preview_delete_data`, `preview_secrets_setup`, and
+`preview_secrets_status`. Arguments match the HTTP method arguments, except the
+owner-only `reopen` option. There is no MCP edit, set, remove, read, or export tool.
 Data deletion uses `POST /deleteData` with `{ "name": "shop" }`.
 Stop accepts `{ "name": "shop", "afterEngineRestart": true }` for explicit recovery.
 The deletion tool has a destructive annotation and requires owner authorization.
 Both `structuredContent` and the text fallback contain the response envelope.
 Tool failures also set `isError: true`.
+
+`POST /secrets/setup` takes `{spec, reopen?}`, `/secrets/status` takes `{id}`,
+and `/secrets/edit` takes an exact secret `{id}`. These use ordinary control authority.
+The fixed `GET /secrets`, `/secrets.js`, and `/secrets.css` assets grant no permission.
+Browser `POST /secrets/form`, `/secrets/save`, and `/secrets/cancel` require exact
+Host/Origin and the private one-use grant, independently of the control bearer.
+These private routes are used only by the owner page. They are never public preview routes.
 
 ## Errors and limits
 
@@ -311,7 +395,9 @@ Errors use stable `PreviewError.code` values. Do not parse error messages.
 `INVALID_INPUT`, `SOURCE_DENIED`, `EXECUTION_DENIED`, `ALREADY_EXISTS`, `BUSY`,
 `NOT_FOUND`, `STALE_ATTEMPT`, `ATTEMPT_EXPIRED`, `UNSUPPORTED_PLATFORM`,
 `START_FAILED`, `TIMEOUT`, `CLEANUP_INCOMPLETE`, `UNAUTHORIZED`,
-`DAEMON_UNAVAILABLE`, and `CLOSED` are the public error codes.
+`DAEMON_UNAVAILABLE`, `CLOSED`, `SECRET_REQUIRED`, `SECRET_DENIED`, and
+`SECRET_STORE_UNAVAILABLE` are the public error codes. Secret failures can include
+the same redacted `requirements` metadata used by inspect.
 
 There are at most 32 live names, 128 inactive names, and 64 KiB of logs per attempt.
 The total live-node limit is 128, including candidates and retained cleanup.
@@ -320,6 +406,14 @@ Each gateway permits 256 connections and in-flight requests. Upstream response
 headers and WebSocket handshakes have a 10-second deadline. Active streams do not.
 Control bodies and responses have a 1 MiB limit. The daemon permits 32 active
 requests, including at most 16 waits, with two slots reserved for cleanup.
+
+At most 128 IDs can be selected or required per attempt. Metadata listing returns
+up to 128 names with `truncated`. Keychain work permits four helpers and 32 queued
+operations. Reads have a 10-second deadline; explicit interactive writes have 30 seconds.
+Forms expire after five minutes, with eight pending/saving forms and 32 recent
+results. Browser launches are limited to one per second. A save has a 30-second
+deadline and retains partial or uncertain outcomes. Ordinary status and preview
+traffic perform no Keychain reads.
 
 After a lost mutation response, call `get` or `list` before another mutation.
 A transport failure does not prove that the original operation failed.

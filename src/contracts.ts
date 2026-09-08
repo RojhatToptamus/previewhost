@@ -16,6 +16,13 @@ export const limits = {
   liveNodes: 128,
   retainedEnvironments: 128,
   parallelServices: 4,
+  secrets: 128,
+  secretBytes: 4096,
+  secretOperations: 4,
+  secretQueue: 32,
+  secretRequests: 8,
+  secretResults: 32,
+  secretSetupMs: 300_000,
 } as const;
 
 export const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
@@ -27,17 +34,19 @@ const timeoutMs = z.number().int().min(100).max(120_000).default(30_000);
 const directory = z.string().min(1).max(4096);
 const envKey = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(128);
 const literal = z.string().max(4096).refine((value) => !value.includes('\0'), 'Values cannot contain NUL.');
+export const secretIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'Use a secret name of 1–128 letters, numbers, dots, dashes, underscores or slashes.');
+const inputReferenceSchema = z.strictObject({ fromEnv: envKey });
+export const scalarValueSchema = z.union([literal, inputReferenceSchema, z.strictObject({ secret: secretIdSchema })]);
+export type ScalarValue = z.output<typeof scalarValueSchema>;
 const argv = z.array(z.string().max(8192).refine((value) => !value.includes('\0'), 'Arguments cannot contain NUL.')).min(1).max(128)
   .refine((value) => value[0].length > 0, 'The executable cannot be empty.');
-const envSchema = z.record(envKey, literal)
+const envSchema = z.record(envKey, scalarValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'PORT, HOST and PREVIEW_URL are reserved.')
-  .refine((env) => Object.values(env).every((value) => !value.includes('\0')), 'Environment values cannot contain NUL.')
   .default({});
 
-const inputReferenceSchema = z.strictObject({ fromEnv: envKey });
 export const environmentValueSchema = z.union([
-  literal, inputReferenceSchema,
+  scalarValueSchema,
   z.strictObject({ service: nameSchema }),
   z.strictObject({ publicUrl: nameSchema }),
   z.strictObject({ browserUrl: nameSchema }),
@@ -52,8 +61,8 @@ export const environmentServiceSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('attach'), url: z.string().max(4096), readyPath, timeoutMs }),
   z.strictObject({ type: z.literal('postgres') }),
   z.strictObject({ type: z.literal('redis') }),
-  z.strictObject({ type: z.literal('external-postgres'), url: z.union([literal, inputReferenceSchema]), timeoutMs }),
-  z.strictObject({ type: z.literal('external-redis'), url: z.union([literal, inputReferenceSchema]), timeoutMs }),
+  z.strictObject({ type: z.literal('external-postgres'), url: scalarValueSchema, timeoutMs }),
+  z.strictObject({ type: z.literal('external-redis'), url: scalarValueSchema, timeoutMs }),
 ]);
 const environmentSpecSchema = z.strictObject({
   name: nameSchema, type: z.literal('environment'), primary: nameSchema,
@@ -87,8 +96,39 @@ export type ErrorCode =
   | 'INVALID_INPUT' | 'SOURCE_DENIED' | 'EXECUTION_DENIED' | 'ALREADY_EXISTS'
   | 'BUSY' | 'NOT_FOUND' | 'STALE_ATTEMPT' | 'ATTEMPT_EXPIRED' | 'UNSUPPORTED_PLATFORM'
   | 'START_FAILED' | 'TIMEOUT' | 'CLEANUP_INCOMPLETE' | 'UNAUTHORIZED'
-  | 'DAEMON_UNAVAILABLE' | 'CLOSED';
-export interface Failure { code: ErrorCode; message: string }
+  | 'DAEMON_UNAVAILABLE' | 'CLOSED' | 'SECRET_REQUIRED' | 'SECRET_DENIED' | 'SECRET_STORE_UNAVAILABLE';
+export interface Failure { code: ErrorCode; message: string; requirements?: SecretRequirement[]; outcome?: 'unknown' }
+export interface SecretRequirement {
+  id: string;
+  selected: boolean;
+  bindings: Array<{ service?: string; key: string }>;
+}
+export interface SecretSetupContext {
+  mode: 'missing' | 'edit';
+  name?: string;
+  sources: string[];
+  requirements: SecretRequirement[];
+}
+export interface SecretSetupStatus extends SecretSetupContext {
+  id: string;
+  state: 'pending' | 'saving' | 'complete' | 'partial' | 'canceled' | 'expired';
+  expiresAt: string;
+  browser: 'opened' | 'failed' | 'not-needed';
+  saved: string[];
+  alreadyPresent: string[];
+  remaining: string[];
+  error?: Failure;
+}
+export interface SecretSetupApi {
+  secretsSetup(spec: PreviewSpec, options?: { reopen?: boolean; signal?: AbortSignal }): Promise<SecretSetupStatus>;
+  secretsStatus(id: string): Promise<SecretSetupStatus>;
+  secretsEdit(id: string, options?: { signal?: AbortSignal }): Promise<SecretSetupStatus>;
+}
+export const secretRequestSchemas = {
+  setup: z.strictObject({ spec: previewSpecSchema, reopen: z.boolean().optional() }),
+  status: z.strictObject({ id: z.uuid() }),
+  edit: z.strictObject({ id: secretIdSchema }),
+};
 export interface ServiceStatus {
   type: EnvironmentService['type'];
   state: 'waiting' | 'starting' | 'ready' | 'failed' | 'stopped';
@@ -99,7 +139,7 @@ export interface ServiceStatus {
 export interface DataStatus {
   resources: Array<{ name: string; type: OwnedDatabaseSpec['type'] }>;
   running: boolean;
-  cleanup?: Failure;
+  cleanup?: Failure & { operation?: 'remove-credential' };
 }
 export interface AttemptSummary {
   id: string;
@@ -128,10 +168,11 @@ export interface PreviewDescription {
       type: EnvironmentService['type']; cwd?: string; directory?: string; command?: string[];
       envKeys?: string[]; bindings?: Record<string, Exclude<EnvironmentValue, string>>;
       readyPath?: string; timeoutMs?: number; spa?: boolean;
-      url?: string | { fromEnv: string }; // External database literals are omitted.
+      url?: ScalarValue; // External database literals are omitted.
     }>;
   };
   envKeys: string[];
+  secrets?: SecretRequirement[];
   source: 'caller-owned-live-directory' | 'external-http-server' | 'live-directories-and-dependencies';
   cleanup: 'owned-process-group' | 'owned-file-server' | 'proxy-connections-only' | 'owned-apps-and-containers-data-retained';
 }
@@ -155,10 +196,12 @@ export type AuthorizationRequest = (
   | { operation: 'replace'; spec: EffectiveSpec }
   | { operation: 'delete-data'; name: string; resources: DataStatus['resources'] }
   | { operation: 'recover-data'; name: string; resources: DataStatus['resources'] }
+  | { operation: 'secrets-setup'; mode: 'missing' | 'edit'; ids: string[]; spec?: EffectiveSpec }
 ) & { signal: AbortSignal };
 export interface RuntimeOptions {
   allowedRoots: string[];
   inputs?: Record<string, string>;
+  secretIds?: string[];
   dataDirectory?: string;
   dockerSocket?: string;
   authorize?: (request: AuthorizationRequest) => boolean | Promise<boolean>;

@@ -1,4 +1,5 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
+import { testKeychain } from './testSupport/keychain.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,10 @@ import { Docker } from './docker.js';
 import type { PreviewSpec, PreviewStatus } from './contracts.js';
 
 const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
+beforeEach(async (t) => {
+  assert.ok('mock' in t, 'The isolated Keychain must belong to a test context.');
+  if (process.platform === 'darwin' && dockerSocket) await testKeychain(t);
+});
 const enabled = { skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000 };
 const signal = () => new AbortController().signal;
 
@@ -134,6 +139,7 @@ test('persistent-data authorization reserves the name and stop cancels pending d
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket,
     authorize(request) {
       if (request.operation === 'start' || request.operation === 'replace') return request.spec.name === 'owned';
+      if (request.operation === 'secrets-setup') return false;
       assert.equal(request.name, 'owned');
       return allowData ? true : new Promise<boolean>(() => {});
     } });

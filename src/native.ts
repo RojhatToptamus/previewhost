@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { CommandSpec } from './contracts.js';
 import type { Resource } from './resources.js';
 import { PreviewError, throwIfAborted } from './errors.js';
+import { validateEnvironmentSize } from './spec.js';
 
 // Process-group and owner-IPC behavior derives from Task Monki (MIT); see NOTICE.
 
@@ -19,10 +20,11 @@ interface ProcessIdentity {
 export interface NativeResource extends Resource {
   verifyListener(): Promise<void>;
 }
+export type NativeCommandSpec = Omit<CommandSpec, 'env'> & { env: Record<string, string> };
 
 /** The caller receives cleanup ownership before the supervisor can execute. */
 export async function startNative(input: {
-  spec: CommandSpec;
+  spec: NativeCommandSpec;
   url: string;
   signal: AbortSignal;
   appendLog(text: string): void;
@@ -33,6 +35,7 @@ export async function startNative(input: {
     throw new PreviewError('UNSUPPORTED_PLATFORM', 'Native commands are currently supported on macOS only.');
   }
   throwIfAborted(input.signal);
+  validateEnvironmentSize(input.spec.env);
   await Promise.all(['/bin/ps', '/usr/sbin/lsof'].map((name) => access(name, constants.X_OK)));
   throwIfAborted(input.signal);
   const port = await availablePort();

@@ -84,6 +84,27 @@ leave those processes untouched until you identify their owner.
 Stop can complete after the verified processes exit. Restart discards native
 attempt observations and cannot repair an unknown process group.
 
+## Stored secrets are missing or inaccessible
+
+For `SECRET_REQUIRED`, use `previewd secrets setup --file preview.yaml` or ask the
+client to call `preview_secrets_setup`. Enter values only in the private owner form.
+Save starts nothing. Check `previewd secrets status REQUEST_ID`, then retry startup.
+
+If the browser cannot open, use `previewd secrets set ID` in a terminal, then
+request setup again. `setup --reopen` opens an existing pending form again.
+`--stdin` accepts a pipe; omit it for hidden terminal entry. Never pass a value
+as an argument. Closing or refreshing the private page loses its in-memory grant.
+
+For `SECRET_DENIED`, check the daemon's exact `--secret ID` selections and owner
+authorization. `--allow-exec` alone does not select stored secrets. For locked or
+unavailable storage, unlock the default Keychain in Keychain Access and check the
+specific packaged helper's access to the item. An updated helper can need approval.
+Do not grant all applications access. A missing helper requires a macOS package build.
+
+Partial saves retain completed writes. An unknown write outcome can already have
+changed the item. Check public status and create a fresh setup request to check
+remaining entries. Presence alone does not prove that an explicit edit succeeded.
+
 ## Database data or recovery is incomplete
 
 `stop` preserves data. Retained resource names and cleanup errors appear in
@@ -93,6 +114,9 @@ verified owned data. It requires owner authorization.
 
 If deletion reports live applications, stop the environment first.
 If cleanup is incomplete, resolve that error before data deletion.
+The exception is `data.cleanup.operation: "remove-credential"`: Docker data is
+already gone. Unlock Keychain, then retry `previewd delete-data NAME` directly.
+Stop and daemon shutdown remain available while this credential debt is retained.
 If another runtime owns the data directory, use that owner or stop it normally.
 Do not remove the lock inode while any runtime can use it.
 
@@ -111,6 +135,11 @@ The flag confirms the completed Engine restart. It never restarts Docker itself.
 Restarting only previewd does not meet this prerequisite. A changed Engine or
 conflicting object identity still prevents cleanup. Never use broad Docker prune
 or manual record deletion as a substitute for verified ownership.
+
+A missing retained credential must be restored from its Keychain backup before
+database open. previewd does not regenerate a password for existing data. Migration
+conflicts preserve the schema 1 record and existing database authentication.
+Keep that record intact while repairing the exact copied item in Keychain Access.
 
 ## The browser shows old content or HMR disconnects
 
@@ -142,6 +171,7 @@ Use an absolute executable path when the client does not inherit your shell PATH
 Start the foreground daemon separately. MCP stdout must contain protocol messages
 only. Remove shell wrappers that print banners to stdout.
 
-Check the client tool list for ten `preview_*` tools. Inspect the tool error
+Check the daemon-backed client tool list for twelve `preview_*` tools, including
+`preview_secrets_setup` and `preview_secrets_status`. Inspect the tool error
 envelope before retrying. Host configuration examples and verified client versions
 appear in [integrations](integrations.md).

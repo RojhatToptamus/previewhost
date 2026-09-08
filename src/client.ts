@@ -3,7 +3,7 @@ import { lstat, open } from 'node:fs/promises';
 import { request, type ClientRequest } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { limits, type ErrorCode, type PreviewApi } from './contracts.js';
+import { limits, type ErrorCode, type PreviewApi, type SecretSetupApi } from './contracts.js';
 import { PreviewError } from './errors.js';
 
 export interface ClientOptions { endpoint?: string; tokenFile?: string }
@@ -46,7 +46,7 @@ export async function readToken(path: string): Promise<string> {
 }
 
 /** Connects on demand. Closing this client never stops daemon-owned previews. */
-export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & {
+export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & SecretSetupApi & {
   close(): Promise<void>; shutdown(): Promise<void>;
 } {
   let endpoint: URL;
@@ -120,7 +120,10 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
               const err = data.error;
               if (!err || typeof err !== 'object' || !('code' in err) || typeof err.code !== 'string' ||
                   !('message' in err) || typeof err.message !== 'string') throw new Error('Invalid error');
-              finish(new PreviewError(err.code as ErrorCode, err.message));
+              finish(new PreviewError(err.code as ErrorCode, err.message, {
+                ...('requirements' in err && Array.isArray(err.requirements) ? { requirements: err.requirements } : {}),
+                ...('outcome' in err && err.outcome === 'unknown' ? { outcome: 'unknown' as const } : {}),
+              }));
             } else if (res.statusCode === 200 && 'result' in data) finish(undefined, data.result as T);
             else throw new Error('Invalid response');
           } catch {
@@ -143,6 +146,9 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
     cancel: (name, attemptId) => call('cancel', { name, attemptId }),
     stop: (name, opts = {}) => call('stop', { name, afterEngineRestart: opts.afterEngineRestart }),
     deleteData: (name) => call('deleteData', { name }),
+    secretsSetup: (spec, opts = {}) => call('secrets/setup', { spec, reopen: opts.reopen }, opts.signal),
+    secretsStatus: (id) => call('secrets/status', { id }),
+    secretsEdit: (id, opts = {}) => call('secrets/edit', { id }, opts.signal),
     shutdown: async () => { await call('shutdown', {}); },
     close: async () => {
       closed = true;

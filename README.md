@@ -17,6 +17,9 @@ This repository is not published to npm. Install its local tarball.
 
 Requirements: Node.js 22.23 or later. Native commands currently require macOS,
 `/bin/ps`, and `/usr/sbin/lsof`. See [tested support](docs/integrations.md).
+Stored secrets and managed database credentials require macOS 13 or later.
+Building the packaged Keychain helper requires Xcode Command Line Tools.
+Installing the tarball does not compile native code.
 
 From this repository, run:
 
@@ -119,6 +122,32 @@ and execution permission. `--env NAME` selects an owner environment input for
 Stop preserves database data. `previewd delete-data NAME` permanently removes a
 stopped environment's owned data after host authorization. Attached databases
 remain under their original owner.
+
+## Supply stored secrets
+
+Store an entry through hidden terminal input, then select its exact name for the daemon:
+
+```sh
+previewd secrets set shop/dev/token
+previewd serve --root "$PWD" --allow-exec --secret shop/dev/token
+```
+
+Bind it only where needed in a command's `env`:
+
+```yaml
+API_TOKEN: {secret: shop/dev/token}
+```
+
+Values remain in individual macOS Keychain items. Names are ordinary visible
+metadata, with no directory inheritance. Existing literals and `{fromEnv: NAME}`
+remain available. `--allow-exec` selects no stored secrets by itself.
+
+For missing entries, use `previewd secrets setup --file preview.yaml` or the
+`preview_secrets_setup` MCP tool. The daemon opens a private local browser form.
+Saving starts no code. Check setup status, then retry normal startup.
+MCP receives names and status, never values or the form's write permission.
+See [secret commands and limits](docs/api.md#stored-secrets) and the
+[trust boundary](docs/security.md#stored-secrets-and-private-entry).
 
 ## Embed the library
 

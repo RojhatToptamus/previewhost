@@ -5,15 +5,17 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { Socket } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
-import { limits, requestSchemas, type PreviewApi } from './contracts.js';
+import { limits, requestSchemas, secretRequestSchemas } from './contracts.js';
+import type { PreviewRuntime } from './runtime.js';
 import { checkTokenDirectory, defaultTokenFile, readToken } from './client.js';
 import { failure, PreviewError } from './errors.js';
+import { SecretSetup } from './secrets-setup.js';
+import { secretsPage, secretsScript, secretsStyle } from './secrets-page.js';
 
-type OwnedRuntime = PreviewApi & { close(): Promise<void> };
-
-async function createToken(path: string): Promise<string> {
+async function createToken(path: string, runtime: PreviewRuntime): Promise<string> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await checkTokenDirectory(path);
+  await runtime.protectDirectory(dirname(path));
   try {
     const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { await handle.writeFile(`${randomBytes(32).toString('hex')}\n`); }
@@ -49,7 +51,7 @@ function readBody(req: IncomingMessage, signal: AbortSignal): Promise<unknown> {
     }
     function end() {
       cleanup();
-      try { resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      try { resolveBody(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))); }
       catch { reject(new PreviewError('INVALID_INPUT', 'Send one valid JSON object.')); }
     }
     req.on('data', data); req.once('end', end); req.once('error', error);
@@ -59,13 +61,14 @@ function readBody(req: IncomingMessage, signal: AbortSignal): Promise<unknown> {
 }
 
 /** Starts an explicit foreground control listener around the supplied runtime. */
-export async function startDaemon(options: { runtime: OwnedRuntime; port?: number; tokenFile?: string }): Promise<{
+export async function startDaemon(options: { runtime: PreviewRuntime; port?: number; tokenFile?: string }): Promise<{
   endpoint: string; closed: Promise<void>; close(): Promise<void>;
 }> {
   const port = options.port ?? 9400;
   if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new PreviewError('INVALID_INPUT', 'The control port must be an integer between 0 and 65535.');
-  const token = await createToken(resolve(options.tokenFile ?? defaultTokenFile()));
+  const token = await createToken(resolve(options.tokenFile ?? defaultTokenFile()), options.runtime);
   const runtime = options.runtime;
+  let secrets: SecretSetup;
   const sockets = new Set<Socket>();
   const requests = new Set<AbortController>();
   let active = 0;
@@ -96,7 +99,7 @@ export async function startDaemon(options: { runtime: OwnedRuntime; port?: numbe
     if (!runtimeClose) {
       closing = true;
       for (const controller of requests) controller.abort();
-      runtimeClose = Promise.resolve().then(() => runtime.close()).catch((error: unknown) => {
+      runtimeClose = Promise.resolve().then(async () => { await secrets.close(); await runtime.close(); }).catch((error: unknown) => {
         terminalError ??= error;
         throw error;
       });
@@ -150,6 +153,9 @@ export async function startDaemon(options: { runtime: OwnedRuntime; port?: numbe
       case 'cancel': { const p = parse(requestSchemas.cancel, value); return runtime.cancel(p.name, p.attemptId); }
       case 'stop': { const p = parse(requestSchemas.stop, value); return runtime.stop(p.name, { afterEngineRestart: p.afterEngineRestart }); }
       case 'deleteData': return runtime.deleteData(parse(requestSchemas.deleteData, value).name);
+      case 'secrets/setup': { const p = parse(secretRequestSchemas.setup, value); return secrets.setup(p.spec, signal, p.reopen); }
+      case 'secrets/status': return secrets.status(parse(secretRequestSchemas.status, value).id);
+      case 'secrets/edit': return secrets.setup(parse(secretRequestSchemas.edit, value).id, signal);
       default: throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
     }
   }
@@ -173,21 +179,34 @@ export async function startDaemon(options: { runtime: OwnedRuntime; port?: numbe
     void (async () => {
       const authority = `127.0.0.1:${(server.address() as { port: number }).port}`;
       const headerCount = (name: string) => req.rawHeaders.filter((_value, index) => index % 2 === 0 && req.rawHeaders[index].toLowerCase() === name).length;
-      if (req.headers.host !== authority || headerCount('host') !== 1 || req.headers.origin !== undefined) {
-        throw new PreviewError('UNAUTHORIZED', 'Control requests require the exact loopback Host and no Origin.');
+      if (req.headers.host !== authority || headerCount('host') !== 1) {
+        throw new PreviewError('UNAUTHORIZED', 'Requests require the exact numeric loopback Host.');
+      }
+      const browser = ['/secrets/form', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
+      const asset = req.url === '/secrets' ? [secretsPage, 'text/html'] : req.url === '/secrets.js' ? [secretsScript, 'text/javascript'] :
+        req.url === '/secrets.css' ? [secretsStyle, 'text/css'] : undefined;
+      if (asset && req.method === 'GET') {
+        if (req.headers.origin !== undefined && (req.headers.origin !== secrets.origin || headerCount('origin') !== 1)) throw new PreviewError('UNAUTHORIZED', 'Use the same origin for this private page.');
+        res.writeHead(200, { 'content-type': `${asset[1]}; charset=utf-8`, 'content-length': Buffer.byteLength(asset[0]),
+          'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'cross-origin-resource-policy': 'same-origin',
+          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", connection: 'close' });
+        res.end(asset[0]); return;
+      }
+      if (browser ? req.headers.origin !== secrets.origin || headerCount('origin') !== 1 : req.headers.origin !== undefined) {
+        throw new PreviewError('UNAUTHORIZED', browser ? 'Private form requests require the exact page Origin.' : 'Control requests cannot carry an Origin.');
       }
       const supplied = req.headers.authorization ?? '';
       const expected = `Bearer ${token}`;
-      if (headerCount('authorization') !== 1 || Buffer.byteLength(supplied) !== Buffer.byteLength(expected) ||
-          !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+      if (headerCount('authorization') !== 1 || !browser && (Buffer.byteLength(supplied) !== Buffer.byteLength(expected) ||
+          !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected)))) {
         throw new PreviewError('UNAUTHORIZED', 'A valid daemon bearer token is required.');
       }
       if (closing) throw new PreviewError('CLOSED', 'The daemon is shutting down.');
-      if (req.method !== 'POST' || !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type'] ?? '')) {
+      if (req.method !== 'POST' || headerCount('content-type') !== 1 || !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type'] ?? '')) {
         throw new PreviewError('INVALID_INPUT', 'Use POST with Content-Type: application/json.');
       }
       const method = req.url?.slice(1) ?? '';
-      if (!Object.hasOwn(requestSchemas, method) && method !== 'shutdown') throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
+      if (!Object.hasOwn(requestSchemas, method) && !['secrets/setup', 'secrets/status', 'secrets/edit'].includes(method) && !browser && method !== 'shutdown') throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
       const cleanup = ['stop', 'cancel', 'shutdown'].includes(method);
       if (active >= limits.controlRequests - (cleanup ? 0 : 2) || (method === 'wait' && waits >= limits.controlWaits)) {
         throw new PreviewError('BUSY', 'Control request capacity is full; stop and cancel retain reserved capacity.');
@@ -198,7 +217,11 @@ export async function startDaemon(options: { runtime: OwnedRuntime; port?: numbe
       if (Number(req.headers['content-length']) > limits.controlBytes) throw new PreviewError('INVALID_INPUT', 'The control request exceeds 1 MiB.');
       const value = await readBody(req, controller.signal);
       if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The control request was closed.');
-      if (method === 'shutdown') {
+      if (browser) {
+        const result = method === 'secrets/save' ? await secrets.save(supplied, value) : (parse(requestSchemas.list, value),
+          method === 'secrets/cancel' ? secrets.cancel(supplied) : secrets.form(supplied));
+        send(res, 200, { result });
+      } else if (method === 'shutdown') {
         parse(requestSchemas.list, value);
         try { await stopRuntime(); send(res, 200, { result: null }); }
         catch (error) { fail(res, error); }
@@ -212,7 +235,10 @@ export async function startDaemon(options: { runtime: OwnedRuntime; port?: numbe
 
   await new Promise<void>((ready, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => { server.off('error', reject); ready(); });
+    server.listen(port, '127.0.0.1', () => {
+      secrets = new SecretSetup(runtime, `http://127.0.0.1:${(server.address() as { port: number }).port}`);
+      server.off('error', reject); ready();
+    });
   });
   server.on('error', (error) => {
     terminalError ??= new PreviewError('DAEMON_UNAVAILABLE', `The control listener failed: ${error.message}`);
