@@ -167,7 +167,8 @@ fields but no per-service `name`. Owned resource types are `postgres` and
 Missing inputs, invalid references, and service-reference cycles fail before
 resource startup. Public URL references do not create readiness dependencies.
 This permits ordinary frontend/API CORS references in both directions.
-There is no automatic `.env` search or arbitrary host environment access.
+previewd does not search `.env` files or forward arbitrary host environment values.
+Application commands can load their own files under ordinary user permissions.
 
 The numeric URL reaches only `primary`. Each HTTP service also has
 `<name>--<service>.localhost` on the same port. The combined DNS label must fit

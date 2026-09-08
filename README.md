@@ -117,11 +117,21 @@ services:
 
 Managed databases require an explicit private `--data-dir`, local Docker Engine,
 and execution permission. `--env NAME` selects an owner environment input for
-`{fromEnv: NAME}` references. No `.env` file loads automatically.
+`{fromEnv: NAME}` references. previewd does not load `.env` files. Application commands can.
 
 Stop preserves database data. `previewd delete-data NAME` permanently removes a
 stopped environment's owned data after host authorization. Attached databases
 remain under their original owner.
+
+## Preview existing task worktrees
+
+Use the directories already supplied by the coding host, including uncommitted
+changes and installed packages. Keep one preview name for the continuing task's
+data. Stop all consuming previews before the host removes their source.
+
+The [coding-task workflow](docs/worktrees.md) includes a runnable shared-notes
+recipe for existing frontend/backend worktrees. It uses the current CLI or MCP
+environment operations without another checkout or workspace owner.
 
 ## Supply stored secrets
 
@@ -190,6 +200,7 @@ The packaged [library example](examples/library.mjs) performs one request and th
 
 - [API and CLI reference](docs/api.md)
 - [Agent clients, frameworks, and tested support](docs/integrations.md)
+- [Existing coding-task worktrees](docs/worktrees.md)
 - [Ownership, security, and recovery](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contribution guide](CONTRIBUTING.md)

@@ -7,7 +7,25 @@ import { failure, PreviewError } from './errors.js';
 /** All tools call the same public API; the MCP host owns tool approval UI. */
 export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi, 'secretsSetup' | 'secretsStatus'>>): McpServer {
   const server = new McpServer({ name: 'previewd', version: '0.1.0' }, {
-    instructions: 'Manage local previews and application environments through an explicitly started previewd daemon. Start or replace returns an attempt. Wait for its id before using the URL. A wait timeout does not stop startup. Cancel requires the exact attempt id. Stop preserves database data. Delete data only after an explicit user request with preview_delete_data. Set afterEngineRestart only after the operator confirms an actual local Docker Engine restart. Disconnecting leaves previews running. Commands, managed databases, data deletion, and recovery require owner authorization. After a connection error, inspect get/list before another mutation. Bind stored credentials with {secret: ID}. Never ask for secret values in chat or tool arguments. For SECRET_REQUIRED, use preview_secrets_setup when available, let the owner complete the private browser form, check preview_secrets_status, then retry normal start/replace with the current spec. Saving does not start code. SECRET_DENIED requires the owner to select the exact IDs; a locked store requires owner unlock.',
+    instructions:
+      'Manage local previews and application environments through an explicitly started previewd daemon. Use the ' +
+      'existing task directories supplied by the host, including uncommitted files. Do not clone, reset, clean, or ' +
+      'delete source to start a preview. Keep one preview name for continuing task data. Run necessary project ' +
+      'preparation through its existing owner before startup. For incompatible writes to shared dependencies or ' +
+      'build output, stop all affected previews before preparation and start again. Replacement overlaps processes ' +
+      'and cannot undo source edits or database migrations. Application commands can load existing .env files. ' +
+      'Retain submitted source paths in the task context until every consuming preview finishes cleanup. Stop all ' +
+      'such previews before source teardown, including previews named for another task. Get/list omit source paths. ' +
+      'If the source associations or previous-owner cleanup are uncertain, retain source. Start or replace returns ' +
+      'an attempt. Wait for its id before using the URL. A wait timeout does not stop startup. Cancel requires the ' +
+      'exact attempt id. Stop preserves database data. Delete data only after an explicit user request with ' +
+      'preview_delete_data. Set afterEngineRestart only after the operator confirms an actual local Docker Engine ' +
+      'restart. Disconnecting leaves previews running. Commands, managed databases, data deletion, and recovery ' +
+      'require owner authorization. After a connection error, inspect get/list before another mutation. Bind stored ' +
+      'credentials with {secret: ID}. Never ask for secret values in chat or tool arguments. For SECRET_REQUIRED, ' +
+      'use preview_secrets_setup when available, let the owner complete the private browser form, check ' +
+      'preview_secrets_status, then retry normal start/replace with the current spec. Saving does not start code. ' +
+      'SECRET_DENIED requires the owner to select the exact IDs; a locked store requires owner unlock.',
   });
   let active = 0;
   let waits = 0;

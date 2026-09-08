@@ -25,6 +25,35 @@ require macOS process tools, but Linux and Windows behavior remains unverified.
 Additional client and framework results appear in their sections. Client versions
 and host behavior can change. A configuration example alone does not establish support.
 
+## Existing task worktrees
+
+The [task workflow](worktrees.md) runs existing directories through the same CLI
+and MCP operations. The installed shared-notes recipe passed with two Git worktrees
+containing staged, unstaged, and untracked changes. Git metadata and source files
+remained intact through failed startup, replacement, cancellation, disconnect,
+and stop. Explicit caller edits remained visible on reload.
+
+Codex App Server 0.146.0 made eighteen direct MCP calls across two connections.
+The checks retained one task's PostgreSQL and Redis data across stop/start,
+kept another task independent, and stopped both source consumers before removal.
+These checks made no model turns and changed no user configuration.
+
+Chrome 152 checked real browser writes and reads through numeric and readable
+frontend origins. Desktop 1280 × 900 and mobile 390 × 844 viewports showed the
+saved note, reporting result, and stopped-backend state without application errors.
+The example's missing favicon produced separate 404 messages.
+
+Codex's standalone command runner passed offline installation, generation, failure,
+and cancellation checks. An edited lockfile installed the new dependency and
+rebuilt its generated consumer. Cancellation stopped a parent, child, and grandchild sharing stdout.
+Abrupt App Server loss left those setup processes alive. Setup inside an explicit
+daemon-owned application command survived that client loss and stopped with the
+preview. A host must retain source while its own setup cleanup is uncertain.
+
+Automatic task deletion, Task Monki engine replacement, and other hosts' setup
+recovery remain outside this integration. Each host still owns its submitted
+source associations and teardown ordering.
+
 ## Codex
 
 Install the local tarball first. Start the daemon in a separate terminal:

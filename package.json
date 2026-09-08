@@ -20,6 +20,7 @@
     "dist",
     "docs",
     "examples",
+    "!examples/**/*.test.mjs",
     "README.md",
     "CONTRIBUTING.md",
     "LICENSE",
@@ -28,7 +29,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/prepare-bin.mjs && node scripts/build-native.mjs",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
-    "test": "npm run build && tsc -p tsconfig.test.json && node scripts/build-native.mjs --test && node --test --test-concurrency=1 .local/test-build/*.test.js",
+    "test": "npm run build && tsc -p tsconfig.test.json && node scripts/build-native.mjs --test && node --test --test-concurrency=1 .local/test-build/*.test.js examples/multi-repo/*.test.mjs",
     "prepack": "npm run build",
     "verify": "npm run typecheck && npm test"
   },

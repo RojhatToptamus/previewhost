@@ -54,8 +54,9 @@ An edit affects future readers; running applications retain their delivered valu
 
 Use --file - (or omit --file with piped stdin) to read JSON. Source paths in a file
 resolve relative to that file; stdin paths resolve relative to the current directory.
-YAML files reject aliases, tags, merge keys, and duplicate keys. No .env file loads
-automatically. Environment status includes each service and retained database data.
+YAML files reject aliases, tags, merge keys, and duplicate keys. previewd does not
+load .env files. Application commands can. Source directories stay live and caller-owned.
+Environment status includes each service and retained database data.
 Start/replace wait up to 30 seconds by default. A timeout or interrupted wait does
 not cancel the preview. Use get/list after an uncertain response, or cancel with
 the exact attempt id. A disconnected MCP adapter leaves daemon previews running.

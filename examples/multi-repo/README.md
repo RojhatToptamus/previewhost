@@ -16,6 +16,12 @@ The paths resolve relative to that file.
 The services do not import source files from each other.
 This example installs their packages together in its parent directory.
 
+For existing task worktrees, use [worktrees.mjs](worktrees.mjs) and the
+[coding-task workflow](../../docs/worktrees.md). The frontend directory contains
+its HTTP server and browser files. The backend directory contains `api/`,
+`reporting/`, and their installed packages. The recipe prints the same environment
+spec with the supplied paths and task name. It performs no source preparation.
+
 ## Install the dependencies
 
 Requirements: macOS, Node.js 22.23 or later, the installed previewd tarball, and a local Docker Engine.
