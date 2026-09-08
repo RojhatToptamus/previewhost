@@ -167,7 +167,10 @@ every previous attempt or log tail.
 
 ## MCP has no tools or reports connection errors
 
-Use an absolute executable path when the client does not inherit your shell PATH.
+When the client does not inherit your shell PATH, set its command to the absolute
+Node executable. Pass the installed `previewd/dist/cli.js` path and `mcp` as arguments.
+An absolute previewd executable alone still uses `env node` and requires Node on PATH.
+Run `node -p process.execPath` in the working shell to find the Node executable.
 Start the foreground daemon separately. MCP stdout must contain protocol messages
 only. Remove shell wrappers that print banners to stdout.
 

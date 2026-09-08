@@ -8,7 +8,11 @@ import { failure, PreviewError } from './errors.js';
 export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi, 'secretsSetup' | 'secretsStatus'>>): McpServer {
   const server = new McpServer({ name: 'previewd', version: '0.1.0' }, {
     instructions:
-      'Manage local previews and application environments through an explicitly started previewd daemon. Use the ' +
+      'Use existing task sources with an explicitly started daemon. Commands run as argv without a shell. Use ' +
+      '{port} and 127.0.0.1 for listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. ' +
+      'Inspect the project/spec, start, then wait for the returned attempt ID. Wait cancellation or disconnect leaves ' +
+      'startup running. The host owns external preparation and source. While cleanup is uncertain, retain source ' +
+      'and block conflicting preparation retries. Use the ' +
       'existing task directories supplied by the host, including uncommitted files. Do not clone, reset, clean, or ' +
       'delete source to start a preview. Keep one preview name for continuing task data. Run necessary project ' +
       'preparation through its existing owner before startup. For incompatible writes to shared dependencies or ' +
@@ -16,11 +20,13 @@ export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi
       'and cannot undo source edits or database migrations. Application commands can load existing .env files. ' +
       'Retain submitted source paths in the task context until every consuming preview finishes cleanup. Stop all ' +
       'such previews before source teardown, including previews named for another task. Get/list omit source paths. ' +
-      'If the source associations or previous-owner cleanup are uncertain, retain source. Start or replace returns ' +
-      'an attempt. Wait for its id before using the URL. A wait timeout does not stop startup. Cancel requires the ' +
-      'exact attempt id. Stop preserves database data. Delete data only after an explicit user request with ' +
+      'If source associations or previous-owner cleanup are uncertain, do not remove or move source, or retry ' +
+      'conflicting installation, generation, or builds. The host must resolve its own setup process ownership; ' +
+      'preview_stop cannot do that. A wait timeout leaves startup running; preview_cancel targets the exact candidate. ' +
+      'Use daemon-owned preparation only as explicit HTTP application startup that fits its readiness deadline. ' +
+      'Stop preserves database data. Delete data only after an explicit user request with ' +
       'preview_delete_data. Set afterEngineRestart only after the operator confirms an actual local Docker Engine ' +
-      'restart. Disconnecting leaves previews running. Commands, managed databases, data deletion, and recovery ' +
+      'restart. Commands, managed databases, data deletion, and recovery ' +
       'require owner authorization. After a connection error, inspect get/list before another mutation. Bind stored ' +
       'credentials with {secret: ID}. Never ask for secret values in chat or tool arguments. For SECRET_REQUIRED, ' +
       'use preview_secrets_setup when available, let the owner complete the private browser form, check ' +
@@ -50,11 +56,11 @@ export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi
   const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
   const cleanup = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
   server.registerTool('preview_inspect', {
-    description: 'Validate one preview or environment spec and describe sources, commands, bindings, and cleanup. Does not start resources or grant permission. Environment values and database credentials are omitted.',
+    description: 'Validate one preview or environment spec and describe sources, commands, bindings, and cleanup. Does not install dependencies, check application health, start resources, or grant permission. Environment values and database credentials are omitted.',
     inputSchema: requestSchemas.inspect, annotations: read,
   }, ({ spec }) => run('request', () => client.inspect(spec)));
   server.registerTool('preview_start', {
-    description: 'Start a named preview or environment. Returns a starting attempt. Use preview_wait with its id. An environment becomes ready only after all its services. Execution and managed databases require daemon owner permission.',
+    description: 'Start a named preview or environment from existing source. Commands run as argv without shell expansion. Use {port} and 127.0.0.1 for explicit listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. Returns a starting attempt; use preview_wait with its id. An environment becomes ready only after all its services. Execution and managed databases require daemon owner permission.',
     inputSchema: requestSchemas.start, annotations: write,
   }, ({ spec }) => run('request', () => client.start(spec)));
   server.registerTool('preview_replace', {

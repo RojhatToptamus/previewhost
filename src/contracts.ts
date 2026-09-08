@@ -29,32 +29,35 @@ export const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
 const readyPath = z.string().max(2048).refine(
   (value) => value.startsWith('/') && !value.startsWith('//') && /^[\x21-\x7e]+$/.test(value) && !value.includes('#'),
   'Use a URL-encoded origin-relative readiness path without whitespace or a fragment.',
-).default('/');
-const timeoutMs = z.number().int().min(100).max(120_000).default(30_000);
-const directory = z.string().min(1).max(4096);
+).default('/').describe('URL-encoded origin-relative readiness path. HTTP 200–399 headers count as ready; redirects are not followed and bodies are not checked.');
+const timeoutMs = z.number().int().min(100).max(120_000).default(30_000)
+  .describe('Service readiness deadline in milliseconds, including any startup preparation. Default 30000; maximum 120000.');
+const directory = z.string().min(1).max(4096)
+  .describe('Existing live source directory, including uncommitted files. Use an absolute path in library/MCP calls; config-file paths resolve from that file.');
 const envKey = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(128);
 const literal = z.string().max(4096).refine((value) => !value.includes('\0'), 'Values cannot contain NUL.');
 export const secretIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'Use a secret name of 1–128 letters, numbers, dots, dashes, underscores or slashes.');
-const inputReferenceSchema = z.strictObject({ fromEnv: envKey });
+const inputReferenceSchema = z.strictObject({ fromEnv: envKey.describe('Environment input explicitly selected by the daemon owner; not an arbitrary client or shell variable.') });
 export const scalarValueSchema = z.union([literal, inputReferenceSchema, z.strictObject({ secret: secretIdSchema })]);
 export type ScalarValue = z.output<typeof scalarValueSchema>;
 const argv = z.array(z.string().max(8192).refine((value) => !value.includes('\0'), 'Arguments cannot contain NUL.')).min(1).max(128)
-  .refine((value) => value[0].length > 0, 'The executable cannot be empty.');
+  .refine((value) => value[0].length > 0, 'The executable cannot be empty.')
+  .describe('Executable and argv, with no implicit shell: no $PORT expansion, pipes, redirects, or &&. Literal {port} is replaced with the allocated private port. Honor injected PORT and HOST=127.0.0.1 or pass explicit loopback/port flags; disable port fallback. Dependencies must exist or come from explicit project preparation. A command must stay running and serve HTTP, not only exit successfully.');
 const envSchema = z.record(envKey, scalarValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'PORT, HOST and PREVIEW_URL are reserved.')
-  .default({});
+  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and numeric public origin. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewd does not load .env files; the application can.');
 
 export const environmentValueSchema = z.union([
   scalarValueSchema,
-  z.strictObject({ service: nameSchema }),
-  z.strictObject({ publicUrl: nameSchema }),
-  z.strictObject({ browserUrl: nameSchema }),
+  z.strictObject({ service: nameSchema.describe('Wait for this service and use its candidate internal numeric HTTP URL or selected database connection URL. Adds a readiness dependency; cycles are invalid.') }),
+  z.strictObject({ publicUrl: nameSchema.describe('Primary HTTP service only: numeric public origin. Adds no readiness dependency and can still reach the active application during replacement.') }),
+  z.strictObject({ browserUrl: nameSchema.describe('Any HTTP service: public .localhost alias for browser requests. Adds no readiness dependency; native DNS resolution and candidate readiness are not guaranteed. During replacement it can still reach the active application.') }),
 ]);
 const serviceEnvironment = z.record(envKey, environmentValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'PORT, HOST and PREVIEW_URL are reserved.')
-  .default({});
+  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewd does not load .env files; the application can.');
 export const environmentServiceSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('static'), directory, spa: z.boolean().default(false) }),
   z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs }),
@@ -65,13 +68,14 @@ export const environmentServiceSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('external-redis'), url: scalarValueSchema, timeoutMs }),
 ]);
 const environmentSpecSchema = z.strictObject({
-  name: nameSchema, type: z.literal('environment'), primary: nameSchema,
+  name: nameSchema, type: z.literal('environment'), primary: nameSchema.describe('HTTP service reached through the environment’s numeric public URL.'),
   services: z.record(nameSchema, environmentServiceSchema)
     .refine((services) => Object.keys(services).length >= 1 && Object.keys(services).length <= limits.environmentServices,
       `An environment needs between 1 and ${limits.environmentServices} services.`)
     .refine((services) => Object.values(services).filter((service) => service.type === 'postgres' || service.type === 'redis').length <= limits.environmentDatabases,
       `An environment supports at most ${limits.environmentDatabases} owned databases.`),
-  timeoutMs: timeoutMs.removeDefault().default(60_000),
+  timeoutMs: timeoutMs.removeDefault().default(60_000)
+    .describe('Overall environment startup deadline in milliseconds, across dependencies and service startup. Default 60000; maximum 120000. Individual service deadlines also apply.'),
 });
 
 export const previewSpecSchema = z.discriminatedUnion('type', [
@@ -207,7 +211,7 @@ export interface RuntimeOptions {
   authorize?: (request: AuthorizationRequest) => boolean | Promise<boolean>;
 }
 
-const attemptIdSchema = z.string().min(1).max(128);
+const attemptIdSchema = z.string().min(1).max(128).describe('Exact candidate attempt ID returned by start/replace or current status.');
 /** Argument containers shared by the HTTP and MCP adapters. */
 export const requestSchemas = {
   inspect: z.strictObject({ spec: previewSpecSchema }),
@@ -215,7 +219,8 @@ export const requestSchemas = {
   replace: z.strictObject({ name: nameSchema, spec: previewSpecSchema }),
   list: z.strictObject({}),
   get: z.strictObject({ name: nameSchema }),
-  wait: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, timeoutMs: z.number().int().min(1).max(limits.waitMs).optional() }),
+  wait: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, timeoutMs: z.number().int().min(1).max(limits.waitMs).optional()
+    .describe('Wait limit in milliseconds, default and maximum 30000. Timeout or canceling this wait leaves startup running; wait again or cancel the exact candidate.') }),
   logs: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema.optional(), maxBytes: z.number().int().min(1).max(limits.logBytes).optional() }),
   cancel: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   stop: z.strictObject({ name: nameSchema, afterEngineRestart: z.boolean().optional() }),

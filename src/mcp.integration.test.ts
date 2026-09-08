@@ -33,6 +33,27 @@ test('MCP discovers with no daemon in both protocol eras and returns actionable 
       assert.equal(tools.find((tool) => tool.name === 'preview_wait')?.annotations?.readOnlyHint, true);
       assert.equal(tools.find((tool) => tool.name === 'preview_start')?.annotations?.readOnlyHint, false);
       assert.equal(tools.find((tool) => tool.name === 'preview_delete_data')?.annotations?.destructiveHint, true);
+      // Descriptions are the agent's spec-authoring contract, including facts
+      // that JSON Schema cannot express as validation rules.
+      const startSchema = tools.find((tool) => tool.name === 'preview_start')!.inputSchema;
+      const variants = (startSchema.properties!.spec as { oneOf: Array<{ properties: Record<string, { const?: string; description?: string }> }> }).oneOf;
+      const command = variants.find((variant) => variant.properties.type.const === 'command')!.properties;
+      assert.match(command.command.description!, /argv.*no implicit shell/);
+      assert.match(command.command.description!, /\{port\}.*private port/);
+      assert.match(command.command.description!, /HOST=127\.0\.0\.1/);
+      assert.match(command.env.description!, /PREVIEW_URL.*numeric public origin/);
+      assert.match(command.cwd.description!, /absolute path/);
+      assert.match(command.readyPath.description!, /200–399.*redirects are not followed/);
+      const environment = variants.find((variant) => variant.properties.type.const === 'environment')!.properties;
+      assert.match(environment.timeoutMs.description!, /Overall environment.*60000/);
+      const bindings = JSON.stringify(environment.services);
+      assert.match(bindings, /candidate internal numeric HTTP URL/);
+      assert.match(bindings, /Primary HTTP service only/);
+      assert.match(bindings, /native DNS resolution and candidate readiness are not guaranteed/);
+      const instructions = client.getInstructions()!;
+      assert.match(instructions.slice(0, 512), /\{port\} and 127\.0\.0\.1/);
+      assert.match(instructions.slice(0, 512), /wait for the returned attempt ID/);
+      assert.match(instructions.slice(0, 512), /cleanup is uncertain.*block conflicting/);
       const result = await client.callTool({ name: 'preview_list', arguments: {} });
       assert.equal(result.isError, true);
       assert.equal((result.structuredContent as { error: { code: string } }).error.code, 'DAEMON_UNAVAILABLE');

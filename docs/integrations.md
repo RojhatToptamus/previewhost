@@ -48,7 +48,9 @@ and cancellation checks. An edited lockfile installed the new dependency and
 rebuilt its generated consumer. Cancellation stopped a parent, child, and grandchild sharing stdout.
 Abrupt App Server loss left those setup processes alive. Setup inside an explicit
 daemon-owned application command survived that client loss and stopped with the
-preview. A host must retain source while its own setup cleanup is uncertain.
+preview. While its setup cleanup is uncertain, a host must retain source and block
+conflicting installation, generation, or build retries. This guidance does not fix
+Codex's crash cleanup. The host must resolve its own process ownership before continuing.
 
 Automatic task deletion, Task Monki engine replacement, and other hosts' setup
 recovery remain outside this integration. Each host still owns its submitted
@@ -66,12 +68,18 @@ Add the following server to your Codex MCP configuration:
 
 ```toml
 [mcp_servers.previewd]
-command = "/absolute/app/node_modules/.bin/previewd"
-args = ["mcp"]
+command = "/absolute/node/bin/node"
+args = ["/absolute/app/node_modules/previewd/dist/cli.js", "mcp"]
 ```
 
 For a custom owner, add `--endpoint` and `--token-file` to the MCP arguments.
-An absolute executable path avoids differences between GUI and shell PATH values.
+Replace both paths with actual installed paths. `node -p process.execPath` in the
+working shell prints its absolute Node executable. The ordinary previewd executable
+uses `#!/usr/bin/env node`; its absolute path still requires Node on the host PATH.
+The explicit Node launch above works with `PATH=/usr/bin:/bin` in the installed-package
+MCP check. This verifies process launch and protocol discovery, not Codex Desktop UI.
+The separately started daemon still needs a PATH that resolves project commands,
+or those commands must use their own absolute executable paths.
 The token value does not belong in this configuration.
 
 The current clean package exposes twelve MCP tools, including secret setup/status.
@@ -97,8 +105,8 @@ Use this project-level `.cursor/mcp.json` configuration in Cursor:
 {
   "mcpServers": {
     "previewd": {
-      "command": "/absolute/app/node_modules/.bin/previewd",
-      "args": ["mcp"]
+      "command": "/absolute/node/bin/node",
+      "args": ["/absolute/app/node_modules/previewd/dist/cli.js", "mcp"]
     }
   }
 }
@@ -106,6 +114,8 @@ Use this project-level `.cursor/mcp.json` configuration in Cursor:
 
 Start the daemon separately. Use the host approval controls to enable the server
 and its tools. Native execution also requires the daemon launch permission.
+Substitute actual Node and CLI paths as described above. The minimal-PATH package
+check verifies this launch form; Cursor IDE remains unverified.
 
 Cursor Agent 2026.08.25-3e8eec8 discovered all ten tools and completed one headless model turn.
 The turn made twelve previewd calls through inspect, start, wait, get, list,

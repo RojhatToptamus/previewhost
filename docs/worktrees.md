@@ -35,9 +35,9 @@ The private data directory belongs outside task directories that the host can re
 Multiple tasks can share this owner with different preview names.
 
 1. Read `get` or `preview_get` for the task name before another start.
-2. If installation or generation is necessary, stop affected previews before incompatible writes.
-3. Run the project's preparation commands through the host's command runner.
-4. If preparation fails or cancellation remains unresolved, stop this procedure.
+2. Resolve any previous preparation through the host's existing command handles and cleanup checks.
+3. If installation or generation is necessary, stop affected previews before incompatible writes.
+4. Run the project's preparation through the host's command runner and await successful completion and cleanup. Stop this procedure on failure or unresolved cancellation.
 5. Inspect one environment spec with the actual service paths.
 6. Start the environment and wait for the returned attempt ID.
 7. Open the ready URL and test the application's browser operation.
@@ -46,10 +46,21 @@ A host runner must own cancellation and cleanup of its setup processes.
 previewd adds no installer. Explicit project commands can install packages or
 generate files as part of their intended work.
 
-Normal cancellation does not prove cleanup after abrupt host loss. Source remains
-in place while setup cleanup is uncertain. Project preparation that must outlive
-the agent client can run inside its explicit application startup command.
-The daemon then owns that process through readiness and stop.
+Normal cancellation does not prove cleanup after abrupt host loss. After a lost
+connection, reconcile the original command through its host before another preparation attempt.
+While cleanup is uncertain, do not remove or move source, or retry conflicting
+installation, generation, or builds. A failure permits a retry only after the host
+has resolved the failed command's cleanup. Do not infer process ownership from a
+port, directory, or process name; use the host's existing ownership mechanisms.
+
+Codex App Server crash cleanup remains unresolved in the tested version. These
+rules prevent conflicting follow-up work; they do not stop surviving Codex processes.
+`preview_stop` cleans up previewd-owned work, not external host preparation.
+
+Preparation can run inside an explicit HTTP application startup command when it
+belongs to that startup and fits the readiness deadline. The daemon then owns
+that process through readiness and stop. Independent installation and generation
+can remain with the coding host.
 
 Setup that needs managed database credentials can run in its owning service's
 startup command before HTTP readiness. Browser builds need their public URLs
@@ -120,13 +131,14 @@ still share data. Native execution and daemon access are not per-task security b
 
 1. Find every submitted preview that consumes the directory, including another task's preview.
 2. Stop those previews and await successful cleanup.
-3. Resolve the host's other source users before removing or moving the directory.
+3. Resolve external preparation and the host's other source users before removing or moving the directory.
 
 An edited config cannot reconstruct all paths used by older attempts. Current
 `get/list` responses omit those source paths. The host must retain the associations
 from submitted specs until active, candidate, and cleanup consumers finish.
 
-If those associations or previous-owner cleanup are uncertain, retain the source.
+If those associations or previous-owner cleanup are uncertain, retain the source
+and block conflicting preparation retries.
 If the host cannot coordinate another task's directory lifetime, keep the initial
 integration within source lifetimes that it controls together.
 

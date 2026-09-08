@@ -38,6 +38,34 @@ It never reads personal credentials. Keep production Keychain access out of test
 use `src/testSupport/keychain.ts` whenever a test can open managed data or secrets.
 The production binary accepts no test Keychain selector.
 
+## Verify a macOS release
+
+Use the same local Docker prerequisites above, then run:
+
+```sh
+PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
+npm pack --ignore-scripts
+npm run check:package -- /absolute/path/to/previewd-0.1.0.tgz
+```
+
+`verify:release` requires macOS and an explicit local Docker Unix socket. It runs
+the existing type check and full test suite. Missing images or an unavailable
+Engine fail the existing database tests. Any skipped, canceled, failed, or TODO
+test fails the release check, as does a missing test summary.
+
+Pack only after that check passes; it has already built the package. The package
+check installs that exact tarball in a temporary consumer outside this repository.
+It checks public ESM imports, installed CLI static/native startup, MCP discovery
+with an absolute Node executable and minimal PATH, disconnect survival, and cleanup.
+It then installs TypeScript and Node declarations in the consumer and compiles
+against the installed public declarations. npm needs registry access or cached dependencies.
+On success, the check removes its temporary consumer after its owned processes close.
+On failure, it retains that directory for diagnosis and cleanup verification.
+
+Review `npm pack --dry-run` for unintended files. Current release evidence covers
+macOS 26.5.1 on arm64. Codex Desktop and Cursor IDE remain unverified; headless and
+SDK checks do not establish GUI compatibility.
+
 ## Change the product
 
 Trace the public method, authoritative owner, and cleanup path before editing.

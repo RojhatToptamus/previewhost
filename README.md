@@ -15,8 +15,8 @@ API, provider account, or vendor SDK.
 
 This repository is not published to npm. Install its local tarball.
 
-Requirements: Node.js 22.23 or later. Native commands currently require macOS,
-`/bin/ps`, and `/usr/sbin/lsof`. See [tested support](docs/integrations.md).
+The initial release targets macOS and needs Node.js 22.23 or later. Native commands
+require `/bin/ps` and `/usr/sbin/lsof`. See [tested support](docs/integrations.md).
 Stored secrets and managed database credentials require macOS 13 or later.
 Building the packaged Keychain helper requires Xcode Command Line Tools.
 Installing the tarball does not compile native code.
@@ -28,6 +28,10 @@ npm ci
 npm run verify
 npm pack
 ```
+
+Developer verification can skip local Docker suites. For a release candidate, use
+the [macOS release checks](CONTRIBUTING.md#verify-a-macos-release), which require zero skips
+and test the tarball in a separate consumer.
 
 From your application directory, install the generated tarball:
 
@@ -181,6 +185,7 @@ try {
 For a long-lived application, keep the runtime open until application shutdown.
 The packaged [library example](examples/library.mjs) performs one request and then closes it.
 `loadPreviewSpec(file)` uses the same JSON/YAML file loader as the CLI.
+TypeScript consumers need TypeScript and `@types/node` as development dependencies.
 
 ## Behavior
 
