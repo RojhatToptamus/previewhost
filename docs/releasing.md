@@ -39,12 +39,14 @@ ad-hoc signed Keychain helper with `arm64` and `x86_64` slices. Consumers do not
 compile it during installation. CI uses Node.js 24; the package minimum remains
 Node.js 22.23. Local arm64 results do not establish hosted Intel compatibility.
 
-For a release, Changesets packs the completed build with lifecycle scripts disabled.
-CI downloads that uploaded artifact and checks its release version and dist-tag.
+For a release, CI downloads the Changesets publish plan and verifies its package and version.
+It selects `alpha` for alpha versions and `latest` for regular versions before packing.
+This explicit selection handles npm's first-alpha `latest` tag without relying on its removal.
+Changesets packs the completed build with lifecycle scripts disabled.
 `npm run check:package` installs that exact tarball outside the repository. It checks
 its inventory, both native architectures, code signature, executable permissions,
 ESM imports, CLI startup, MCP discovery and version, cleanup, and TypeScript declarations.
-Only after this succeeds can the publish job consume the same artifact by ID.
+After these checks pass, CI uploads the packed directory for the publish job to consume by artifact ID.
 The publisher runs on hosted Ubuntu and does not rebuild or repack the source.
 
 The publish job alone receives `id-token: write`. It uses npm 11 for Trusted
@@ -111,15 +113,11 @@ npm publish ./previewhost-0.1.0-alpha.0.tgz --ignore-scripts --access public --t
 npm view previewhost@alpha dist-tags --json
 ```
 
-Confirm that `alpha` points to `0.1.0-alpha.0`. Changesets documents a first-publish
-`latest` exception. Its current CLI also chooses `latest` if every published
-version is an alpha and the registry has a `latest` tag. Our release check rejects
-that plan, so an alpha cannot silently move to `latest`.
-If npm adds `latest` to this first alpha, remove it with
-`npm dist-tag rm previewhost latest` and verify the tags again. If the registry
-refuses removal, stop and resolve that restriction before automated alpha releases.
-Use `npm view previewhost@alpha dist-tags --json` after removal; an unqualified
-lookup can return no output when `latest` is absent.
+Confirm that `alpha` points to `0.1.0-alpha.0`.
+npm can also assign `latest` to this first alpha and reject its removal.
+Changesets then defaults subsequent alpha releases to `latest`.
+The workflow overrides that default from the package version before packing, so alpha releases update only `alpha`.
+An existing `latest` tag remains until a separate tag change or regular release.
 The first registry publication and its resulting tags must be checked live.
 
 Create the initial GitHub prerelease from the same source commit, using the
@@ -175,7 +173,7 @@ edit is needed. Existing `alpha` tags remain until deliberately changed.
 
 ## Failures and verification limits
 
-A failing test, native check, inventory check, or tag check blocks publication.
+A failing test, native check, inventory check, or release-plan validation blocks publication.
 For a test/build failure, fix the cause and rerun Release on `main`.
 Do not bypass the zero-skip release gate.
 
