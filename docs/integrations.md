@@ -19,7 +19,7 @@ require macOS process tools, but Linux and Windows behavior remains unverified.
 | ESM library | Static, command, attach, replacement, cancellation, stop, and close | One runtime per owner |
 | CLI and daemon | JSON/YAML environment startup, service outcomes, selected owner inputs, authentication, and shutdown | Foreground daemon must already run |
 | MCP SDK | Environment lifecycle and private secret setup/status. Both protocol eras discover tools and return tool errors | Host-specific approval UI remains outside previewd |
-| Codex App Server 0.146.0 | Model-driven command/environment startup and stop; database lifecycle; private secret setup and retry | Command/environment and secret checks use `gpt-5.5`; database checks use direct MCP. Desktop UI remains unverified |
+| Codex 0.146.0 | Automatic MCP review in exec and App Server; command/environment startup and stop; database and secret lifecycles | Model checks use `gpt-5.5`; database checks use direct App Server MCP. Desktop UI remains unverified |
 | Cursor Agent | Three-application database lifecycle; private secret setup and retry | Headless model sessions on the versions named below. IDE behavior remains unverified |
 | Task Monki | Real HTTP dependency approval, readiness, replacement, and independent stop | Engine embedding and production UI integration remain unverified |
 
@@ -100,37 +100,56 @@ See the [official Codex MCP configuration reference](https://developers.openai.c
 
 ### MCP approvals
 
-In the tested configuration, Codex requests approval before `preview_start` and
-`preview_stop`. A custom App Server client receives `mcpServer/elicitation/request`
-in form mode, with `_meta.codex_approval_kind` set to `mcp_tool_call`.
+Approval policy and reviewer selection are separate controls. Setting
+`approvals_reviewer="auto_review"` alone does not establish that the reviewer ran.
 
-Verify the request's server, tool, arguments, task, and turn against the authorized operation.
-For an approved call, return this result with the received request ID:
+Codex 0.146.0 with `gpt-5.5` exercised these configurations against the installed
+`previewd@0.1.0` package. Every test used a read-only sandbox and disposable fixtures.
 
-```json
-{"action":"accept","content":{},"_meta":null}
+| Client and policy | Approval handling | Observed result |
+| --- | --- | --- |
+| `exec`, `never` | `auto_review` selected; default MCP approval modes | Inspect passed; exec canceled startup elicitation before dispatch |
+| App Server, `never` | Test harness accepted four scoped elicitation requests | Both scenarios passed inspect, start, wait, and stop; this verifies client-mediated approval |
+| `exec`, `on-request` | Automatic reviewer; start/stop approval mode `prompt` | Both scenarios passed; four review start/completion pairs preceded mutation dispatch |
+| App Server, `on-request` | Automatic reviewer; start/stop approval mode `prompt` | Both scenarios passed; four decisions reported `approved` with `decisionSource: agent`; zero client approval requests |
+
+The automatic-review tests used these session-local values:
+
+```toml
+approval_policy = "on-request"
+approvals_reviewer = "auto_review"
+sandbox_mode = "read-only"
+features.guardian_approval = true
+features.tool_call_mcp_elicitation = true
+mcp_servers.previewd_authoring.tools.preview_start.approval_mode = "prompt"
+mcp_servers.previewd_authoring.tools.preview_stop.approval_mode = "prompt"
 ```
 
-This response grants the current call without a saved approval. Other decisions
-use `decline` or `cancel`, with `content: null`. See the
-[App Server protocol](https://learn.chatgpt.com/docs/app-server).
+`previewd_authoring` was the isolated test server name. The explicit `prompt`
+overrides required review for each start and stop. Neither test accepted approvals
+in its harness or called MCP tools through direct RPCs. The macOS sandbox also
+blocked a separate write probe. See [Codex automatic review](https://learn.chatgpt.com/docs/sandboxing/auto-review).
 
-Codex 0.146.0 `exec` automatically cancels elicitation requests. It can report
-`user cancelled MCP tool call` before the request reaches previewd.
-The [version's request handler](https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/exec/src/lib.rs)
-defines this behavior. The generic `approval_policy="never"` configuration did
-not remove the MCP approval requirement in the tested read-only sandbox.
+The exec trace exposes review event names but omits decision payloads.
+Its approved outcomes follow from successful dispatch after each completed review.
+The separate App Server record contains target call IDs, decisions, and rationales.
+All four decisions reported low risk and high user authorization.
+Reviewer decisions depend on each request.
 
-Codex App Server 0.146.0 with `gpt-5.5` passed both a standalone command scenario
-and an API/web environment scenario using the installed `previewd@0.1.0` package.
-The model called inspect, start, wait, and stop for each scenario.
-The test client accepted four approvals for the exact fixture operations.
-Independent HTTP checks verified readiness, API dependencies, and injected origins.
-Stop removed all three application processes, their groups, and five listeners.
+Each automatic-review run made eight model-driven calls across a standalone
+command and an API/web environment. Independent HTTP checks verified readiness,
+API connectivity, and injected origins. Each run stopped three application
+processes, their groups, and five listeners. The dedicated daemon also stopped.
 Global configuration, source files, and tool annotations remained unchanged.
-
-The correction is confined to the test client's approval handling.
 previewd's runtime, request contracts, and owner permissions remain unchanged.
+
+For client-mediated approval, App Server sends `mcpServer/elicitation/request`
+in form mode with `_meta.codex_approval_kind: "mcp_tool_call"`.
+Verify the server, tool, arguments, task, and turn against the authorized operation.
+For an approved call, return `{"action":"accept","content":{},"_meta":null}`
+with the received request ID. This response grants the current call without a
+saved approval. See the [App Server protocol](https://learn.chatgpt.com/docs/app-server).
+The `never`-policy harness test used this separate approval path.
 
 ## Cursor and other MCP hosts
 

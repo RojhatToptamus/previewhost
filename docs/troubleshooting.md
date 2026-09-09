@@ -32,13 +32,20 @@ file. The next daemon launch creates a new token.
 
 ## Codex reports `user cancelled MCP tool call`
 
-Codex 0.146.0 `exec` automatically cancels MCP elicitation requests. This message
-alone does not establish that a person canceled the call.
+The recorded Codex 0.146.0 `exec` test used `approval_policy="never"` and
+`approvals_reviewer="auto_review"`. Exec canceled its startup elicitation requests
+before dispatch. This message alone does not establish that a person canceled the call.
 
-For automated calls that require approval, use a client that handles the
-[supported approval flow](integrations.md#mcp-approvals).
-Approve the specific operation through that client. The daemon still requires
-its own launch permission for native execution.
+For automatic review, use `on-request`, `auto_review`, and an enforceable sandbox.
+Keep the relevant tool approval requirements enabled.
+Verify that review events and decisions occur. Reviewer selection alone is insufficient.
+The [tested approval configurations](integrations.md#mcp-approvals) distinguish
+automatic review from App Server responses supplied by a client.
+
+A reviewer denial, a timeout, and a canceled client elicitation are different outcomes.
+For a denial, read the review rationale. For client-mediated approval, approve the
+specific operation through that client. The daemon still requires its own launch
+permission for native execution.
 
 ## Startup fails or times out
 
