@@ -34,10 +34,9 @@ jobs:
       - run: npm ci
       - name: Start local Docker
         run: |
-          brew install colima docker
-          # Lima requires one VZ CPU on hosted macOS to avoid nested-VM stalls.
-          # https://github.com/lima-vm/lima/pull/1511#issuecomment-1574937888
-          colima start --runtime docker --vm-type vz --cpus 1 --memory 4
+          brew install colima docker qemu
+          # VZ is too slow for the real database lifecycle tests on hosted Intel Macs.
+          colima start --runtime docker --vm-type qemu --cpus 2 --memory 4
           echo "PREVIEWD_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
