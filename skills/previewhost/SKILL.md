@@ -15,15 +15,15 @@ Read project instructions and search scripts, JSON/YAML files, and project docum
 Reuse the task's current sources, including uncommitted files and worktrees.
 If no suitable recipe exists, use [Create or update a recipe](references/docs/recipes.md).
 
-For CLI use, find the installed `previewhost` executable, usually `./node_modules/.bin/previewhost`.
-Use `--help` to verify its syntax. Read the installed package's `package.json` for its version.
+For CLI use, use `previewhost` from PATH or the project's `./node_modules/.bin/previewhost`.
+Use `--help` to verify its syntax.
 For MCP use, verify that the `preview_*` tools are available.
 Both interfaces require a separately running daemon.
 Use the owner's endpoint and token-file path. Never print the token contents.
 Append `--endpoint` and `--token-file` to CLI client commands when their defaults differ.
 
 Use `list` or `preview_list` to verify connectivity and existing preview names.
-If installation or connection is missing, read the relevant [installation](references/README.md#install-locally) or [MCP setup](references/docs/integrations.md#connect-an-mcp-client) section.
+If installation or connection is missing, read the relevant [installation](references/README.md#install) or [MCP setup](references/docs/integrations.md#connect-an-mcp-client) section.
 Start a dedicated daemon only within the task's authorization, with the required source roots and permissions.
 Do not restart or reconfigure a shared daemon to broaden access.
 Commands require daemon execution permission. `--allow-exec` also permits managed database operations and explicit deletion/recovery.
@@ -81,7 +81,7 @@ Retain affected source until cleanup is complete.
 
 - Recipe creation or changes: [decision guide](references/docs/recipes.md), then the relevant [spec fields](references/docs/api.md#specs).
 - Framework arguments, allowed hosts, HMR, or origins: [framework configuration](references/docs/integrations.md#framework-configuration).
-- Multiple services or databases: [environment bindings](references/docs/api.md#environment-specs) and [database prerequisites](references/examples/multi-repo/README.md#install-the-dependencies).
+- Multiple services or databases: [frontend, backends, PostgreSQL, and Redis walkthrough](references/examples/multi-repo/README.md), then the relevant [environment bindings](references/docs/api.md#environment-specs).
 - Existing task worktrees or shared preparation: [worktree guide](references/docs/worktrees.md).
 - Missing stored credentials: [private secret entry](references/docs/api.md#stored-secrets).
   Use `preview_secrets_setup` / `preview_secrets_status`, or CLI `secrets setup` / `secrets status` with the selected connection.
@@ -91,5 +91,5 @@ Retain affected source until cleanup is complete.
 - Data retention, deletion, or exceptional recovery: [security and recovery](references/docs/security.md#recovery).
 
 The reference examples are source material for recipes.
-Run maintained executable examples from the installed previewhost package, where their runtime imports resolve.
+Use each example's documented setup. The multi-repository example requires a source checkout and its own dependencies.
 Do not execute scripts from the skill's reference copy as though it were an installed package.

@@ -48,6 +48,39 @@ It never reads personal credentials.
 For tests that open managed data or secrets, use `src/testSupport/keychain.ts`.
 The production binary accepts no test Keychain selector.
 
+## Build and install a tarball
+
+Source builds require the tools listed in [Set up development](#set-up-development).
+With GitHub access to the repository, clone the source:
+
+```sh
+git clone https://github.com/RojhatToptamus/previewhost.git
+cd previewhost
+```
+
+Install build dependencies:
+
+```sh
+npm ci
+```
+
+Build the package and create a tarball:
+
+```sh
+npm pack
+```
+
+From your application directory, install that tarball.
+Replace the path and `VERSION` with the file reported by `npm pack`:
+
+```sh
+npm install /absolute/path/to/previewhost/previewhost-VERSION.tgz
+```
+
+Installation from the tarball does not compile native code.
+Continue with the [README quick starts](README.md#use-the-cli).
+Use `./node_modules/.bin/previewhost` for this local CLI installation.
+
 ## Verify a macOS release
 
 See the [release pipeline](docs/releasing.md) for changesets, prerelease promotion,

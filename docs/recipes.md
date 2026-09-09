@@ -24,10 +24,10 @@ For shared output or overlapping processes, read the [worktree guide](worktrees.
 
 | Project requirement | Spec and maintained reference |
 | --- | --- |
-| Serve existing HTML/assets or prepared build output | `static`: [static recipe](../examples/static.json) and [static fields](api.md#specs). |
+| Serve existing HTML/assets or prepared build output | `static`: [static quick start](#serve-a-static-page) and [static fields](api.md#specs). |
 | Start one HTTP application | `command`: [command recipe](../examples/command.json) and [framework configuration](integrations.md#framework-configuration). |
 | Expose an HTTP server already managed elsewhere | `attach`: [attachment fields and example](api.md#specs). Verify the existing listener first. |
-| Start connected HTTP services or use databases | `environment`: [bindings and service fields](api.md#environment-specs) and [multi-repository recipe](../examples/multi-repo/environment.yaml). |
+| Start connected HTTP services or use databases | `environment`: [bindings and service fields](api.md#environment-specs) and [frontend, backends, PostgreSQL, and Redis walkthrough](../examples/multi-repo/README.md). |
 | Preview existing task worktrees | Use the appropriate spec with the host's source paths. See the [worktree guide](worktrees.md) and [maintained recipe program](../examples/multi-repo/worktrees.mjs). |
 
 Use `spa: true` only if the application needs an index fallback for client routes.
@@ -40,6 +40,49 @@ If that decision is unknown, ask before creating or selecting a database.
 Owned PostgreSQL and Redis require the [database prerequisites](../examples/multi-repo/README.md#install-the-dependencies).
 External database entries accept only the supported local connection forms described in the API reference.
 Do not substitute production credentials or infer permission to migrate, reset, or delete data.
+
+## Serve a static page
+
+Use the [global CLI installation and runtime requirements](../README.md#install).
+This example needs no command execution permission or Docker.
+Create a sample page:
+
+```sh
+mkdir previewhost-static
+cd previewhost-static
+mkdir site
+printf '<h1>Hello from previewhost.</h1>\n' > site/index.html
+```
+
+Save this recipe as `preview.json` in that directory:
+
+```json
+{
+  "name": "site",
+  "type": "static",
+  "directory": "./site"
+}
+```
+
+After any previous demo daemon stops, start this daemon in a terminal:
+
+```sh
+previewhost serve --root "$PWD"
+```
+
+In a second terminal in the same directory, start the preview:
+
+```sh
+previewhost start --file preview.json
+```
+
+Open the returned `url`. The page shows **Hello from previewhost.**
+After use, stop the preview and daemon:
+
+```sh
+previewhost stop site
+previewhost shutdown
+```
 
 ## Verify commands and bindings
 

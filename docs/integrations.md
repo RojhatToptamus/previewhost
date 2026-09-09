@@ -20,14 +20,24 @@ Linux and Windows remain unverified, including static and attached previews.
 | Task Monki | HTTP attachment, approval, readiness, replacement, and independent stop | Embedded runtime and browser UI integration remain unverified |
 
 The MCP client, framework, browser, and Task Monki sections below record checks under the former package name, `previewd`.
-The renamed package remains untested in those MCP hosts. Agent skill checks identify their tested package separately.
-The configuration examples use the new package and server name.
+Full preview workflows with the renamed package remain untested in those MCP hosts.
+Agent skill checks identify their tested package separately.
+The configuration examples use the public `previewhost` executable from PATH.
+The earlier host checks used an absolute Node executable and installed CLI path.
 The client results apply to the named versions and configurations.
 A configuration example or successful discovery alone does not establish a working preview workflow.
+
+The [full-stack walkthrough](../examples/multi-repo/README.md) passed with the globally installed previewhost 0.1.0-alpha.0 CLI and local Docker databases.
+Browser checks covered note writes, public backend routes, PostgreSQL and Redis reads, and replacement at the same URL.
+Stop and daemon restart retained the data. Explicit deletion removed the test's owned containers, volumes, and credentials.
+The external-database variant also passed with separate local PostgreSQL and Redis containers.
+Preview stop left those containers and their data under their original owner.
 
 ## Agent skill
 
 Use the [README installation and usage steps](../README.md#use-the-agent-skill).
+The repository is private. Remote skill installation requires existing authenticated GitHub access.
+A public npm installation does not grant that access.
 The repository contains one `skills/previewhost/SKILL.md` entrypoint for preview operation and recipe creation.
 Its references link to the maintained documentation and examples. Agents read these documents only when the task needs them.
 
@@ -73,39 +83,23 @@ Skill installation does not install previewhost, start its daemon, configure MCP
 
 ## Connect an MCP client
 
-1. [Install previewhost](../README.md#install-locally) in your application directory.
-2. From that directory, start the daemon in a separate terminal:
-
-   ```sh
-   ./node_modules/.bin/previewhost serve --root "$PWD" --allow-exec
-   ```
-
-   This permits project code to execute as your user. It does not provide a sandbox.
-   Managed databases also require the [database prerequisites](../examples/multi-repo/README.md#install-the-dependencies).
-
-3. Run `node -p process.execPath` to find the absolute Node executable.
-4. Add the configuration for your client below.
-5. Replace `/absolute/node/bin/node` and `/absolute/app` with your Node executable and application directory.
-6. Copy the [packaged command spec](../examples/command.json) into your client request.
-7. Set its `cwd` to `/absolute/app/node_modules/previewhost/examples`.
-8. Ask the client to inspect that spec.
-9. Ask the client to start the preview.
-10. Ask the client to call `preview_wait` with the attempt ID from `preview_start`.
-11. Open the returned URL. The example responds with `Hello from previewhost.`
-12. Ask the client to stop `node-example`.
-13. After you finish, run `./node_modules/.bin/previewhost shutdown` from your application directory.
+Follow the [README MCP quick start](../README.md#use-mcp) to install previewhost, create the frontend and backend, and start the daemon.
+Use the client configuration below for your host.
+Each example starts the adapter with `previewhost` from PATH.
+previewhost 0.1.0-alpha.0 passed static and README frontend/backend workflows through the CLI and MCP protocol.
+The README embedded-library example also passed.
+Cursor Agent 2026.09.02-c22c1a3 discovered all twelve tools through the project configuration.
+That discovery check used no model.
+For executable lookup errors, see [PATH troubleshooting](troubleshooting.md#the-client-cannot-find-previewhost).
 
 Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.
 
-The absolute Node command works without Node on the client's PATH.
-An absolute `previewhost` executable still uses `env node` and needs Node on PATH.
-The daemon also needs a PATH that resolves application commands, or absolute command paths.
-
 Discovery exposes twelve `preview_*` tools without a daemon. Tool operations
-require the daemon. Client approval does not grant its execution permission.
-A client disconnect leaves daemon previews active.
+require the daemon. A client disconnect leaves daemon previews active.
+Development servers require daemon execution permission through `--allow-exec`.
+Client approval does not grant that permission.
 
 ## Codex
 
@@ -113,8 +107,8 @@ Add this server to your [Codex MCP configuration](https://developers.openai.com/
 
 ```toml
 [mcp_servers.previewhost]
-command = "/absolute/node/bin/node"
-args = ["/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"]
+command = "previewhost"
+args = ["mcp"]
 ```
 
 ### MCP approvals
@@ -146,8 +140,8 @@ sandbox_mode = "read-only"
 features.guardian_approval = true
 features.tool_call_mcp_elicitation = true
 [mcp_servers.previewhost]
-command = "/absolute/node/bin/node"
-args = ["/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"]
+command = "previewhost"
+args = ["mcp"]
 
 [mcp_servers.previewhost.tools.preview_start]
 approval_mode = "prompt"
@@ -189,8 +183,8 @@ In Cursor, add this server to the project's `.cursor/mcp.json`:
 {
   "mcpServers": {
     "previewhost": {
-      "command": "/absolute/node/bin/node",
-      "args": ["/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"]
+      "command": "previewhost",
+      "args": ["mcp"]
     }
   }
 }
@@ -256,7 +250,7 @@ Add this server to your OpenCode configuration:
   "mcp": {
     "previewhost": {
       "type": "local",
-      "command": ["/absolute/node/bin/node", "/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"],
+      "command": ["previewhost", "mcp"],
       "enabled": true
     }
   },
@@ -353,13 +347,13 @@ Save the selected spec as `preview.json` in your application directory.
 With the daemon active, run these commands from that directory:
 
 ```sh
-./node_modules/.bin/previewhost start --file preview.json
-./node_modules/.bin/previewhost get PREVIEW_NAME
+previewhost start --file preview.json
+previewhost get PREVIEW_NAME
 ```
 
 Replace `PREVIEW_NAME` with the spec's `name`. Open the returned URL.
-After use, run `./node_modules/.bin/previewhost stop PREVIEW_NAME`.
-To close the daemon, run `./node_modules/.bin/previewhost shutdown`.
+After use, run `previewhost stop PREVIEW_NAME`.
+To close the daemon, run `previewhost shutdown`.
 
 Vite 8.2.2 and Next.js 16.3.4 passed Chrome 152 checks on Node.js 22.23.1.
 Both served interactive pages and source updates through numeric URLs and
