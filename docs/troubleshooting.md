@@ -30,6 +30,16 @@ The daemon creates the token. Do not put its value in project files or MCP
 configuration. If a token is exposed, stop the daemon before removing that token
 file. The next daemon launch creates a new token.
 
+## Codex reports `user cancelled MCP tool call`
+
+Codex 0.146.0 `exec` automatically cancels MCP elicitation requests. This message
+alone does not establish that a person canceled the call.
+
+For automated calls that require approval, use a client that handles the
+[supported approval flow](integrations.md#mcp-approvals).
+Approve the specific operation through that client. The daemon still requires
+its own launch permission for native execution.
+
 ## Startup fails or times out
 
 Read `previewd get NAME`, then `previewd logs NAME ATTEMPT_ID`.

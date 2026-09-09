@@ -9,6 +9,7 @@ tools to its model. The model still needs a host that supports one of those inte
 Remote and cloud hosts need explicit access to this machine's filesystem and
 loopback network. previewd does not provide that bridge.
 
+The initial release supports macOS only.
 The verification environment is macOS 26.5.1, arm64, with Node.js 22.23.1 and 24.19.0.
 Native execution rejects other operating systems. Static and attach code does not
 require macOS process tools, but Linux and Windows behavior remains unverified.
@@ -18,7 +19,7 @@ require macOS process tools, but Linux and Windows behavior remains unverified.
 | ESM library | Static, command, attach, replacement, cancellation, stop, and close | One runtime per owner |
 | CLI and daemon | JSON/YAML environment startup, service outcomes, selected owner inputs, authentication, and shutdown | Foreground daemon must already run |
 | MCP SDK | Environment lifecycle and private secret setup/status. Both protocol eras discover tools and return tool errors | Host-specific approval UI remains outside previewd |
-| Codex App Server 0.146.0 | Three-application database lifecycle; private secret setup and retry | Database checks use direct MCP; secret checks use a `gpt-5.5` model session. Desktop UI remains unverified |
+| Codex App Server 0.146.0 | Model-driven command/environment startup and stop; database lifecycle; private secret setup and retry | Command/environment and secret checks use `gpt-5.5`; database checks use direct MCP. Desktop UI remains unverified |
 | Cursor Agent | Three-application database lifecycle; private secret setup and retry | Headless model sessions on the versions named below. IDE behavior remains unverified |
 | Task Monki | Real HTTP dependency approval, readiness, replacement, and independent stop | Engine embedding and production UI integration remain unverified |
 
@@ -96,6 +97,40 @@ configuration for native applications and managed databases. The same MCP
 configuration sends its complete environment spec through one start operation.
 
 See the [official Codex MCP configuration reference](https://developers.openai.com/codex/mcp/).
+
+### MCP approvals
+
+In the tested configuration, Codex requests approval before `preview_start` and
+`preview_stop`. A custom App Server client receives `mcpServer/elicitation/request`
+in form mode, with `_meta.codex_approval_kind` set to `mcp_tool_call`.
+
+Verify the request's server, tool, arguments, task, and turn against the authorized operation.
+For an approved call, return this result with the received request ID:
+
+```json
+{"action":"accept","content":{},"_meta":null}
+```
+
+This response grants the current call without a saved approval. Other decisions
+use `decline` or `cancel`, with `content: null`. See the
+[App Server protocol](https://learn.chatgpt.com/docs/app-server).
+
+Codex 0.146.0 `exec` automatically cancels elicitation requests. It can report
+`user cancelled MCP tool call` before the request reaches previewd.
+The [version's request handler](https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/exec/src/lib.rs)
+defines this behavior. The generic `approval_policy="never"` configuration did
+not remove the MCP approval requirement in the tested read-only sandbox.
+
+Codex App Server 0.146.0 with `gpt-5.5` passed both a standalone command scenario
+and an API/web environment scenario using the installed `previewd@0.1.0` package.
+The model called inspect, start, wait, and stop for each scenario.
+The test client accepted four approvals for the exact fixture operations.
+Independent HTTP checks verified readiness, API dependencies, and injected origins.
+Stop removed all three application processes, their groups, and five listeners.
+Global configuration, source files, and tool annotations remained unchanged.
+
+The correction is confined to the test client's approval handling.
+previewd's runtime, request contracts, and owner permissions remain unchanged.
 
 ## Cursor and other MCP hosts
 
