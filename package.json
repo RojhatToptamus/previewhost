@@ -1,6 +1,6 @@
 {
   "name": "previewhost",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "Local HTTP previews for applications and coding agents.",
   "type": "module",
   "license": "MIT",
