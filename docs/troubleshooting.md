@@ -59,6 +59,17 @@ both stop calls. Inspect, start, and wait had no observed per-call prompts.
 Successful dispatch alone does not establish that an automatic reviewer approved
 a call. Cursor's observed approval behavior differs from the Codex review records.
 
+## Claude Code or OpenCode waits for MCP approval
+
+Review the pending tool and arguments. Claude Code offers `Yes` for the current
+request; OpenCode offers `Allow once`. The verified configurations required
+confirmation for every start and stop, while inspect and wait were allowed.
+The client prompt appears before dispatch to previewd.
+
+See the tested [Claude Code](integrations.md#claude-code) and
+[OpenCode](integrations.md#opencode) configurations and versions. Client approval
+does not grant the daemon's separate native execution permission.
+
 ## Startup fails or times out
 
 Read `previewd get NAME`, then `previewd logs NAME ATTEMPT_ID`.

@@ -22,6 +22,8 @@ require macOS process tools, but Linux and Windows behavior remains unverified.
 | Codex 0.146.0 | Automatic MCP review in exec and App Server; command/environment startup and stop; database and secret lifecycles | Model checks use `gpt-5.5`; database checks use direct App Server MCP. Desktop UI remains unverified |
 | Cursor Agent | Three-application database lifecycle; private secret setup and retry | Headless model sessions on the versions named below |
 | Cursor IDE 3.19.14 | Model-driven inspect, start, wait, and stop for standalone and API/web previews | Composer 2.5 Fast; both stop calls required manual approval |
+| Claude Code 2.1.239 | Model-driven inspect, start, wait, and stop for standalone and API/web previews | Interactive terminal; Sonnet 5 with low effort; four manual start/stop approvals |
+| OpenCode 1.18.25 | Model-driven inspect, start, wait, and stop for standalone and API/web previews | Interactive terminal; `openai/gpt-5.5`; four manual start/stop approvals |
 | Task Monki | Real HTTP dependency approval, readiness, replacement, and independent stop | Engine embedding and production UI integration remain unverified |
 
 Additional client and framework results appear in their sections. Client versions
@@ -250,6 +252,63 @@ The packaged helper executes as arm64 and as x86_64 under Rosetta. Native Intel
 hardware and interactive reapproval after an update were not tested. Changing
 the helper's code or architecture slice can require an owner access decision;
 see [Keychain access and updates](security.md#stored-secrets-and-private-entry).
+
+## Claude Code
+
+Claude Code 2.1.239 completed eight model-driven MCP calls across the standalone
+and API/web fixtures. The interactive terminal showed `Sonnet 5 with low effort`;
+its session transcript recorded `claude-sonnet-5`.
+
+The session used `--model sonnet --effort low --permission-mode manual`.
+An explicit `--mcp-config` file and `--strict-mcp-config` selected only the test
+server. The JSON used the same `mcpServers` command/arguments shape as the Cursor
+example. An absolute Node executable launched the installed CLI through a
+transparent stdio recorder, with a dedicated daemon endpoint and token file.
+
+Temporary `--settings` rules allowed inspect/wait and required confirmation for
+start/stop. `--setting-sources ""` excluded saved user, project, and local settings.
+All four mutation calls displayed a permission prompt before dispatch. Each was
+approved with `Yes` for that request. This verifies manual client approval;
+no automatic reviewer was used. Sonnet and low effort were available.
+
+Independent HTTP checks verified readiness, web-to-API connectivity, and expected
+numeric and service origins. Stop removed all three application processes,
+their groups, and five preview listeners. Client exit removed the MCP server
+and recorder. The dedicated daemon then shut down and released its listener.
+Settings files remained unchanged, and the temporary fixture trust entry was removed.
+
+See [Claude Code model and effort configuration](https://code.claude.com/docs/en/model-config).
+These checks used macOS 26.5.1 arm64, Node.js 22.23.1, and installed `previewd@0.1.0`.
+Other permission modes, models, databases, and secret workflows were not tested in this client.
+
+## OpenCode
+
+OpenCode 1.18.25 completed the same eight model-driven MCP calls through its
+interactive `--mini` terminal. The session export recorded provider `openai`
+and model `gpt-5.5`. No reasoning variant was overridden.
+
+The session selected a temporary configuration file through `OPENCODE_CONFIG`.
+It defined `mcp.previewd_test` as a local server with an absolute Node command
+array and `enabled: true`. The command launched the installed CLI through a
+transparent stdio recorder, with a separate daemon endpoint and token file.
+
+The resolved `permission` object allowed `previewd_test_preview_inspect` and
+`previewd_test_preview_wait`. It set `previewd_test_preview_start` and
+`previewd_test_preview_stop` to `ask`. Each mutation displayed `Permission required`.
+The pending arguments matched the known fixture, and dispatch followed selection
+of `Allow once`. All four approvals used that per-request control.
+No automatic reviewer or remembered approval was used.
+
+Independent HTTP checks verified readiness, API connectivity, and expected origins.
+Stop removed all three application processes, their groups, and five preview
+listeners. Client exit removed the MCP server and recorder. The separate daemon
+shut down and released its listener. Global configuration files and fixture
+sources remained unchanged.
+
+See [OpenCode permissions](https://dev.opencode.ai/docs/permissions/) for the tested
+configuration syntax. These checks used macOS 26.5.1 arm64, Node.js 22.23.1,
+and installed `previewd@0.1.0`. Other models, permission modes, databases, and
+secret workflows were not tested in this client.
 
 ## Task Monki
 
