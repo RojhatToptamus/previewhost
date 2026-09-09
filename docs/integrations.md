@@ -49,15 +49,15 @@ It does not establish execution support for untested clients.
 | [Cursor](https://cursor.com/docs/context/skills) | Reads `.agents/skills`. Select `/previewhost` in Agent chat. |
 | [OpenCode](https://opencode.ai/docs/skills/) | Reads `.agents/skills`. Ask the agent to load the `previewhost` skill. |
 
-Codex CLI 0.146.0 discovered the installed project skill with previewhost 0.1.0 through `codex exec --ignore-user-config --ephemeral`.
-It selected the skill from its catalog, read the recipe and API references, and created a command recipe from project source.
-Separate host-side inspection validated that recipe.
+Codex CLI 0.146.0 passed a native skill workflow with previewhost 0.1.0 on macOS 26.5.1.
+With explicit `$previewhost` use, it discovered and loaded the installed skill and created a command recipe from a project without one.
+It inspected the recipe, started the preview, waited for readiness, and verified the returned URL's page and health response against the application source.
+After stop, it confirmed stopped state, a closed preview listener, an unreachable URL, and unchanged source files.
+Its sandbox denied `ps`; separate host checks confirmed that no application processes or upstream listeners remained.
 
-Native preview startup remains unverified in the tested loopback-only managed-proxy configuration.
-The proxy reached the daemon, but CLI `list` and `inspect` returned `DAEMON_UNAVAILABLE`.
-The shared previewhost client uses direct `node:http` requests with `agent: false`; it does not route requests through the proxy environment.
-No native start, page/health check, or stop operation completed in that configuration.
-These checks cover explicit `$previewhost` use. Automatic selection and other clients' skill workflows remain unverified.
+The check used Codex workspace-write permissions with direct network access and a separate daemon with source access and execution permission.
+The CLI needs direct loopback access to the daemon. A proxy-only network configuration did not complete this workflow.
+Automatic skill selection and other clients' skill workflows remain unverified.
 
 Skill selection can also follow the task description. Automatic selection depends on the client and request.
 Skill installation does not install previewhost, start its daemon, configure MCP, or grant execution permission.
