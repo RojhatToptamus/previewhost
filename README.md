@@ -140,9 +140,8 @@ $previewhost Preview this project. Create a recipe if none exists, then verify t
 ```
 
 Update the checkout. Repeat the install command to refresh the skill and its references.
-For other clients and tested discovery behavior, see [agent skill integration](docs/integrations.md#agent-skill).
+For remote installation, other clients, and tested discovery behavior, see [agent skill integration](docs/integrations.md#agent-skill).
 For recipe decisions, see [Create or update a preview recipe](docs/recipes.md).
-The remote Git installation check is pending until the skill is available in the remote repository.
 
 ## Use agents, inputs, or stored secrets
 
