@@ -48,7 +48,43 @@ It never reads personal credentials.
 For tests that open managed data or secrets, use `src/testSupport/keychain.ts`.
 The production binary accepts no test Keychain selector.
 
+## Build and install a tarball
+
+Source builds require the tools listed in [Set up development](#set-up-development).
+With GitHub access to the repository, clone the source:
+
+```sh
+git clone https://github.com/RojhatToptamus/previewhost.git
+cd previewhost
+```
+
+Install build dependencies:
+
+```sh
+npm ci
+```
+
+Build the package and create a tarball:
+
+```sh
+npm pack
+```
+
+From your application directory, install that tarball.
+Replace the path and `VERSION` with the file reported by `npm pack`:
+
+```sh
+npm install /absolute/path/to/previewhost/previewhost-VERSION.tgz
+```
+
+Installation from the tarball does not compile native code.
+Continue with the [README quick starts](README.md#use-the-cli).
+Use `./node_modules/.bin/previewhost` for this local CLI installation.
+
 ## Verify a macOS release
+
+See the [release pipeline](docs/releasing.md) for changesets, prerelease promotion,
+GitHub Actions, and the one-time npm/GitHub setup.
 
 Use the local Docker prerequisites above.
 Replace the tarball placeholder with its actual path.
@@ -57,7 +93,7 @@ From the repository directory, run:
 ```sh
 PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
 npm pack --ignore-scripts
-npm run check:package -- /absolute/path/to/previewhost-0.1.0.tgz
+npm run check:package -- /absolute/path/to/previewhost-0.1.0-alpha.0.tgz
 ```
 
 `verify:release` requires macOS and an explicit local Docker Unix socket. It runs
@@ -66,6 +102,7 @@ Engine fail the existing database tests. Any skipped, canceled, failed, or TODO
 test fails the release check, as does a missing test summary.
 
 The package check installs that exact tarball in a temporary project outside this repository.
+It rejects unexpected packaged files and checks the universal Keychain binary and signature.
 It checks public ESM imports, installed CLI static/native startup, MCP discovery
 with an absolute Node executable and minimal PATH, disconnect survival, and cleanup.
 It then installs TypeScript and Node declarations in that project and compiles

@@ -1,12 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { findPackageJSON } from 'node:module';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { connectPreviewDaemon, type ClientOptions } from './client.js';
 import { limits, requestSchemas, secretRequestSchemas, type PreviewApi, type SecretSetupApi } from './contracts.js';
 import { failure, PreviewError } from './errors.js';
 
+const { version } = JSON.parse(readFileSync(findPackageJSON('.', import.meta.url)!, 'utf8')) as { version: string };
+
 /** All tools call the same public API; the MCP host owns tool approval UI. */
 export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi, 'secretsSetup' | 'secretsStatus'>>): McpServer {
-  const server = new McpServer({ name: 'previewhost', version: '0.1.0' }, {
+  const server = new McpServer({ name: 'previewhost', version }, {
     instructions:
       'Use existing task sources with an explicitly started daemon. Commands run as argv without a shell. Use ' +
       '{port} and 127.0.0.1 for listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. ' +

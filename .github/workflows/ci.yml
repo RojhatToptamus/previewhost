@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      publish-plan-artifact-id:
+        type: string
+        required: true
+    outputs:
+      pack-dir-artifact-id:
+        value: ${{ jobs.verify.outputs.pack-dir-artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify macOS package
+    # Colima uses this Intel runner in its own macOS integration suite.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    outputs:
+      pack-dir-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - name: Start local Docker
+        run: |
+          brew install colima docker qemu
+          # VZ is too slow for the real database lifecycle tests on hosted Intel Macs.
+          colima start --runtime docker --vm-type qemu --cpus 2 --memory 4
+          echo "PREVIEWD_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+          docker pull postgres:17-alpine
+          docker pull redis:7-alpine
+      - run: npm run verify:release
+      - name: Pack pull request
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p "$RUNNER_TEMP/previewhost-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/previewhost-package"
+          npm run check:package -- "$RUNNER_TEMP"/previewhost-package/*.tgz
+      - name: Download release plan
+        if: inputs.publish-plan-artifact-id != ''
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ inputs.publish-plan-artifact-id }}
+          path: ${{ runner.temp }}/previewhost-plan
+          merge-multiple: true
+      - name: Select release channel, pack, and verify
+        if: inputs.publish-plan-artifact-id != ''
+        env:
+          npm_config_ignore_scripts: 'true'
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const { name, version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const file = `${process.env.RUNNER_TEMP}/previewhost-plan/publish-plan.json`;
+          const data = JSON.parse(readFileSync(file, 'utf8'));
+          const releases = data.plan.flat();
+          assert.equal(releases.length, 1);
+          assert.match(version, /^\d+\.\d+\.\d+(?:-alpha\.\d+)?$/);
+          assert.deepEqual([releases[0].kind, releases[0].name, releases[0].version], ['publish', name, version], 'Release plan must match the package.');
+          // npm can retain latest on the first alpha; select our channel explicitly.
+          releases[0].tag = version.includes('-') ? 'alpha' : 'latest';
+          writeFileSync(file, JSON.stringify(data));
+          NODE
+          npm run changeset -- pack --from-publish-plan "$RUNNER_TEMP/previewhost-plan/publish-plan.json" --out-dir "$RUNNER_TEMP/previewhost-release"
+          npm run check:package -- "$RUNNER_TEMP"/previewhost-release/packages/*.tgz
+      - name: Upload verified release
+        if: inputs.publish-plan-artifact-id != ''
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: previewhost-release
+          path: ${{ runner.temp }}/previewhost-release
+          if-no-files-found: error
+          retention-days: 30
+      - name: Stop local Docker
+        if: always()
+        run: colima stop

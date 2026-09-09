@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      publish-plan-artifact-id: ${{ steps.mode.outputs.publish-plan-artifact-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - uses: changesets/action/select-mode@v2
+        id: mode
+      - name: Create or update release pull request
+        if: steps.mode.outputs.mode == 'version'
+        uses: changesets/action/version@v2
+        with:
+          script: npm run version:release
+          pr-title: Release previewhost
+          commit-message: Release previewhost
+
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.mode == 'publish'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      publish-plan-artifact-id: ${{ needs.prepare.outputs.publish-plan-artifact-id }}
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install npm with Trusted Publishing support
+        run: npm install --global npm@11
+      - run: npm ci --ignore-scripts
+      - name: Publish verified tarball and create GitHub release
+        uses: changesets/action/publish@v2
+        with:
+          pack-dir-artifact-id: ${{ needs.verify.outputs.pack-dir-artifact-id }}
+        env:
+          npm_config_ignore_scripts: 'true'

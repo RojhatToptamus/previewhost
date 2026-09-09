@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdir, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createPreviewRuntime, connectPreviewDaemon } from 'previewhost';
@@ -48,6 +48,18 @@ try {
   assert.equal(import.meta.resolve('previewhost'), new URL('./node_modules/previewhost/dist/index.js', import.meta.url).href);
   const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   assert.equal(manifest.name, 'previewhost');
+  const inventory = (await readdir(root, { recursive: true, withFileTypes: true }))
+    .filter((entry) => !entry.isDirectory())
+    .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1));
+  const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
+  for (const file of inventory) {
+    assert(allowed.test(file) && !file.includes('.test.'), `Unexpected packaged file: ${file}`);
+  }
+  const keychain = join(root, 'dist/native/keychain');
+  assert((await stat(keychain)).mode & 0o111, 'The packaged Keychain helper must be executable.');
+  assert.deepEqual(execFileSync('/usr/bin/lipo', ['-archs', keychain], { encoding: 'utf8' }).trim().split(/\s+/).sort(), ['arm64', 'x86_64']);
+  execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--all-architectures', keychain]);
+  for (const file of ['dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/supervisor.js', 'examples/static.json', 'examples/command.json', 'examples/server.mjs', 'examples/site/index.html', 'LICENSE', 'NOTICE']) assert(inventory.includes(file), `Missing packaged file: ${file}`);
   assert.deepEqual(manifest.bin, { previewhost: './dist/cli.js' });
   for (const hook of ['preinstall', 'install', 'postinstall']) assert.equal(manifest.scripts[hook], undefined);
   for (const extra of ['typescript', '@types/node', '@modelcontextprotocol/client']) await assert.rejects(stat(join(directory, 'node_modules', extra)));
@@ -120,6 +132,7 @@ try {
   }
   const initialization = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'previewhost-package-review', version: '1.0.0' } });
   assert.equal(initialization.serverInfo.name, 'previewhost');
+  assert.equal(initialization.serverInfo.version, manifest.version);
   rpcChild.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
   const tools = await rpc('tools/list');
   assert.equal(tools.tools.length, 12);

@@ -70,7 +70,7 @@ A command that exits without serving HTTP is not a preview service.
 
 ### Shared-notes task recipe
 
-The packaged [task recipe](../examples/multi-repo/worktrees.mjs) accepts existing
+The [task recipe](../examples/multi-repo/worktrees.mjs) accepts existing
 directories with this shared-notes layout:
 
 ```text
@@ -85,15 +85,17 @@ The backend's preparation must supply `pg` and `redis` before startup.
 The frontend needs no packages.
 The [example guide](../examples/multi-repo/README.md) describes the application and database requirements.
 
-With the daemon active, run this command from the directory with your installed previewhost package.
+The npm package does not include this recipe.
+[Clone and build the source](../CONTRIBUTING.md#build-and-install-a-tarball) to prepare its library import.
+With the daemon active, run this command from the previewhost repository root.
 Replace the frontend and backend placeholders with the existing task paths:
 
 ```sh
-node node_modules/previewhost/examples/multi-repo/worktrees.mjs \
+node examples/multi-repo/worktrees.mjs \
   --name task-notes-42 \
   --frontend /absolute/task-worktrees/frontend-task \
   --backend /absolute/task-worktrees/backend-task \
-  | ./node_modules/.bin/previewhost start --file -
+  | previewhost start --file -
 ```
 
 Open the returned `url`. The page can save a note and read it through both backends.
@@ -101,7 +103,7 @@ The recipe prints a JSON spec with your task name and service paths.
 It performs no source preparation.
 
 `--file PATH` selects an edited shared-notes environment file instead of the
-packaged default. That file supplies commands, bindings, readiness, and database types.
+example default. That file supplies commands, bindings, readiness, and database types.
 The recipe preserves command arguments and unrelated service paths.
 Its directory arguments resolve from the current directory.
 
@@ -151,16 +153,16 @@ native processes stopped.
 For the recipe above, stop the environment from your application directory:
 
 ```sh
-./node_modules/.bin/previewhost stop task-notes-42
+previewhost stop task-notes-42
 ```
 
 Stop preserves source and database data. To permanently remove this task's
 managed database data after stop, run:
 
 ```sh
-./node_modules/.bin/previewhost delete-data task-notes-42
+previewhost delete-data task-notes-42
 ```
 
 Attached services remain under their original owner.
-After all tasks finish with the daemon, run `./node_modules/.bin/previewhost shutdown`.
+After all tasks finish with the daemon, run `previewhost shutdown`.
 See [recovery limits](security.md#recovery) before source removal after a crash.

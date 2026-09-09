@@ -4,6 +4,46 @@ Commands on this page use `previewhost` from PATH.
 For a local installation, use `./node_modules/.bin/previewhost` from your application directory.
 Replace `NAME`, `ATTEMPT_ID`, and `REQUEST_ID` with values from your configuration or command output.
 
+## The client cannot find previewhost
+
+An MCP client can use a different PATH from your terminal.
+From a terminal where previewhost works, find its executable:
+
+```sh
+command -v previewhost
+```
+
+Use the returned absolute path as the MCP `command`. Keep `args` as `["mcp"]`.
+For example:
+
+```json
+{
+  "mcpServers": {
+    "previewhost": {
+      "command": "/absolute/npm-prefix/bin/previewhost",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Replace the example path with the command output.
+The executable also needs `node` on the client's PATH.
+If Node is missing, add its directory to the client's PATH and restart the client.
+The daemon's PATH must also resolve any application commands.
+
+For clients that require an absolute Node command, find Node and the global package directory:
+
+```sh
+node -p process.execPath
+npm root -g
+```
+
+Use the Node path as `command`.
+Set `args` to `["/absolute/global/node_modules/previewhost/dist/cli.js", "mcp"]`.
+Replace `/absolute/global/node_modules` with the directory from `npm root -g`.
+For a local package, use its absolute `node_modules/previewhost/dist/cli.js` path instead.
+
 ## The client cannot find the daemon
 
 Start `previewhost serve` in a foreground terminal.
@@ -214,9 +254,7 @@ The runtime does not retain every previous attempt or log tail.
 
 ## MCP has no tools or reports connection errors
 
-If the client lacks Node on PATH, use an absolute Node executable as its command.
-Pass the installed `previewhost/dist/cli.js` path and `mcp` as arguments.
-Run `node -p process.execPath` in your shell to find Node.
+For executable lookup errors, use the [PATH troubleshooting steps](#the-client-cannot-find-previewhost).
 
 Start the foreground daemon separately.
 MCP stdout must contain only protocol messages.
