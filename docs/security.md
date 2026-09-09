@@ -32,11 +32,11 @@ Private secret forms use separate browser authorization, described below.
 
 The token file uses mode 0600 in an owner-only directory.
 previewd rejects unsafe permissions, wrong ownership, symlinks, and non-regular files.
-Anyone who can read the token has full daemon authority.
+Anyone who can read the token can call every daemon operation.
 The token remains after shutdown so configured clients can reconnect.
 
-Before token access, the daemon excludes its canonical parent directory from
-static previews in that runtime, including resolved aliases.
+Before token access, the daemon excludes the token directory from static previews.
+This also blocks symlinks to that directory within the same runtime.
 Embedded owners can register private directories with `runtime.protectDirectory(path)`.
 Protection remains for the runtime lifetime and blocks access through existing
 static previews. It does not protect hard links, undo earlier exposure, or
@@ -96,13 +96,13 @@ Application attempts and routes remain in memory.
 Restart does not restore native previews or adopt old processes.
 
 After unexpected owner exit, the supervisor detects IPC loss and stops its group.
-If the supervisor fails first, the runtime checks recorded process identity before fallback signaling.
+If the supervisor fails first, the runtime checks the recorded process identity before it stops the group itself.
 A changed process title can prevent that match.
 Normal cleanup through a live supervisor still works.
 
 If ownership cannot be established, previewd reports `CLEANUP_INCOMPLETE` and retains the cleanup handle.
 The name remains unavailable for replacement until `stop` completes cleanup.
-A fresh daemon cannot recover native handles from the previous runtime's memory.
+A new daemon lacks the records needed to retry cleanup of those processes.
 
 If both owner and supervisor die before cleanup, remaining processes can require manual inspection.
 previewd does not infer their ownership after restart.
@@ -168,8 +168,8 @@ It removes owned containers, preserves volumes, and waits for an explicit start.
 Retained names and cleanup errors appear in `get` and `list`.
 
 An Engine request can complete after its caller disconnects.
-previewd records the intended mutation before dispatch and awaits its outcome
-before ordinary cleanup. A missing object alone does not prove that an uncertain
+previewd records the requested change before it sends the Engine request.
+It waits for the result before normal cleanup. A missing object alone does not prove that an uncertain
 creation failed.
 
 Unresolved creation retains its record and reports `CLEANUP_INCOMPLETE`.
@@ -202,7 +202,7 @@ Keep secrets out of command arguments. Read logs only in trusted local clients.
 ## Stored secrets and private entry
 
 User entries use individual, nonsynchronizing items in the default user Keychain.
-The packaged Security.framework helper addresses exact service/account pairs.
+The packaged helper uses macOS Security.framework to access each entry by its service and account names.
 It supports metadata, read, atomic add-if-absent, update-in-place, and exact deletion.
 It does not grant access to all applications.
 
@@ -214,13 +214,13 @@ The helper contains arm64 and x86_64 code for macOS 13 or later.
 It has an ad hoc signature with identifier `dev.previewd.keychain`.
 Package updates or architecture changes can require approval for that helper
 again in Keychain Access. The signing identifier alone does not preserve access.
-An identical binary can move without a code identity change.
+Moving an unchanged helper file preserves its signature.
 The signature does not authenticate JavaScript callers or isolate same-user processes.
 
 Values pass through pipes as base64. This encoding does not encrypt them.
 Helper input, output, and execution time have limits.
 Timeout or cancellation terminates the helper but cannot prove that a dispatched
-Keychain mutation failed. Results retain that uncertainty.
+Keychain write failed. The result reports that the write outcome is unknown.
 
 Private setup uses a public request ID and a separate, unpredictable write grant
 in daemon memory. Owner authorization fixes the mode, names, sources, and recipients.

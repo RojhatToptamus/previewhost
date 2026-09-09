@@ -31,16 +31,17 @@ No input map or data directory exists by default.
 `dockerSocket` selects an explicit local Engine socket and requires `dataDirectory`.
 Its default is the local Docker Desktop socket at `~/.docker/run/docker.sock`.
 
-For `start` and `replace`, the callback receives `operation`, a separate validated
-`spec`, and `signal`. It cannot change execution inputs. Environment bindings
-remain symbolic in this request.
+For `start` and `replace`, the callback receives `operation`, a validated copy of
+`spec`, and `signal`. Changes to this copy do not affect execution.
+Service, input, and secret references have not yet been resolved.
 
 For `delete-data` and `recover-data`, the request contains `operation`, `name`,
 `resources`, and `signal`. The resource summary contains service names and types,
-without credentials. Callbacks must narrow `operation` before they access `spec`.
+without credentials. These requests have no `spec`.
+Check `operation` before you read `spec` in the callback.
 
 For `secrets-setup`, the request contains `mode` (`missing` or `edit`), exact `ids`,
-and `signal`. Missing-value setup also supplies the symbolic `spec`.
+and `signal`. Missing-value setup also supplies `spec` with unresolved references.
 Both modes require owner authorization. A form grant never authorizes execution.
 
 Commands, managed databases, data deletion, and exceptional recovery require
@@ -48,13 +49,18 @@ authorization. An absent callback grants none of these operations. Static and
 attached HTTP previews do not require this callback.
 
 If `signal` aborts, the callback must release its resources. A late approval
-cannot restart a canceled attempt. Approval does not reserve a filesystem snapshot.
+cannot restart a canceled attempt. Source files can change while approval is pending.
 
 `runtime.close()` stops all owned previews and prevents new work. `client.close()`
 only closes client requests. `client.shutdown()` explicitly stops the daemon.
 The MCP interface does not expose daemon shutdown.
 
 ## Specs
+
+Each start or replacement creates an attempt with its own ID.
+A pending start or replacement appears as `candidate`.
+The `active` field identifies the attempt that serves requests.
+During replacement, both can exist under the same preview name.
 
 The fragments below describe each spec type.
 For CLI use, save one complete spec in your application directory.
@@ -121,7 +127,7 @@ The server remains under its original owner after preview stop.
 
 Attachment accepts `127.0.0.1`, `localhost`, or one lowercase `.localhost` label,
 with an explicit HTTP port. All connections use IPv4 loopback.
-The supplied authority becomes the upstream Host header. HTTPS, IPv6, credentials,
+The supplied hostname and port become the upstream Host header. HTTPS, IPv6, credentials,
 paths, queries, and fragments are unsupported.
 
 Command and attach readiness requires HTTP 200–399 response headers. It does not
@@ -186,7 +192,7 @@ listed above but no per-service `name`. Owned resource types are `postgres` and
 
 Missing inputs, invalid references, and service-reference cycles fail before
 resource startup. Public URL references do not create readiness dependencies.
-This permits ordinary frontend/API CORS references in both directions.
+The frontend can receive the API URL while the API receives the frontend origin for CORS.
 previewd does not search `.env` files or forward arbitrary host environment values.
 Application commands can load their own files under ordinary user permissions.
 
@@ -226,7 +232,7 @@ External services remain outside owned stop and deletion operations.
 | `list()` | Current and retained terminal status records. |
 | `wait(name, attemptId, { timeoutMs?, signal? })` | Exact `AttemptResult`. Default and maximum wait: 30 seconds. |
 | `logs(name, attemptId?, maxBytes?)` | `{ name, attemptId, text, truncated }`. Default and maximum: 65,536 bytes. |
-| `cancel(name, attemptId)` | Cancels that pending candidate and joins cleanup. A stale ID fails. |
+| `cancel(name, attemptId)` | Cancels the pending candidate and waits for cleanup. A stale ID fails. |
 | `stop(name, { afterEngineRestart? })` | Stops all applications and owned containers. Preserves data. Repeated stop retries incomplete cleanup. |
 | `deleteData(name)` | Permanently removes a stopped environment's verified owned database data after host authorization. |
 
@@ -247,18 +253,19 @@ Stop can complete while that deletion remains pending. Explicit `deleteData` ret
 Attempt states are `starting`, `ready`, `failed`, `canceled`, `stopped`, and
 `cleanup-incomplete`. `AttemptResult` adds `name`.
 If that attempt remains active, the result also includes its URL.
-`wait` finishes after candidate work and old-target cleanup.
-Its timeout or abort only removes that wait.
+`wait` finishes after startup and any cleanup of the replaced application.
+A timeout or canceled wait leaves the preview running.
 
 During replacement, new requests use the candidate after successful readiness.
-Old requests receive up to one second to drain. The name stays busy through
-retirement. If retirement fails, the new route remains active and status reports
-`cleanup-incomplete`. Further replacement requires a successful stop.
+Existing requests have up to one second to finish. The name stays busy until
+cleanup of the old application finishes. If cleanup fails, the new route remains
+active and status reports `cleanup-incomplete`. Another replacement requires a successful stop.
 
 An environment changes all application routes together. Database resources stay
 shared across active and candidate applications. Candidate failure preserves
-the active application and its databases. A ready owned service loss stops the
-aggregate application. External probes run only at startup.
+the active application and its databases.
+If an owned service fails after startup, previewd stops the environment's owned services.
+External connection checks run only at startup.
 
 Replacement cannot undo source edits, database writes, or migrations performed
 by application code. Changes between an environment and a single preview require
@@ -322,11 +329,11 @@ port, which the startup JSON reports.
 `--env NAME` selects the current value once at owner startup. Missing selected
 keys are errors. Startup JSON reports selected key names without their values.
 `--data-dir` enables owned database storage explicitly. `--docker-socket` requires
-that directory. The runtime does not create data ownership by default.
+that directory. Without `--data-dir`, the daemon cannot create managed databases.
 
 `--allow-exec` grants native execution, managed database operations, and explicit
 data deletion/recovery through the trusted daemon. `stop --after-engine-restart`
-requests only the exceptional recovery described above. It never implies data deletion.
+requests recovery after a Docker Engine restart, as described above. It never implies data deletion.
 
 ## Stored secrets
 
@@ -383,8 +390,10 @@ The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id)`, a
 
 States are `pending`, `saving`, `complete`, `partial`, `canceled`, and `expired`.
 Remaining names have unconfirmed writes. They are not necessarily absent.
-`complete` reports observed presence or completed writes, not issuer validity or
-future read permission. `browser: "failed"` means use hidden CLI input or `--reopen`.
+`complete` means the entries were present or their writes succeeded.
+It does not check whether a credential works with its service or remains accessible later.
+
+`browser: "failed"` means use hidden CLI input or `--reopen`.
 A fresh setup rechecks availability after CLI entry and invalidates an obsolete form.
 
 Save starts no application. Check status before another start/replace with the current spec.
@@ -397,15 +406,14 @@ Updates affect later resolutions. Running applications can retain old values.
 For credentials that must change together, first cancel pending starts.
 Stop all consuming daemons before you update the entries.
 After the update, restart those daemons.
-previewd has no cross-daemon consumer registry.
+previewd does not track secret use across daemons.
 Local removal does not revoke a credential at its issuer.
 
 After use, stop the preview.
 Shut down its daemon.
 To remove the example entry, run `previewd secrets remove shop/dev/token`.
 
-User entries use macOS Keychain through a packaged native helper. Static/attach
-and explicit-input library use do not load it. See [storage and recovery](security.md).
+See [Keychain permissions and recovery](security.md#stored-secrets-and-private-entry).
 
 ## HTTP and MCP
 
@@ -432,7 +440,7 @@ Both `structuredContent` and the text fallback contain the response envelope.
 Tool failures also set `isError: true`.
 
 `POST /secrets/setup` takes `{spec, reopen?}`, `/secrets/status` takes `{id}`,
-and `/secrets/edit` takes an exact secret `{id}`. These use ordinary control authority.
+and `/secrets/edit` takes an exact secret `{id}`. These require the daemon's control token.
 The fixed `GET /secrets`, `/secrets.js`, and `/secrets.css` assets grant no permission.
 Browser `POST /secrets/form`, `/secrets/save`, and `/secrets/cancel` require exact
 Host/Origin and the private one-use grant, independently of the control bearer.
@@ -467,5 +475,5 @@ results. Browser launches are limited to one per second. A save has a 30-second
 deadline and retains partial or uncertain outcomes. Ordinary status and preview
 traffic perform no Keychain reads.
 
-After a lost mutation response, call `get` or `list` before another mutation.
+After a lost response to start, replace, cancel, stop, or delete-data, read `get` or `list` before another attempt.
 A transport failure does not prove that the original operation failed.

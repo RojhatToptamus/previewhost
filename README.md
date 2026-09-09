@@ -7,8 +7,8 @@ from separate repositories or worktrees. Applications and agent hosts can start,
 inspect, replace, and stop previews through an ESM library, CLI, local HTTP API,
 or MCP tools.
 
-Each preview gets a local URL. Environments connect multiple HTTP services to
-PostgreSQL, Redis, or existing services. Replacement keeps the URL and switches
+Each preview gets a local URL. An environment groups HTTP services and their
+databases under one preview name. Replacement keeps the URL and switches
 all application routes after the new services become ready.
 
 ## Install locally
@@ -21,9 +21,11 @@ The package build requires Xcode Command Line Tools.
 Stored secrets and managed databases require macOS 13 or later.
 See [tested platforms and clients](docs/integrations.md).
 
-From this repository, run:
+Clone the repository and build the package:
 
 ```sh
+git clone https://github.com/RojhatToptamus/previewd.git
+cd previewd
 npm ci
 npm pack
 ```
@@ -36,7 +38,7 @@ npm install /absolute/path/to/previewd/previewd-0.1.0.tgz
 ```
 
 `npm pack` builds the package. Installation from the tarball does not compile
-native code. Release checks belong in the [contribution guide](CONTRIBUTING.md#verify-a-macos-release).
+native code. For release verification, follow the [contribution guide](CONTRIBUTING.md#verify-a-macos-release).
 
 ## Start a static preview
 
@@ -150,7 +152,7 @@ Run `node preview.mjs`. The output contains the URL and HTML.
 For a long-lived application, keep the runtime open until application shutdown.
 The embedded runtime does not require a separate daemon.
 See the [API and CLI reference](docs/api.md) for configuration and lifecycle contracts.
-TypeScript consumers need TypeScript and `@types/node` as development dependencies.
+For a TypeScript project, install `typescript` and `@types/node` as development dependencies.
 
 ## License
 

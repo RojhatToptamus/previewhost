@@ -16,7 +16,7 @@ Linux and Windows remain unverified, including static and attached previews.
 | ESM library | Static, command, attach, replacement, cancellation, and cleanup | The application owns the runtime lifetime |
 | CLI and daemon | JSON/YAML environments, selected inputs, authentication, and shutdown | Clients require a separate foreground daemon |
 | MCP SDK | Environment lifecycle, secret setup/status, discovery, and tool errors | Client approval behavior requires a separate host check |
-| Coding-task worktrees | Live edits, replacement, data retention, and source preservation | The host owns preparation and source teardown |
+| Coding-task worktrees | Live edits, replacement, data retention, and source preservation | The host prepares and removes source directories |
 | Task Monki | HTTP attachment, approval, readiness, replacement, and independent stop | Embedded runtime and browser UI integration remain unverified |
 
 The client results below apply to the named versions and configurations.
@@ -37,13 +37,14 @@ A configuration example or successful discovery alone does not establish a worki
 3. Run `node -p process.execPath` to find the absolute Node executable.
 4. Add the configuration for your client below.
 5. Replace `/absolute/node/bin/node` and `/absolute/app` with your Node executable and application directory.
-6. Ask the client to inspect the spec.
-7. Ask the client to start the preview.
-8. Ask the client to wait for the returned candidate ID.
-9. Open the ready URL.
-10. Check the application.
-11. Ask the client to stop the preview.
-12. After you finish, run `./node_modules/.bin/previewd shutdown` from your application directory.
+6. Copy the [packaged command spec](../examples/command.json) into your client request.
+7. Set its `cwd` to `/absolute/app/node_modules/previewd/examples`.
+8. Ask the client to inspect that spec.
+9. Ask the client to start the preview.
+10. Ask the client to call `preview_wait` with the attempt ID from `preview_start`.
+11. Open the returned URL. The example responds with `Hello from previewd.`
+12. Ask the client to stop `node-example`.
+13. After you finish, run `./node_modules/.bin/previewd shutdown` from your application directory.
 
 Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
@@ -71,8 +72,8 @@ args = ["/absolute/app/node_modules/previewd/dist/cli.js", "mcp"]
 
 Codex 0.146.0 with `gpt-5.5` passed standalone-command and API/web workflows
 through `exec` and App Server. Each successful model run called inspect, start,
-wait, and stop for both previews. HTTP checks covered readiness, API connectivity,
-and injected origins. Process groups and listeners closed after stop and daemon shutdown.
+wait, and stop for both previews. HTTP checks covered successful startup, API connectivity,
+and the URLs passed to the applications. Process groups and listeners closed after stop and daemon shutdown.
 
 Approval policy and reviewer selection are separate controls.
 Selecting `auto_review` alone does not prove that automatic review ran.
@@ -161,7 +162,7 @@ Inspect, start, and wait had no observed per-call prompts.
 Both stop calls required manual approval through **Run** before dispatch.
 No automatic-review decision payload was captured.
 
-HTTP checks covered readiness, API connectivity, and injected origins.
+HTTP checks covered successful startup, API connectivity, and the URLs passed to the applications.
 All application processes, MCP connections, and listeners closed after cleanup.
 These IDE checks used Node.js 22.23.1 and no databases or stored secrets.
 
@@ -189,8 +190,8 @@ The client displayed **Sonnet 5 with low effort** and recorded `claude-sonnet-5`
 
 The tested permissions allowed inspect/wait and required approval for start/stop.
 All four start/stop calls required **Yes** for the current request before dispatch.
-This was manual approval. HTTP checks covered readiness, API connectivity, and
-injected origins. Stop and client exit released the application processes, MCP
+This was manual approval. HTTP checks covered successful startup, API connectivity, and
+the URLs passed to the applications. Stop and client exit released the application processes, MCP
 process, and listeners. The separate daemon also shut down.
 
 These checks used Node.js 22.23.1 and installed `previewd@0.1.0`.
@@ -219,14 +220,14 @@ Add this server to your OpenCode configuration:
 }
 ```
 
-OpenCode 1.18.25 with `openai/gpt-5.5` passed both workflows through its interactive
-`--mini` terminal. No reasoning variant override applied.
+OpenCode 1.18.25 with `openai/gpt-5.5` passed standalone-server and API/web
+previews through its interactive `--mini` terminal. No reasoning variant override applied.
 The model called inspect, start, wait, and stop for each preview.
 
 The tested permissions allowed inspect/wait and required approval for start/stop.
 All four start/stop calls required **Allow once** before dispatch.
 No automatic reviewer or saved approval was used.
-HTTP checks covered readiness, API connectivity, and injected origins.
+HTTP checks covered successful startup, API connectivity, and the URLs passed to the applications.
 Stop and client exit released the application processes, MCP process, and listeners.
 The separate daemon also shut down.
 
@@ -237,7 +238,7 @@ See [OpenCode permissions](https://dev.opencode.ai/docs/permissions/).
 ## Private secret setup
 
 Codex App Server 0.146.0 with `gpt-5.5` and Cursor Agent 2026.09.02-c22c1a3
-with **Auto** passed missing-secret setup and startup retry.
+with **Auto** passed the workflow to enter a missing secret and retry startup.
 Save started no application. The retry delivered the value, and logs redacted it.
 Client transcripts contained neither the value nor the private form grant or control token.
 
@@ -267,9 +268,9 @@ results, and the stopped-backend state without application errors.
 
 Codex's command runner passed installation, generation, failure, and cancellation checks.
 Abrupt App Server loss left its setup processes alive.
-The host must resolve that cleanup before conflicting preparation or source removal.
-Setup inside an explicit daemon-owned HTTP startup command survived client loss
-and stopped with its preview. This does not repair external host processes.
+The host must stop those processes before it retries setup or removes their source.
+Setup included in a preview's HTTP startup command continued after the client disconnected
+and stopped with the preview. This does not repair external host processes.
 See [preparation ownership](worktrees.md#prepare-and-start).
 
 ## Task Monki

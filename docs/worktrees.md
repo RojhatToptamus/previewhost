@@ -1,7 +1,7 @@
 # Preview the current coding task
 
 previewd runs existing task directories, including uncommitted files and installed
-packages. The coding host owns Git, source preparation, and source removal.
+packages. The coding host manages Git, installs dependencies, generates files, and removes task directories.
 The daemon owns the preview's application processes, routes, and managed databases.
 
 ## Select the task and its source
@@ -41,14 +41,14 @@ Multiple tasks can share this daemon with different preview names.
 From the coding host, complete these steps:
 
 1. Read `get` or `preview_get` for the task name before another start.
-2. Resolve previous preparation through the host's command handles and cleanup checks.
-3. Before incompatible installation or generation writes, stop affected previews.
+2. Before another setup attempt, wait for previous setup to finish or cancel it through the host.
+3. Before setup changes files used by running previews, stop the affected previews.
 4. Run the project's preparation through the host's command runner.
 5. Wait for successful completion and process cleanup.
 6. If preparation fails or cleanup remains uncertain, stop this procedure.
 7. Inspect the environment spec with the actual service paths.
 8. Start the environment.
-9. Wait for the returned candidate ID.
+9. Call `wait` or `preview_wait` with the returned attempt ID.
 10. Open the ready URL and check the application's browser operation.
 
 The host runner owns cancellation and cleanup of its preparation processes.
@@ -61,8 +61,9 @@ The tested Codex App Server version left setup processes alive after a crash.
 `preview_stop` cannot clean up that external preparation.
 See the [integration result](integrations.md#existing-task-worktrees).
 
-Preparation can form part of an explicit HTTP startup command within its readiness
-deadline. The daemon then owns that command through startup and stop.
+An HTTP startup command can install dependencies or generate files before it serves requests.
+That work must finish within the startup timeout.
+The daemon owns that command through startup and stop.
 This also permits setup that needs the service's managed database credentials.
 Browser builds need their public URLs before the build.
 A command that exits without serving HTTP is not a preview service.
@@ -114,13 +115,14 @@ For a custom daemon, add its `--endpoint` and `--token-file` client arguments.
 Live edits follow the application's reload or restart behavior.
 Startup readiness does not check later edits.
 Application commands can load `.env` files. previewd does not load them itself.
-The application's environment-file precedence can override supplied bindings.
+Some applications give `.env` values priority over variables that previewd supplies.
 
 `{service: api}` selects the candidate dependency and waits for its readiness.
 `{browserUrl: api}` supplies the public alias for browser code.
 Before replacement finishes, that alias can still reach the active application.
 
-Overlapping replacement requires compatible shared build output and dependencies.
+During replacement, the old and new processes can use the same source directory.
+Their dependencies and build output must work for both versions.
 If the application cannot support overlap, stop it before preparation and startup.
 Failed replacement does not restore source files, database writes, or migrations.
 
@@ -129,21 +131,21 @@ Different names keep managed databases separate under one data owner.
 Equal external database URLs still share data.
 Daemon access and native execution provide no security isolation between tasks.
 
-## Stop before source teardown
+## Stop before source removal
 
 1. Find every preview that uses the directory, including previews from other tasks.
 2. Stop each preview and wait for successful cleanup.
 3. Resolve external preparation and the host's other source users.
-4. After all consumers stop, remove or move the directory through the host.
+4. After every process that uses the directory stops, remove or move it through the host.
 
 Current `get` and `list` responses omit source paths.
-The host must retain submitted path associations until active, candidate, and cleanup
-consumers finish. An edited configuration cannot reconstruct those older paths.
-If associations or cleanup are uncertain, retain the source and block conflicting preparation.
+The host must remember which directories each submitted spec uses until every
+related process stops. An edited configuration can omit paths from older attempts.
+If the host cannot identify those directories or processes, keep the source and do not retry setup.
 
 A wait timeout leaves startup active. Cancel requires the exact candidate ID
 and preserves an active attempt. After an uncertain response, read status before
-another mutation. Missing status after a daemon restart does not prove that old
+another start, replacement, or stop. Missing status after a daemon restart does not prove that old
 native processes stopped.
 
 For the recipe above, stop the environment from your application directory:

@@ -50,7 +50,7 @@ From `node_modules/previewd/examples/multi-repo`, run this command in the first 
 npm run serve
 ```
 
-The owner stays in the foreground.
+The daemon stays in the foreground.
 It permits execution of the example code as your user, without a sandbox.
 It stores private data records under `.local/data`.
 Its token file is `.local/token`.
@@ -69,14 +69,19 @@ The note list shows the API response.
 The report shows the PostgreSQL count and the Redis value from the separate reporting service.
 
 Both backends permit requests from the frontend's numeric and readable origins.
-Internal service references use numeric candidate addresses.
-The public browser references do not add readiness dependencies.
+Each backend receives the connection URLs for the services it needs.
+The frontend receives public URLs for browser requests.
 Each `/ready` route checks its dependencies before it returns success.
 
-If another owner uses port 9400, select a different control port:
+If another daemon uses port 9400, start this daemon on a different control port:
 
 ```sh
 npm run serve -- --port 9401
+```
+
+In the second terminal, start the preview with that endpoint:
+
+```sh
 npm start -- --endpoint http://127.0.0.1:9401
 ```
 
@@ -95,12 +100,11 @@ npm run replace
 Reload the browser after the replacement completes.
 All three service labels show `v2`, and the existing notes remain.
 The application URLs stay the same during replacement.
-A candidate failure before cutover leaves the active application available.
+If the new services fail before requests switch to them, the old application remains available.
 
 The API creates `previewd_demo_notes` with `CREATE TABLE IF NOT EXISTS` during its own startup.
 previewd does not run a migration engine.
-Application writes and schema changes are not part of route rollback.
-PostgreSQL owns the notes.
+A failed replacement does not undo database writes or schema changes.
 A cache error after a successful write returns the saved note with `cacheUpdated: false`.
 
 ## Stop and remove data
@@ -112,7 +116,7 @@ npm run stop
 ```
 
 PostgreSQL and Redis data remain available for the next start.
-An owner restart also preserves this data.
+A daemon restart also preserves this data.
 
 The next command permanently removes this environment's PostgreSQL and Redis data.
 After the environment stops, run:
@@ -121,7 +125,7 @@ After the environment stops, run:
 npm run delete-data
 ```
 
-To close the owner, run:
+To shut down the daemon, run:
 
 ```sh
 npm run shutdown
@@ -131,7 +135,7 @@ npm run shutdown
 
 An existing Compose stack can own the PostgreSQL and Redis services.
 Its database ports must publish on numeric `127.0.0.1` endpoints.
-If you ran the owned-database example, stop it and close its owner first:
+If you ran the owned-database example, stop it and shut down its daemon first:
 
 ```sh
 npm run stop
@@ -139,7 +143,7 @@ npm run shutdown
 ```
 
 Change the environment name in `environment.yaml` to `shared-notes-external`.
-This keeps the original environment's retained data separate from the external bindings.
+The original environment's data remains available under `shared-notes`.
 Under `services`, replace the two resource definitions in `environment.yaml`:
 
 ```yaml
@@ -155,7 +159,7 @@ Before the daemon starts, export `DEMO_DATABASE_URL` and `DEMO_REDIS_URL` in its
 Use existing local database credentials, explicit ports, and valid database paths.
 The selected PostgreSQL database must permit the API to create its demo table.
 Use a database intended for this example.
-Then start the owner with those selected inputs:
+Then start the daemon with those selected inputs:
 
 ```sh
 npm run serve -- --env DEMO_DATABASE_URL --env DEMO_REDIS_URL
@@ -170,7 +174,6 @@ npm exec -- previewd get shared-notes-external --token-file .local/token
 npm exec -- previewd stop shared-notes-external --token-file .local/token
 ```
 
-The consumers keep their existing service bindings.
 previewd checks the external connections but does not stop them or remove their data.
 After use, run `npm run shutdown` to close the daemon.
 The external database owner remains responsible for its demo table and data.

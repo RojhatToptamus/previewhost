@@ -96,7 +96,7 @@ To stop the whole preview, run `previewd stop NAME`.
 
 For environments, status includes `active.services`, `candidate.services`, or `latest.services`.
 Each service reports its state and error. Logs include service prefixes.
-A failed prerequisite can prevent dependent services from startup.
+If a dependency fails to start, services that need it cannot start.
 
 For a missing selected input, supply it to the daemon with `serve --env NAME`.
 Only selected values reach `{fromEnv: NAME}` bindings.
@@ -110,9 +110,9 @@ A reachable TCP port does not prove successful authentication.
 
 ## Replacement or cleanup is incomplete
 
-A candidate failure before cutover preserves the active route.
-A cleanup failure after cutover leaves the new route active and reports the error.
-Replacement does not roll back after cutover.
+If the new application fails before requests switch to it, the old application remains available.
+If cleanup of the old application fails after the switch, the new application remains active.
+Status reports the cleanup error.
 
 Read the error before another `previewd stop NAME` attempt.
 If the error identifies a process group, inspect its members:
@@ -126,7 +126,7 @@ A port, process name, or directory alone does not establish ownership.
 If ownership is uncertain, leave the processes intact until you identify their owner.
 
 Stop can complete after the owned processes exit.
-A daemon restart loses native cleanup handles and cannot repair an unknown group.
+A daemon restart loses the process records needed for cleanup. It cannot identify an unknown group's owner.
 
 ## Stored secrets are missing or inaccessible
 
@@ -179,7 +179,7 @@ previewd stop NAME --after-engine-restart
 previewd get NAME
 ```
 
-The flag asserts that the Engine restart occurred. It does not restart Docker.
+Use this flag only after the Engine restart finishes. The flag does not restart Docker.
 A previewd restart alone does not meet this prerequisite.
 A changed Engine or conflicting object identity still prevents cleanup.
 Broad Docker prune or manual record deletion bypasses ownership checks and cannot repair this uncertainty.
