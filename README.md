@@ -13,13 +13,14 @@ all application routes after the new services become ready.
 
 ## Install locally
 
-This package is not published to npm. Build a tarball from this repository.
+Published alpha releases use `npm install previewhost@alpha`.
+To install from source, build a tarball from this repository.
 
 The initial release supports macOS and requires Node.js 22.23 or later.
 Native commands require `/bin/ps` and `/usr/sbin/lsof`.
 The package build requires Xcode Command Line Tools.
 Stored secrets and managed databases require macOS 13 or later.
-See [tested platforms and clients](docs/integrations.md).
+See [tested platforms and clients](https://github.com/RojhatToptamus/previewhost/blob/main/docs/integrations.md).
 
 Clone the repository and build the package:
 
@@ -36,11 +37,11 @@ From your application directory, install the generated tarball.
 Replace `/absolute/path/to/previewhost` with the repository path:
 
 ```sh
-npm install /absolute/path/to/previewhost/previewhost-0.1.0.tgz
+npm install /absolute/path/to/previewhost/previewhost-0.1.0-alpha.0.tgz
 ```
 
 `npm pack` builds the package. Installation from the tarball does not compile
-native code. For release verification, follow the [contribution guide](CONTRIBUTING.md#verify-a-macos-release).
+native code. For release verification, follow the [contribution guide](https://github.com/RojhatToptamus/previewhost/blob/main/CONTRIBUTING.md#verify-a-macos-release).
 
 ## Start a static preview
 
@@ -71,7 +72,7 @@ To stop the preview and shut down the daemon, run:
 ```
 
 A client disconnect leaves previews active. Stop preserves source files.
-The [troubleshooting guide](docs/troubleshooting.md) covers port conflicts and connection errors.
+The [troubleshooting guide](https://github.com/RojhatToptamus/previewhost/blob/main/docs/troubleshooting.md) covers port conflicts and connection errors.
 
 ## Run a development server
 
@@ -93,7 +94,7 @@ In the second terminal, start the packaged Node server:
 
 Open the returned `url`. The example needs no additional packages.
 Commands receive `PORT`, `HOST=127.0.0.1`, and `PREVIEW_URL`.
-See the [framework configurations](docs/integrations.md#framework-configuration) for Vite, Next.js, and Python.
+See the [framework configurations](https://github.com/RojhatToptamus/previewhost/blob/main/docs/integrations.md#framework-configuration) for Vite, Next.js, and Python.
 
 To read logs and stop the example, run:
 
@@ -105,7 +106,7 @@ To read logs and stop the example, run:
 
 ## Connect services from separate repositories
 
-The [shared-notes example](examples/multi-repo/README.md) runs a frontend and two
+The [shared-notes example](https://github.com/RojhatToptamus/previewhost/blob/main/examples/multi-repo/README.md) runs a frontend and two
 backends with shared PostgreSQL and Redis data. Its guide includes dependencies,
 startup, replacement, and cleanup.
 
@@ -114,7 +115,7 @@ Managed databases require local Docker Engine, cached images, an explicit privat
 `delete-data` permanently removes a stopped environment's owned data as a separate operation.
 Attached HTTP servers and databases remain under their original owner.
 
-For existing task worktrees, follow the [coding-task workflow](docs/worktrees.md).
+For existing task worktrees, follow the [coding-task workflow](https://github.com/RojhatToptamus/previewhost/blob/main/docs/worktrees.md).
 The coding host owns source preparation and removal. Stop every preview that
 uses a directory before the host removes it.
 
@@ -124,7 +125,7 @@ The `previewhost` skill operates previews and creates recipes for existing proje
 It requires an installed previewhost package, prepared project dependencies, and a separate daemon with access to the project sources.
 The agent needs loopback access to the daemon. Command previews also require execution permission.
 See [package installation](#install-locally) and [daemon setup](#run-a-development-server).
-MCP also requires a separate [client connection](docs/integrations.md#connect-an-mcp-client).
+MCP also requires a separate [client connection](https://github.com/RojhatToptamus/previewhost/blob/main/docs/integrations.md#connect-an-mcp-client).
 
 From your application directory, install the skill for Codex:
 
@@ -140,15 +141,15 @@ $previewhost Preview this project. Create a recipe if none exists, then verify t
 ```
 
 Repeat the install command to refresh the skill and its references.
-For remote installation, other clients, and tested discovery behavior, see [agent skill integration](docs/integrations.md#agent-skill).
-For recipe decisions, see [Create or update a preview recipe](docs/recipes.md).
+For remote installation, other clients, and tested discovery behavior, see [agent skill integration](https://github.com/RojhatToptamus/previewhost/blob/main/docs/integrations.md#agent-skill).
+For recipe decisions, see [Create or update a preview recipe](https://github.com/RojhatToptamus/previewhost/blob/main/docs/recipes.md).
 
 ## Use agents, inputs, or stored secrets
 
-- [Agent integration guide](docs/integrations.md): MCP configuration, tested clients, and approval behavior.
-- [Environment bindings](docs/api.md#environment-specs): connect services and pass selected environment inputs.
-- [Stored secrets](docs/api.md#stored-secrets): select Keychain entries and enter missing values through a private browser form.
-- [Security guide](docs/security.md): execution permissions, secret access, and recovery limits.
+- [Agent integration guide](https://github.com/RojhatToptamus/previewhost/blob/main/docs/integrations.md): MCP configuration, tested clients, and approval behavior.
+- [Environment bindings](https://github.com/RojhatToptamus/previewhost/blob/main/docs/api.md#environment-specs): connect services and pass selected environment inputs.
+- [Stored secrets](https://github.com/RojhatToptamus/previewhost/blob/main/docs/api.md#stored-secrets): select Keychain entries and enter missing values through a private browser form.
+- [Security guide](https://github.com/RojhatToptamus/previewhost/blob/main/docs/security.md): execution permissions, secret access, and recovery limits.
 
 previewhost does not load `.env` files. Application commands can load their own files.
 The daemon selects environment inputs and secret names before clients use them.
@@ -178,7 +179,7 @@ try {
 Run `node preview.mjs`. The output contains the URL and HTML.
 For a long-lived application, keep the runtime open until application shutdown.
 The embedded runtime does not require a separate daemon.
-See the [API and CLI reference](docs/api.md) for configuration and lifecycle contracts.
+See the [API and CLI reference](https://github.com/RojhatToptamus/previewhost/blob/main/docs/api.md) for configuration and lifecycle contracts.
 For a TypeScript project, install `typescript` and `@types/node` as development dependencies.
 
 ## Move from previewd
@@ -195,7 +196,7 @@ The default remains `~/.local/share/previewd/token`.
 No data-directory move or Keychain migration is required.
 
 If data lives inside an installed package directory, retain that directory until you move the data separately.
-See [retained storage identifiers](docs/security.md#retained-storage-identifiers).
+See [retained storage identifiers](https://github.com/RojhatToptamus/previewhost/blob/main/docs/security.md#retained-storage-identifiers).
 
 ## License
 

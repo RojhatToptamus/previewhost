@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      publish-plan-artifact-id:
+        type: string
+        required: true
+    outputs:
+      pack-dir-artifact-id:
+        value: ${{ jobs.verify.outputs.pack-dir-artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify macOS package
+    # Colima uses this Intel runner in its own macOS integration suite.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    outputs:
+      pack-dir-artifact-id: ${{ steps.pack.outputs.pack-dir-artifact-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - name: Start local Docker
+        run: |
+          brew install colima docker
+          colima start --runtime docker --cpu 2 --memory 4
+          echo "PREVIEWD_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+          docker pull postgres:17-alpine
+          docker pull redis:7-alpine
+      - run: npm run verify:release
+      - name: Pack pull request
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p "$RUNNER_TEMP/previewhost-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/previewhost-package"
+          npm run check:package -- "$RUNNER_TEMP"/previewhost-package/*.tgz
+      - name: Pack release
+        if: inputs.publish-plan-artifact-id != ''
+        id: pack
+        uses: changesets/action/pack@v2
+        with:
+          publish-plan-artifact-id: ${{ inputs.publish-plan-artifact-id }}
+        env:
+          npm_config_ignore_scripts: 'true'
+      - name: Download release for verification
+        if: steps.pack.outputs.pack-dir-artifact-id != ''
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.pack.outputs.pack-dir-artifact-id }}
+          path: ${{ runner.temp }}/previewhost-release
+          merge-multiple: true
+      - name: Verify release tag and exact uploaded tarball
+        if: steps.pack.outputs.pack-dir-artifact-id != ''
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const { name, version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const { plan } = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/previewhost-release/publish-plan.json`, 'utf8'));
+          const releases = plan.flat();
+          assert.equal(releases.length, 1);
+          const expectedTag = version.includes('-') ? 'alpha' : 'latest';
+          assert(!version.includes('-') || /^\d+\.\d+\.\d+-alpha\.\d+$/.test(version));
+          assert.deepEqual([releases[0].kind, releases[0].name, releases[0].version, releases[0].tag], ['publish', name, version, expectedTag], 'Release plan must match the package version and intended npm tag.');
+          NODE
+          npm run check:package -- "$RUNNER_TEMP"/previewhost-release/packages/*.tgz
+      - name: Stop local Docker
+        if: always()
+        run: colima stop
