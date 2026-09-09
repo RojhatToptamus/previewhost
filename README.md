@@ -2,177 +2,141 @@
 
 Local HTTP previews for applications and coding agents.
 
-previewd serves static files, runs development servers across repositories, and
-connects them to local PostgreSQL, Redis, or existing services. Each preview gets
-a URL. An environment replaces its application routes together after every
-candidate service is ready.
+previewd serves static files, runs development servers, and connects services
+from separate repositories or worktrees. Applications and agent hosts can start,
+inspect, replace, and stop previews through an ESM library, CLI, local HTTP API,
+or MCP tools.
 
-The TypeScript library owns the runtime. A foreground daemon shares that runtime
-with the CLI and MCP tools. An application can use any interface without a model
-API, provider account, or vendor SDK.
+Each preview gets a local URL. Environments connect multiple HTTP services to
+PostgreSQL, Redis, or existing services. Replacement keeps the URL and switches
+all application routes after the new services become ready.
 
 ## Install locally
 
-This repository is not published to npm. Install its local tarball.
+This package is not published to npm. Build a tarball from this repository.
 
-The initial release targets macOS and needs Node.js 22.23 or later. Native commands
-require `/bin/ps` and `/usr/sbin/lsof`. See [tested support](docs/integrations.md).
-Stored secrets and managed database credentials require macOS 13 or later.
-Building the packaged Keychain helper requires Xcode Command Line Tools.
-Installing the tarball does not compile native code.
+The initial release supports macOS and requires Node.js 22.23 or later.
+Native commands require `/bin/ps` and `/usr/sbin/lsof`.
+The package build requires Xcode Command Line Tools.
+Stored secrets and managed databases require macOS 13 or later.
+See [tested platforms and clients](docs/integrations.md).
 
 From this repository, run:
 
 ```sh
 npm ci
-npm run verify
 npm pack
 ```
 
-Developer verification can skip local Docker suites. For a release candidate, use
-the [macOS release checks](CONTRIBUTING.md#verify-a-macos-release), which require zero skips
-and test the tarball in a separate consumer.
-
-From your application directory, install the generated tarball:
+From your application directory, install the generated tarball.
+Replace `/absolute/path/to/previewd` with the repository path:
 
 ```sh
 npm install /absolute/path/to/previewd/previewd-0.1.0.tgz
 ```
 
-Use `./node_modules/.bin/previewd` from that directory. For a shell-wide command,
-install the same tarball with `npm install --global /absolute/path/to/previewd-0.1.0.tgz`.
+`npm pack` builds the package. Installation from the tarball does not compile
+native code. Release checks belong in the [contribution guide](CONTRIBUTING.md#verify-a-macos-release).
 
 ## Start a static preview
 
-In one terminal, start the owner from your application directory:
+From your application directory, start the daemon in the first terminal:
 
 ```sh
 ./node_modules/.bin/previewd serve --root "$PWD"
 ```
 
-The daemon stays in the foreground. Its output identifies the control endpoint
-and token file. It does not start automatically from a client command.
+The daemon stays in the foreground. It prints its control endpoint and token
+file path. CLI and MCP clients require this separate daemon.
 
-In another terminal, use the packaged example:
+In a second terminal, open the same application directory and run:
 
 ```sh
 ./node_modules/.bin/previewd start --file node_modules/previewd/examples/static.json
-./node_modules/.bin/previewd list
+```
+
+Open the `url` from the returned JSON in a browser.
+It serves the packaged example page.
+Source paths in a JSON or YAML file resolve relative to that file.
+
+To stop the preview and shut down the daemon, run:
+
+```sh
 ./node_modules/.bin/previewd stop example
 ./node_modules/.bin/previewd shutdown
 ```
 
-`start` returns JSON with the ready URL. Open that URL in a browser.
-Source paths in a JSON or YAML file resolve relative to that file.
+A client disconnect leaves previews active. Stop preserves source files.
+The [troubleshooting guide](docs/troubleshooting.md) covers port conflicts and connection errors.
 
 ## Run a development server
 
-For trusted local code, start the daemon with execution permission:
+Native commands require permission to execute code as your user.
+`--allow-exec` grants this permission and managed database operations, including explicit data deletion and recovery.
+It does not provide a sandbox. Project dependencies must already exist.
+
+After the previous daemon stops, run this command from your application directory:
 
 ```sh
 ./node_modules/.bin/previewd serve --root "$PWD" --allow-exec
 ```
 
-Then run the packaged Node example:
+In the second terminal, start the packaged Node server:
 
 ```sh
 ./node_modules/.bin/previewd start --file node_modules/previewd/examples/command.json
-./node_modules/.bin/previewd logs node-example
-./node_modules/.bin/previewd stop node-example
 ```
 
-`--allow-exec` grants ordinary execution as your user and explicit database
-deletion/recovery operations. It is not a sandbox.
-The command receives `PORT`, `HOST=127.0.0.1`, and `PREVIEW_URL`.
-Dependencies must already exist. previewd does not install them.
+Open the returned `url`. The example needs no additional packages.
+Commands receive `PORT`, `HOST=127.0.0.1`, and `PREVIEW_URL`.
+See the [framework configurations](docs/integrations.md#framework-configuration) for Vite, Next.js, and Python.
 
-## Run a multi-repository environment
-
-An environment connects services from separate live directories. The numeric
-URL reaches its `primary` service. Each HTTP service also gets a browser alias,
-such as `shared-notes--api.localhost`, on the same preview port.
-
-The packaged [multi-repository example](examples/multi-repo/README.md) contains a
-frontend, two backends, PostgreSQL, and Redis. The backends share the same data.
-Its README lists the Docker image prerequisites and startup commands.
-
-```yaml
-name: shop
-type: environment
-primary: web
-services:
-  database: {type: postgres}
-  api:
-    type: command
-    cwd: ../backend
-    command: [node, server.mjs]
-    env:
-      DATABASE_URL: {service: database}
-      ALLOWED_ORIGIN: {browserUrl: web}
-    readyPath: /ready
-  web:
-    type: command
-    cwd: ../frontend
-    command: [node, server.mjs]
-    env:
-      API_URL: {service: api}
-      PUBLIC_API_URL: {browserUrl: api}
-```
-
-Managed databases require an explicit private `--data-dir`, local Docker Engine,
-and execution permission. `--env NAME` selects an owner environment input for
-`{fromEnv: NAME}` references. previewd does not load `.env` files. Application commands can.
-
-Stop preserves database data. `previewd delete-data NAME` permanently removes a
-stopped environment's owned data after host authorization. Attached databases
-remain under their original owner.
-
-## Preview existing task worktrees
-
-Use the directories already supplied by the coding host, including uncommitted
-changes and installed packages. Keep one preview name for the continuing task's
-data. Stop all consuming previews before the host removes their source.
-
-The [coding-task workflow](docs/worktrees.md) includes a runnable shared-notes
-recipe for existing frontend/backend worktrees. It uses the current CLI or MCP
-environment operations without another checkout or workspace owner.
-
-## Supply stored secrets
-
-Store an entry through hidden terminal input, then select its exact name for the daemon:
+To read logs and stop the example, run:
 
 ```sh
-previewd secrets set shop/dev/token
-previewd serve --root "$PWD" --allow-exec --secret shop/dev/token
+./node_modules/.bin/previewd logs node-example
+./node_modules/.bin/previewd stop node-example
+./node_modules/.bin/previewd shutdown
 ```
 
-Bind it only where needed in a command's `env`:
+## Connect services from separate repositories
 
-```yaml
-API_TOKEN: {secret: shop/dev/token}
-```
+The [shared-notes example](examples/multi-repo/README.md) runs a frontend and two
+backends with shared PostgreSQL and Redis data. Its guide includes dependencies,
+startup, replacement, and cleanup.
 
-Values remain in individual macOS Keychain items. Names are ordinary visible
-metadata, with no directory inheritance. Existing literals and `{fromEnv: NAME}`
-remain available. `--allow-exec` selects no stored secrets by itself.
+Managed databases require local Docker Engine, cached images, an explicit private
+`--data-dir`, and execution permission. Stop preserves their data.
+`delete-data` permanently removes a stopped environment's owned data as a separate operation.
+Attached HTTP servers and databases remain under their original owner.
 
-For missing entries, use `previewd secrets setup --file preview.yaml` or the
-`preview_secrets_setup` MCP tool. The daemon opens a private local browser form.
-Saving starts no code. Check setup status, then retry normal startup.
-MCP receives names and status, never values or the form's write permission.
-See [secret commands and limits](docs/api.md#stored-secrets) and the
-[trust boundary](docs/security.md#stored-secrets-and-private-entry).
+For existing task worktrees, follow the [coding-task workflow](docs/worktrees.md).
+The coding host owns source preparation and removal. Stop every preview that
+uses a directory before the host removes it.
+
+## Use agents, inputs, or stored secrets
+
+- [Agent integration guide](docs/integrations.md): MCP configuration, tested clients, and approval behavior.
+- [Environment bindings](docs/api.md#environment-specs): connect services and pass selected environment inputs.
+- [Stored secrets](docs/api.md#stored-secrets): select Keychain entries and enter missing values through a private browser form.
+- [Security guide](docs/security.md): execution permissions, secret access, and recovery limits.
+
+previewd does not load `.env` files. Application commands can load their own files.
+The daemon selects environment inputs and secret names before clients use them.
 
 ## Embed the library
 
+From your application directory, save this code as `preview.mjs`.
+It serves the packaged example, makes one HTTP request, and closes the runtime:
+
 ```js
+import { fileURLToPath } from 'node:url';
 import { createPreviewRuntime } from 'previewd';
 
-const runtime = await createPreviewRuntime({ allowedRoots: [process.cwd()] });
+const directory = fileURLToPath(new URL('./node_modules/previewd/examples/site', import.meta.url));
+const runtime = await createPreviewRuntime({ allowedRoots: [directory] });
 try {
-  const started = await runtime.start({
-    name: 'site', type: 'static', directory: process.cwd(),
-  });
+  const started = await runtime.start({ name: 'site', type: 'static', directory });
   const result = await runtime.wait('site', started.candidate.id);
   if (result.state !== 'ready') throw new Error(result.error?.message ?? result.state);
   console.log(result.url);
@@ -182,33 +146,13 @@ try {
 }
 ```
 
+Run `node preview.mjs`. The output contains the URL and HTML.
 For a long-lived application, keep the runtime open until application shutdown.
-The packaged [library example](examples/library.mjs) performs one request and then closes it.
-`loadPreviewSpec(file)` uses the same JSON/YAML file loader as the CLI.
+The embedded runtime does not require a separate daemon.
+See the [API and CLI reference](docs/api.md) for configuration and lifecycle contracts.
 TypeScript consumers need TypeScript and `@types/node` as development dependencies.
 
-## Behavior
+## License
 
-- Names identify previews. Attempt IDs identify individual starts and replacements.
-- Failed startup leaves no public listener. Candidate failure before replacement cutover keeps the active preview.
-- If old-resource cleanup fails after cutover, the new route stays active and reports incomplete cleanup.
-- Stop closes owned listeners, native process groups, and managed database containers. Database data remains available for the next start.
-- Attached HTTP servers and databases remain running.
-- Source directories remain live and caller-owned. Stop never deletes them.
-- URLs stay stable across replacement, but can change after stop or daemon restart.
-- A disconnected CLI or MCP client leaves daemon previews running.
-- Application attempts and routes stay in memory. Restart does not restore native previews.
-- Private data records retain exact database ownership. Recovery removes owned containers and preserves their volumes.
-- An uncertain Docker creation can require operator recovery. Status retains the error and cleanup authority.
-
-## Documentation
-
-- [API and CLI reference](docs/api.md)
-- [Agent clients, frameworks, and tested support](docs/integrations.md)
-- [Existing coding-task worktrees](docs/worktrees.md)
-- [Ownership, security, and recovery](docs/security.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Contribution guide](CONTRIBUTING.md)
-
-The gateway and native supervisor adapt narrow MIT-licensed Task Monki behavior.
-See [NOTICE](NOTICE). previewd does not include the Task Monki workflow engine.
+previewd uses the MIT license. The gateway and native supervisor adapt MIT-licensed
+code from Task Monki. See [NOTICE](NOTICE) for attribution.

@@ -1,8 +1,8 @@
 # Preview the current coding task
 
-previewd runs the task directories supplied by the coding host, including
-uncommitted files and existing packages. The host owns Git and source lifetime.
-The daemon owns application processes, routes, and managed databases.
+previewd runs existing task directories, including uncommitted files and installed
+packages. The coding host owns Git, source preparation, and source removal.
+The daemon owns the preview's application processes, routes, and managed databases.
 
 ## Select the task and its source
 
@@ -10,67 +10,67 @@ The daemon owns application processes, routes, and managed databases.
 2. Choose one preview name from the host's stable task identity.
 3. Retain the submitted service paths and preview name in the host's task context.
 4. Read the project commands and the selected environment file.
-5. Verify each service path and its command entrypoint.
+5. Check each service path and its command entrypoint.
 
 Branches do not need matching names. One repository can supply several services.
-Relative config paths resolve from the config file, not from a repository selector.
-An absolute command entrypoint still selects that absolute file after a `cwd` change.
+Paths in a configuration file resolve relative to that file.
+An absolute command entrypoint still selects that file after a `cwd` change.
 
-If no suitable checkout exists, use the source owner's existing preparation tools.
-Creating another checkout is unnecessary for an existing task directory.
-previewd performs no clone, checkout, reset, clean, or source deletion.
+If no suitable checkout exists, use the source owner's preparation tools.
+previewd does not create checkouts or change Git state.
 
 ## Prepare and start
 
-The daemon must already run under its selected owner. For trusted task code,
-the owner can admit a parent containing the task directories:
+The example below uses a parent directory that contains the task worktrees.
+Replace both `/absolute/...` paths with your source parent and private data directory.
+Keep the data directory outside any task directory that the host can remove.
+Managed databases also require the [database prerequisites](../examples/multi-repo/README.md#install-the-dependencies).
+
+In a separate terminal, start the daemon:
 
 ```sh
 previewd serve --root /absolute/task-worktrees --allow-exec \
   --data-dir /absolute/private-preview-data
 ```
 
-The owner remains alive after individual CLI or MCP clients disconnect.
-The private data directory belongs outside task directories that the host can remove.
-Multiple tasks can share this owner with different preview names.
+`previewd` must be on PATH. A local installation also provides
+`./node_modules/.bin/previewd` from the application directory.
+`--allow-exec` permits ordinary execution as your user, without a sandbox.
+Multiple tasks can share this daemon with different preview names.
+
+From the coding host, complete these steps:
 
 1. Read `get` or `preview_get` for the task name before another start.
-2. Resolve any previous preparation through the host's existing command handles and cleanup checks.
-3. If installation or generation is necessary, stop affected previews before incompatible writes.
-4. Run the project's preparation through the host's command runner and await successful completion and cleanup. Stop this procedure on failure or unresolved cancellation.
-5. Inspect one environment spec with the actual service paths.
-6. Start the environment and wait for the returned attempt ID.
-7. Open the ready URL and test the application's browser operation.
+2. Resolve previous preparation through the host's command handles and cleanup checks.
+3. Before incompatible installation or generation writes, stop affected previews.
+4. Run the project's preparation through the host's command runner.
+5. Wait for successful completion and process cleanup.
+6. If preparation fails or cleanup remains uncertain, stop this procedure.
+7. Inspect the environment spec with the actual service paths.
+8. Start the environment.
+9. Wait for the returned candidate ID.
+10. Open the ready URL and check the application's browser operation.
 
-A host runner must own cancellation and cleanup of its setup processes.
-previewd adds no installer. Explicit project commands can install packages or
-generate files as part of their intended work.
+The host runner owns cancellation and cleanup of its preparation processes.
+After a lost connection, check the original command through that host.
+While cleanup is uncertain, retain source and block conflicting installation,
+generation, or build retries. A port, directory, or process name alone does not
+establish process ownership.
 
-Normal cancellation does not prove cleanup after abrupt host loss. After a lost
-connection, reconcile the original command through its host before another preparation attempt.
-While cleanup is uncertain, do not remove or move source, or retry conflicting
-installation, generation, or builds. A failure permits a retry only after the host
-has resolved the failed command's cleanup. Do not infer process ownership from a
-port, directory, or process name; use the host's existing ownership mechanisms.
+The tested Codex App Server version left setup processes alive after a crash.
+`preview_stop` cannot clean up that external preparation.
+See the [integration result](integrations.md#existing-task-worktrees).
 
-Codex App Server crash cleanup remains unresolved in the tested version. These
-rules prevent conflicting follow-up work; they do not stop surviving Codex processes.
-`preview_stop` cleans up previewd-owned work, not external host preparation.
-
-Preparation can run inside an explicit HTTP application startup command when it
-belongs to that startup and fits the readiness deadline. The daemon then owns
-that process through readiness and stop. Independent installation and generation
-can remain with the coding host.
-
-Setup that needs managed database credentials can run in its owning service's
-startup command before HTTP readiness. Browser builds need their public URLs
-before the build. A command that exits successfully without serving HTTP is not
-a preview service.
+Preparation can form part of an explicit HTTP startup command within its readiness
+deadline. The daemon then owns that command through startup and stop.
+This also permits setup that needs the service's managed database credentials.
+Browser builds need their public URLs before the build.
+A command that exits without serving HTTP is not a preview service.
 
 ### Shared-notes task recipe
 
 The packaged [task recipe](../examples/multi-repo/worktrees.mjs) accepts existing
-directories for the shared-notes application:
+directories with this shared-notes layout:
 
 ```text
 frontend task/              backend task/
@@ -80,11 +80,12 @@ frontend task/              backend task/
   style.css                  reporting/server.mjs
 ```
 
-The backend's project preparation supplies `pg` and `redis` before startup.
-The frontend has no package dependencies. The [example guide](../examples/multi-repo/README.md)
-lists the local Docker image prerequisites.
+The backend's preparation must supply `pg` and `redis` before startup.
+The frontend needs no packages.
+The [example guide](../examples/multi-repo/README.md) describes the application and database requirements.
 
-From the directory containing your installed previewd package, run:
+With the daemon active, run this command from the directory with your installed previewd package.
+Replace the frontend and backend placeholders with the existing task paths:
 
 ```sh
 node node_modules/previewd/examples/multi-repo/worktrees.mjs \
@@ -94,59 +95,70 @@ node node_modules/previewd/examples/multi-repo/worktrees.mjs \
   | ./node_modules/.bin/previewd start --file -
 ```
 
-The recipe prints one ordinary JSON spec. It does not start another owner or
-store another workspace record. It changes only the name and the three source
-paths in the example's existing environment spec.
+Open the returned `url`. The page can save a note and read it through both backends.
+The recipe prints a JSON spec with your task name and service paths.
+It performs no source preparation.
 
 `--file PATH` selects an edited shared-notes environment file instead of the
-packaged default. That file owns commands, bindings, readiness, and database choices.
-The recipe does not rewrite command arguments or unrelated service paths.
+packaged default. That file supplies commands, bindings, readiness, and database types.
+The recipe preserves command arguments and unrelated service paths.
 Its directory arguments resolve from the current directory.
 
 For inspection, change `start` to `inspect` in the command above.
-For MCP, supply the same JSON object as the `spec` argument to `preview_inspect`
-and `preview_start`. Use `preview_wait` with the returned candidate ID.
-Custom owners require the existing `--endpoint` and `--token-file` client arguments.
+For MCP, pass the same JSON object as `spec` to `preview_inspect` and `preview_start`.
+Use `preview_wait` with the returned candidate ID.
+For a custom daemon, add its `--endpoint` and `--token-file` client arguments.
 
 ## Continue the task
 
-Live edits follow the application's reload or restart behavior. Startup readiness
-does not certify later edits. Existing `.env` files remain available to the application.
-previewd does not load them itself. Explicit bindings avoid manual port edits,
-subject to the application's own environment-file precedence.
+Live edits follow the application's reload or restart behavior.
+Startup readiness does not check later edits.
+Application commands can load `.env` files. previewd does not load them itself.
+The application's environment-file precedence can override supplied bindings.
 
-`{service: api}` selects the candidate dependency and adds a readiness edge.
-`{browserUrl: api}` supplies the public alias for browser code. Before replacement
-finishes, that public alias can still reach the active application.
+`{service: api}` selects the candidate dependency and waits for its readiness.
+`{browserUrl: api}` supplies the public alias for browser code.
+Before replacement finishes, that alias can still reach the active application.
 
 Overlapping replacement requires compatible shared build output and dependencies.
-If the application cannot support overlap, use stop, project preparation, and start.
-Failed replacement does not restore earlier source files or committed migrations.
+If the application cannot support overlap, stop it before preparation and startup.
+Failed replacement does not restore source files, database writes, or migrations.
 
-The same task name retains its managed data across stop/start. Different names
-isolate managed databases under one data owner. Equal external database URLs
-still share data. Native execution and daemon access are not per-task security boundaries.
+The same task name retains managed data across stop/start.
+Different names keep managed databases separate under one data owner.
+Equal external database URLs still share data.
+Daemon access and native execution provide no security isolation between tasks.
 
 ## Stop before source teardown
 
-1. Find every submitted preview that consumes the directory, including another task's preview.
-2. Stop those previews and await successful cleanup.
-3. Resolve external preparation and the host's other source users before removing or moving the directory.
+1. Find every preview that uses the directory, including previews from other tasks.
+2. Stop each preview and wait for successful cleanup.
+3. Resolve external preparation and the host's other source users.
+4. After all consumers stop, remove or move the directory through the host.
 
-An edited config cannot reconstruct all paths used by older attempts. Current
-`get/list` responses omit those source paths. The host must retain the associations
-from submitted specs until active, candidate, and cleanup consumers finish.
+Current `get` and `list` responses omit source paths.
+The host must retain submitted path associations until active, candidate, and cleanup
+consumers finish. An edited configuration cannot reconstruct those older paths.
+If associations or cleanup are uncertain, retain the source and block conflicting preparation.
 
-If those associations or previous-owner cleanup are uncertain, retain the source
-and block conflicting preparation retries.
-If the host cannot coordinate another task's directory lifetime, keep the initial
-integration within source lifetimes that it controls together.
+A wait timeout leaves startup active. Cancel requires the exact candidate ID
+and preserves an active attempt. After an uncertain response, read status before
+another mutation. Missing status after a daemon restart does not prove that old
+native processes stopped.
 
-A wait timeout leaves startup running. Cancellation needs the exact candidate ID
-and does not stop an active attempt. An uncertain response requires status
-reconciliation before another mutation. Missing status after an owner restart
-does not prove that old native processes stopped.
+For the recipe above, stop the environment from your application directory:
 
-Stop preserves source and database data. Source removal remains the host's operation.
-Explicit `delete-data` removes verified managed data separately. Attached services
-remain under their original owner. See [recovery limits](security.md#recovery).
+```sh
+./node_modules/.bin/previewd stop task-notes-42
+```
+
+Stop preserves source and database data. To permanently remove this task's
+managed database data after stop, run:
+
+```sh
+./node_modules/.bin/previewd delete-data task-notes-42
+```
+
+Attached services remain under their original owner.
+After all tasks finish with the daemon, run `./node_modules/.bin/previewd shutdown`.
+See [recovery limits](security.md#recovery) before source removal after a crash.
