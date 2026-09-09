@@ -129,17 +129,17 @@ MCP also requires a separate [client connection](docs/integrations.md#connect-an
 From your application directory, install the skill for Codex:
 
 ```sh
-npx skills add /absolute/path/to/previewhost --skill previewhost --agent codex --yes
+npx skills add RojhatToptamus/previewhost --skill previewhost --agent codex --yes
 ```
 
-Replace the path with your previewhost checkout. This command installs into the current project.
+This command installs from the default branch into the current project.
 Then ask Codex:
 
 ```text
 $previewhost Preview this project. Create a recipe if none exists, then verify the page.
 ```
 
-Update the checkout. Repeat the install command to refresh the skill and its references.
+Repeat the install command to refresh the skill and its references.
 For remote installation, other clients, and tested discovery behavior, see [agent skill integration](docs/integrations.md#agent-skill).
 For recipe decisions, see [Create or update a preview recipe](docs/recipes.md).
 

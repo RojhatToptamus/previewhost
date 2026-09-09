@@ -37,15 +37,15 @@ Local installation passed with skills 1.5.25 on macOS 26.5.1 in default and `--c
 That result does not establish support for other installers or copying methods.
 Repeat `skills add` to refresh the installed files, including reference-only changes.
 
-Remote project installation also passed while access to local source checkouts was denied.
+Remote project installation from the default branch passed with skills 1.5.25 while access to local source checkouts was denied.
 Codex CLI 0.146.0 discovered the installed skill and loaded its recipe guidance. All required references resolved within the installed directory.
-The tested command selects the feature branch:
+Install from the default branch:
 
 ```sh
-npx --yes skills@1.5.25 add 'RojhatToptamus/previewhost#codex/agent-skill-integration' --skill previewhost --agent codex --yes
+npx skills add RojhatToptamus/previewhost --skill previewhost --agent codex --yes
 ```
 
-Installation from the default branch remains unverified until the skill is merged there.
+The installer found the project skill, and all installed references remained readable without the source checkout.
 
 Select `--agent codex`, `claude-code`, `cursor`, or `opencode` for project installation.
 The following table describes each client's documented discovery and invocation convention.
