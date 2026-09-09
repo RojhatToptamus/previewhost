@@ -120,49 +120,29 @@ uses a directory before the host removes it.
 
 ## Use the agent skill
 
-The `previewhost` skill covers preview operation and recipe creation.
-It uses one `SKILL.md` entrypoint and reads API, framework, database, and worktree references only when relevant.
-For recipe decisions, see [Create or update a preview recipe](docs/recipes.md).
+The `previewhost` skill operates previews and creates recipes for existing projects.
+It requires an installed previewhost package, prepared project dependencies, and a separate daemon with access to the project sources.
+The agent needs loopback access to the daemon. Command previews also require execution permission.
+See [package installation](#install-locally) and [daemon setup](#run-a-development-server).
+MCP also requires a separate [client connection](docs/integrations.md#connect-an-mcp-client).
 
-Install from a checkout that contains `skills/previewhost`.
-From your application directory, use the existing [skills CLI](https://github.com/vercel-labs/skills):
+From your application directory, install the skill for Codex:
 
 ```sh
-npx skills add /absolute/path/to/previewhost --list
 npx skills add /absolute/path/to/previewhost --skill previewhost --agent codex --yes
 ```
 
-Replace `codex` with `claude-code`, `cursor`, or `opencode` for that client.
-The commands use project scope. They do not install into your personal agent configuration.
-The installer copies the skill into the project and creates client links where required.
-Its file-copy behavior resolves the repository reference symlinks into ordinary files.
-Those files reuse the maintained documentation and examples without requiring the source checkout at runtime.
-This installation path does not establish support for other installers or copying methods.
+Replace the path with your previewhost checkout. This command installs into the current project.
+Then ask Codex:
 
-| Client | Project discovery and invocation |
-| --- | --- |
-| [Codex CLI](https://developers.openai.com/codex/skills) | Reads `.agents/skills`. Use `$previewhost` or `/skills`. |
-| [Claude Code](https://code.claude.com/docs/en/skills) | Reads `.claude/skills`. Use `/previewhost`. |
-| [Cursor](https://cursor.com/docs/context/skills) | Reads `.agents/skills`. Select `/previewhost` in Agent chat. |
-| [OpenCode](https://opencode.ai/docs/skills/) | Reads `.agents/skills`. Ask the agent to load the `previewhost` skill. |
-
-An agent can also select the skill when the request matches its description.
-For example: "Use previewhost to preview this project. Create a recipe if none exists, then verify the page."
-Automatic selection depends on the client and task. Installation alone does not prove agent execution.
-
-For a local-checkout installation, update the checkout and repeat the install command.
-Once the skill is available on the repository's default branch, a Git installation can use:
-
-```sh
-npx skills add RojhatToptamus/previewhost --skill previewhost --agent codex --yes
+```text
+$previewhost Preview this project. Create a recipe if none exists, then verify the page.
 ```
 
-Private repository access uses your existing Git authentication.
-To refresh either installation, repeat its `skills add` command.
-This also refreshes references when only the documentation or examples change.
-Installed references do not track checkout edits automatically.
-The skill does not install previewhost, start its daemon, configure MCP, or grant execution permission.
-Install the package and configure the selected interface separately, as described in the [integration guide](docs/integrations.md).
+Update the checkout. Repeat the install command to refresh the skill and its references.
+For other clients and tested discovery behavior, see [agent skill integration](docs/integrations.md#agent-skill).
+For recipe decisions, see [Create or update a preview recipe](docs/recipes.md).
+The remote Git installation check is pending until the skill is available in the remote repository.
 
 ## Use agents, inputs, or stored secrets
 

@@ -19,11 +19,48 @@ Linux and Windows remain unverified, including static and attached previews.
 | Coding-task worktrees | Live edits, replacement, data retention, and source preservation | The host prepares and removes source directories |
 | Task Monki | HTTP attachment, approval, readiness, replacement, and independent stop | Embedded runtime and browser UI integration remain unverified |
 
-The recorded client, framework, browser, and Task Monki checks below used the package under its former name, `previewd`.
-The renamed package remains untested in those hosts.
+The MCP client, framework, browser, and Task Monki sections below record checks under the former package name, `previewd`.
+The renamed package remains untested in those MCP hosts. Agent skill checks identify their tested package separately.
 The configuration examples use the new package and server name.
 The client results apply to the named versions and configurations.
 A configuration example or successful discovery alone does not establish a working preview workflow.
+
+## Agent skill
+
+Use the [README installation and usage steps](../README.md#use-the-agent-skill).
+The repository contains one `skills/previewhost/SKILL.md` entrypoint for preview operation and recipe creation.
+Its references link to the maintained documentation and examples. Agents read these documents only when the task needs them.
+
+The [skills CLI](https://github.com/vercel-labs/skills) resolves those repository symlinks into files during installation.
+The installed references remain readable without the source checkout.
+Local installation passed with skills 1.5.25 on macOS 26.5.1 in default and `--copy` modes after the source checkout became unavailable.
+That result does not establish support for other installers or copying methods.
+Repeat `skills add` to refresh the installed files, including reference-only changes.
+The remote Git installation check remains pending until this skill is available in the remote repository.
+
+Select `--agent codex`, `claude-code`, `cursor`, or `opencode` for project installation.
+The following table describes each client's documented discovery and invocation convention.
+It does not establish execution support for untested clients.
+
+| Client | Project discovery and invocation |
+| --- | --- |
+| [Codex CLI](https://developers.openai.com/codex/skills) | Reads `.agents/skills`. Use `$previewhost` or `/skills`. |
+| [Claude Code](https://code.claude.com/docs/en/skills) | Reads `.claude/skills`. Use `/previewhost`. |
+| [Cursor](https://cursor.com/docs/context/skills) | Reads `.agents/skills`. Select `/previewhost` in Agent chat. |
+| [OpenCode](https://opencode.ai/docs/skills/) | Reads `.agents/skills`. Ask the agent to load the `previewhost` skill. |
+
+Codex CLI 0.146.0 discovered the installed project skill with previewhost 0.1.0 through `codex exec --ignore-user-config --ephemeral`.
+It selected the skill from its catalog, read the recipe and API references, and created a command recipe from project source.
+Separate host-side inspection validated that recipe.
+
+Native preview startup remains unverified in the tested loopback-only managed-proxy configuration.
+The proxy reached the daemon, but CLI `list` and `inspect` returned `DAEMON_UNAVAILABLE`.
+The shared previewhost client uses direct `node:http` requests with `agent: false`; it does not route requests through the proxy environment.
+No native start, page/health check, or stop operation completed in that configuration.
+These checks cover explicit `$previewhost` use. Automatic selection and other clients' skill workflows remain unverified.
+
+Skill selection can also follow the task description. Automatic selection depends on the client and request.
+Skill installation does not install previewhost, start its daemon, configure MCP, or grant execution permission.
 
 ## Connect an MCP client
 
