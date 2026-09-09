@@ -86,7 +86,7 @@ process.once('SIGINT', () => { void stop(); });
 
 try {
   await cache.connect();
-  // This demo application owns its table. previewd does not run migrations.
+  // This demo application owns its table. previewhost does not run migrations.
   await pool.query('CREATE TABLE IF NOT EXISTS previewd_demo_notes (id uuid PRIMARY KEY, text text NOT NULL CHECK (char_length(text) BETWEEN 1 AND 160), revision text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())');
   if (!stopping) {
     await new Promise((resolve, reject) => {

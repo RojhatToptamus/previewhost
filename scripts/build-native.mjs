@@ -14,6 +14,7 @@ function build(source, filename, definitions = []) {
     '-framework', 'Foundation', '-framework', 'Security', source, '-o', output];
   for (const [command, commandArgs] of [
     ['/usr/bin/clang', args],
+    // Existing Keychain access depends on the helper's signature, not the package name.
     ['/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', `dev.previewd.${filename}`, output]],
   ]) {
     const result = spawnSync(command, commandArgs, { stdio: 'inherit' });

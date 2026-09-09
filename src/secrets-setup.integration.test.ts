@@ -37,7 +37,7 @@ test('MCP missing → private save → status → ordinary retry keeps values an
   const tokenFile = join(fixture.directory, 'control', 'token');
   const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
   const client = connectPreviewDaemon({ endpoint: daemon.endpoint, tokenFile });
-  const mcp = new Client({ name: 'previewd-secrets-integration', version: '1.0.0' });
+  const mcp = new Client({ name: 'previewhost-secrets-integration', version: '1.0.0' });
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [resolve('dist/cli.js'), 'mcp', '--endpoint', daemon.endpoint, '--token-file', tokenFile], stderr: 'pipe' });
   let stderr = ''; const wire: string[] = [];

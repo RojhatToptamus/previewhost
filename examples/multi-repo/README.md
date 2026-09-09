@@ -24,12 +24,12 @@ spec with the supplied paths and task name. It performs no source preparation.
 
 ## Install the dependencies
 
-Requirements: macOS 13 or later, Node.js 22.23 or later, the [installed previewd tarball](../../README.md#install-locally), and local Docker Engine.
+Requirements: macOS 13 or later, Node.js 22.23 or later, the [installed previewhost tarball](../../README.md#install-locally), and local Docker Engine.
 
-From the directory where you installed previewd, run:
+From the directory where you installed previewhost, run:
 
 ```sh
-cd node_modules/previewd/examples/multi-repo
+cd node_modules/previewhost/examples/multi-repo
 npm install
 ```
 
@@ -40,11 +40,11 @@ docker pull postgres:17-alpine
 docker pull redis:7-alpine
 ```
 
-previewd does not install Node packages or pull images during startup.
+previewhost does not install Node packages or pull images during startup.
 
 ## Run the example
 
-From `node_modules/previewd/examples/multi-repo`, run this command in the first terminal:
+From `node_modules/previewhost/examples/multi-repo`, run this command in the first terminal:
 
 ```sh
 npm run serve
@@ -54,6 +54,10 @@ The daemon stays in the foreground.
 It permits execution of the example code as your user, without a sandbox.
 It stores private data records under `.local/data`.
 Its token file is `.local/token`.
+
+If you already ran the `previewd` example, retain its `.local` directory.
+Use its absolute `--data-dir` and `--token-file` paths with `previewhost serve`.
+Pass that token path to each client command.
 
 In a second terminal, open the same example directory and run:
 
@@ -103,7 +107,8 @@ The application URLs stay the same during replacement.
 If the new services fail before requests switch to them, the old application remains available.
 
 The API creates `previewd_demo_notes` with `CREATE TABLE IF NOT EXISTS` during its own startup.
-previewd does not run a migration engine.
+The table name and Redis key `previewd:demo:latest-note` remain unchanged so existing example data stays accessible.
+previewhost does not run a migration engine.
 A failed replacement does not undo database writes or schema changes.
 A cache error after a successful write returns the saved note with `cacheUpdated: false`.
 
@@ -170,10 +175,10 @@ The status and stop scripts use the original environment name.
 For this variant, select its name explicitly:
 
 ```sh
-npm exec -- previewd get shared-notes-external --token-file .local/token
-npm exec -- previewd stop shared-notes-external --token-file .local/token
+npm exec -- previewhost get shared-notes-external --token-file .local/token
+npm exec -- previewhost stop shared-notes-external --token-file .local/token
 ```
 
-previewd checks the external connections but does not stop them or remove their data.
+previewhost checks the external connections but does not stop them or remove their data.
 After use, run `npm run shutdown` to close the daemon.
 The external database owner remains responsible for its demo table and data.

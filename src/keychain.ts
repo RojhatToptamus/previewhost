@@ -84,7 +84,7 @@ export class Keychain {
   private check(reply: NativeReply): void {
     if (!reply.status) return;
     if (reply.status === -25293 || reply.status === -128) {
-      throw new PreviewError('SECRET_DENIED', 'Keychain denied access. Allow the previewd helper in Keychain Access, then retry.');
+      throw new PreviewError('SECRET_DENIED', 'Keychain denied access. Allow the previewhost helper in Keychain Access, then retry.');
     }
     throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Keychain is locked or unavailable. Unlock it and check the helper’s item access in Keychain Access, then retry.');
   }
@@ -112,7 +112,7 @@ export class Keychain {
         const timer = setTimeout(() => stop(interrupted('Keychain did not respond in time. A dispatched write can still have completed.')),
           options.interactive ? 30_000 : 10_000);
         signal?.addEventListener('abort', abort, { once: true });
-        child.once('error', () => { problem ??= new PreviewError('SECRET_STORE_UNAVAILABLE', 'The packaged Keychain helper could not start. Reinstall a macOS build of previewd.'); });
+        child.once('error', () => { problem ??= new PreviewError('SECRET_STORE_UNAVAILABLE', 'The packaged Keychain helper could not start. Reinstall a macOS build of previewhost.'); });
         child.stdin.on('error', () => stop(interrupted('The Keychain request ended without a result.')));
         child.stderr.resume(); // Native diagnostics must never enter application logs or transports.
         child.stdout.on('data', (chunk: Buffer) => {

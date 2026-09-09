@@ -1,8 +1,8 @@
 // Fixed first-party assets. Request labels are inserted as text by the script.
 export const secretsPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>previewd · Secrets</title><link rel="stylesheet" href="/secrets.css"><script src="/secrets.js" defer></script></head>
-<body><main><p class="brand">previewd</p><h1 id="title">Private secret setup</h1>
+<title>previewhost · Secrets</title><link rel="stylesheet" href="/secrets.css"><script src="/secrets.js" defer></script></head>
+<body><main><p class="brand">previewhost</p><h1 id="title">Private secret setup</h1>
 <p id="message" role="status" aria-live="polite">Loading this request…</p>
 <dl id="context"></dl><form id="form" hidden autocomplete="off"><div id="fields"></div>
 <label class="reveal"><input type="checkbox" id="reveal"> Show values</label>

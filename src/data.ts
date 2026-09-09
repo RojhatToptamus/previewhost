@@ -23,6 +23,7 @@ export interface DataOwner {
 }
 
 const token = z.string().regex(/^[a-f0-9]{32}$/);
+// Persisted Docker names, ownership labels, and database names retain the previewd namespace.
 const objectName = z.string().regex(/^previewd-[a-f0-9]{32}-(?:data|db)$/);
 const containerId = z.string().regex(/^[a-f0-9]{64}$/);
 const resourceFields = {

@@ -1,4 +1,4 @@
-import { createPreviewRuntime, connectPreviewDaemon, loadPreviewSpec, type PreviewSpec, type PreviewApi } from 'previewd';
+import { createPreviewRuntime, connectPreviewDaemon, loadPreviewSpec, type PreviewSpec, type PreviewApi } from 'previewhost';
 const spec: PreviewSpec = { name: 'task-42', type: 'command', cwd: '/absolute/task', command: ['node', 'server.mjs'] };
 async function describe(api: PreviewApi) { return api.inspect(spec); }
 void describe;

@@ -185,7 +185,7 @@ export async function startNative(input: {
 }
 
 function cleanupError(group: number) {
-  return new PreviewError('CLEANUP_INCOMPLETE', `Could not verify cleanup of native process group ${group}. Inspect its processes manually; previewd will not signal an unknown owner.`);
+  return new PreviewError('CLEANUP_INCOMPLETE', `Could not verify cleanup of native process group ${group}. Inspect its processes manually; previewhost will not signal an unknown owner.`);
 }
 
 function commandEnvironment(values: Record<string, string>, port: number, url: string): NodeJS.ProcessEnv {

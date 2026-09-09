@@ -36,6 +36,7 @@ Select your local Docker Unix socket. The command below uses the Docker Desktop 
 PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify
 ```
 
+`PREVIEWD_TEST_DOCKER_SOCKET` retains its existing name for development scripts.
 Without that variable, the real database suites skip. The remaining data tests
 use isolated Unix sockets to exercise interrupted database operations and ownership checks.
 Each real test creates its own containers and volumes, then removes only those
@@ -56,7 +57,7 @@ From the repository directory, run:
 ```sh
 PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
 npm pack --ignore-scripts
-npm run check:package -- /absolute/path/to/previewd-0.1.0.tgz
+npm run check:package -- /absolute/path/to/previewhost-0.1.0.tgz
 ```
 
 `verify:release` requires macOS and an explicit local Docker Unix socket. It runs

@@ -53,7 +53,7 @@ export async function probeDatabase(type: DatabaseType, value: string, options: 
         database: decodeURIComponent(url.pathname.slice(1)), password: () => decodeURIComponent(url.password),
         ssl: false, sslnegotiation: 'postgres' as const, stream: () => socket,
         connectionTimeoutMillis: options.timeoutMs, query_timeout: options.timeoutMs,
-        application_name: 'previewd', client_encoding: 'UTF8', options: ' ', replication: 'false',
+        application_name: 'previewhost', client_encoding: 'UTF8', options: ' ', replication: 'false',
       };
       const client = new Client(config);
       client.on('error', () => {});

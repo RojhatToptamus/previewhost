@@ -13,7 +13,7 @@ const execute = promisify(execFile);
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
 
 nativeTest('cleanup failure after replacement cutover preserves the new route and retains old debt until stop can verify absence', { timeout: 20_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd replacement '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost replacement '));
   const site = join(directory, 'site');
   const baselinePorts = await ownedListenerPorts();
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => true });
@@ -79,7 +79,7 @@ http.createServer((request, response) => {
     });
 
     // These exact fixture processes are deliberately lost after cutover. The
-    // descendant stays in their group, but previewd has no recorded live owner.
+    // descendant stays in their group, but previewhost has no recorded live owner.
     process.kill(identity!.group, 'SIGKILL');
     process.kill(identity!.pid, 'SIGKILL');
 

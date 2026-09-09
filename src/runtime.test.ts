@@ -12,7 +12,7 @@ import { limits, type PreviewSpec, type PreviewStatus, type RuntimeOptions } fro
 import { PreviewError } from './errors.js';
 
 async function fixture(t: test.TestContext, authorize?: RuntimeOptions['authorize']) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewd runtime '));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewhost runtime '));
   await fs.mkdir(path.join(directory, 'one'));
   await fs.mkdir(path.join(directory, 'two'));
   await fs.writeFile(path.join(directory, 'one/index.html'), '<h1>one</h1>');

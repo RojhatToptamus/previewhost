@@ -38,7 +38,7 @@ if (process.env.EXIT_AFTER) setTimeout(() => process.exit(8), Number(process.env
 `;
 
 async function fixture(t: test.TestContext) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewd multi repo '));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewhost multi repo '));
   const journal = path.join(directory, 'pids');
   await fs.writeFile(journal, '');
   for (const id of ['web', 'api', 'report']) {
@@ -196,7 +196,7 @@ test('an attached alias feeds native consumers and survives consumer failure, ca
 });
 
 test('pending environment nodes reserve the global capacity before authorization completes', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewd-capacity-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewhost-capacity-'));
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => new Promise<boolean>(() => {}) });
   t.after(async () => { await runtime.close(); await fs.rm(directory, { recursive: true, force: true }); });
   const input = (name: string): EnvironmentInput => ({

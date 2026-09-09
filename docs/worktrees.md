@@ -1,6 +1,6 @@
 # Preview the current coding task
 
-previewd runs existing task directories, including uncommitted files and installed
+previewhost runs existing task directories, including uncommitted files and installed
 packages. The coding host manages Git, installs dependencies, generates files, and removes task directories.
 The daemon owns the preview's application processes, routes, and managed databases.
 
@@ -17,7 +17,7 @@ Paths in a configuration file resolve relative to that file.
 An absolute command entrypoint still selects that file after a `cwd` change.
 
 If no suitable checkout exists, use the source owner's preparation tools.
-previewd does not create checkouts or change Git state.
+previewhost does not create checkouts or change Git state.
 
 ## Prepare and start
 
@@ -29,12 +29,12 @@ Managed databases also require the [database prerequisites](../examples/multi-re
 In a separate terminal, start the daemon:
 
 ```sh
-previewd serve --root /absolute/task-worktrees --allow-exec \
+previewhost serve --root /absolute/task-worktrees --allow-exec \
   --data-dir /absolute/private-preview-data
 ```
 
-`previewd` must be on PATH. A local installation also provides
-`./node_modules/.bin/previewd` from the application directory.
+`previewhost` must be on PATH. A local installation also provides
+`./node_modules/.bin/previewhost` from the application directory.
 `--allow-exec` permits ordinary execution as your user, without a sandbox.
 Multiple tasks can share this daemon with different preview names.
 
@@ -85,15 +85,15 @@ The backend's preparation must supply `pg` and `redis` before startup.
 The frontend needs no packages.
 The [example guide](../examples/multi-repo/README.md) describes the application and database requirements.
 
-With the daemon active, run this command from the directory with your installed previewd package.
+With the daemon active, run this command from the directory with your installed previewhost package.
 Replace the frontend and backend placeholders with the existing task paths:
 
 ```sh
-node node_modules/previewd/examples/multi-repo/worktrees.mjs \
+node node_modules/previewhost/examples/multi-repo/worktrees.mjs \
   --name task-notes-42 \
   --frontend /absolute/task-worktrees/frontend-task \
   --backend /absolute/task-worktrees/backend-task \
-  | ./node_modules/.bin/previewd start --file -
+  | ./node_modules/.bin/previewhost start --file -
 ```
 
 Open the returned `url`. The page can save a note and read it through both backends.
@@ -114,8 +114,8 @@ For a custom daemon, add its `--endpoint` and `--token-file` client arguments.
 
 Live edits follow the application's reload or restart behavior.
 Startup readiness does not check later edits.
-Application commands can load `.env` files. previewd does not load them itself.
-Some applications give `.env` values priority over variables that previewd supplies.
+Application commands can load `.env` files. previewhost does not load them itself.
+Some applications give `.env` values priority over variables that previewhost supplies.
 
 `{service: api}` selects the candidate dependency and waits for its readiness.
 `{browserUrl: api}` supplies the public alias for browser code.
@@ -151,16 +151,16 @@ native processes stopped.
 For the recipe above, stop the environment from your application directory:
 
 ```sh
-./node_modules/.bin/previewd stop task-notes-42
+./node_modules/.bin/previewhost stop task-notes-42
 ```
 
 Stop preserves source and database data. To permanently remove this task's
 managed database data after stop, run:
 
 ```sh
-./node_modules/.bin/previewd delete-data task-notes-42
+./node_modules/.bin/previewhost delete-data task-notes-42
 ```
 
 Attached services remain under their original owner.
-After all tasks finish with the daemon, run `./node_modules/.bin/previewd shutdown`.
+After all tasks finish with the daemon, run `./node_modules/.bin/previewhost shutdown`.
 See [recovery limits](security.md#recovery) before source removal after a crash.

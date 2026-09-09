@@ -9,33 +9,33 @@ import { failure, PreviewError } from './errors.js';
 import { listSecrets, removeSecret, setSecret, validateSecretId } from './secrets.js';
 import { readSecretInput } from './secret-input.js';
 
-const help = `previewd — local previews and application environments
+const help = `previewhost — local previews and application environments
 
 Owner:
-  previewd serve [--root DIR ...] [--allow-exec] [--env NAME ...] [--secret ID ...]
-                 [--data-dir DIR] [--docker-socket PATH] [--port 9400] [--token-file PATH]
-  previewd mcp [--endpoint http://127.0.0.1:9400] [--token-file PATH]
+  previewhost serve [--root DIR ...] [--allow-exec] [--env NAME ...] [--secret ID ...]
+                    [--data-dir DIR] [--docker-socket PATH] [--port 9400] [--token-file PATH]
+  previewhost mcp [--endpoint http://127.0.0.1:9400] [--token-file PATH]
 
 Preview operations:
-  previewd inspect --file spec.yaml
-  previewd start --file spec.yaml [--no-wait] [--timeout-ms 30000]
-  previewd replace --file spec.yaml [--no-wait] [--timeout-ms 30000]
-  previewd list
-  previewd get NAME
-  previewd wait NAME ATTEMPT_ID [--timeout-ms 30000]
-  previewd logs NAME [ATTEMPT_ID] [--max-bytes 65536]
-  previewd cancel NAME ATTEMPT_ID
-  previewd stop NAME [--after-engine-restart]
-  previewd delete-data NAME
-  previewd shutdown
+  previewhost inspect --file spec.yaml
+  previewhost start --file spec.yaml [--no-wait] [--timeout-ms 30000]
+  previewhost replace --file spec.yaml [--no-wait] [--timeout-ms 30000]
+  previewhost list
+  previewhost get NAME
+  previewhost wait NAME ATTEMPT_ID [--timeout-ms 30000]
+  previewhost logs NAME [ATTEMPT_ID] [--max-bytes 65536]
+  previewhost cancel NAME ATTEMPT_ID
+  previewhost stop NAME [--after-engine-restart]
+  previewhost delete-data NAME
+  previewhost shutdown
 
 Secrets:
-  previewd secrets setup --file spec.yaml [--reopen]
-  previewd secrets edit ID
-  previewd secrets status REQUEST_ID
-  previewd secrets set ID [--stdin]
-  previewd secrets list
-  previewd secrets remove ID
+  previewhost secrets setup --file spec.yaml [--reopen]
+  previewhost secrets edit ID
+  previewhost secrets status REQUEST_ID
+  previewhost secrets set ID [--stdin]
+  previewhost secrets list
+  previewhost secrets remove ID
 
 All client commands accept --endpoint and --token-file. The default token file is
 ~/.local/share/previewd/token. Serve stays in the foreground; its default allowed
@@ -54,7 +54,7 @@ An edit affects future readers; running applications retain their delivered valu
 
 Use --file - (or omit --file with piped stdin) to read JSON. Source paths in a file
 resolve relative to that file; stdin paths resolve relative to the current directory.
-YAML files reject aliases, tags, merge keys, and duplicate keys. previewd does not
+YAML files reject aliases, tags, merge keys, and duplicate keys. previewhost does not
 load .env files. Application commands can. Source directories stay live and caller-owned.
 Environment status includes each service and retained database data.
 Start/replace wait up to 30 seconds by default. A timeout or interrupted wait does
@@ -86,7 +86,7 @@ async function readSpec(file: string | undefined, signal: AbortSignal): Promise<
 async function main(): Promise<void> {
   let parsed: ReturnType<typeof parseCliArgs>;
   try { parsed = parseCliArgs(); }
-  catch { throw new PreviewError('INVALID_INPUT', 'Invalid command arguments. Run previewd --help.'); }
+  catch { throw new PreviewError('INVALID_INPUT', 'Invalid command arguments. Run previewhost --help.'); }
   const { values, positionals } = parsed;
   const command = positionals[0];
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
@@ -102,11 +102,11 @@ async function main(): Promise<void> {
     cancel: ['endpoint', 'token-file'], stop: ['after-engine-restart', 'endpoint', 'token-file'],
     'delete-data': ['endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
   };
-  if (!Object.hasOwn(accepted, command)) throw new PreviewError('INVALID_INPUT', 'Unknown command. Run previewd --help.');
+  if (!Object.hasOwn(accepted, command)) throw new PreviewError('INVALID_INPUT', 'Unknown command. Run previewhost --help.');
   for (const key of Object.keys(values)) if (!accepted[command].includes(key)) throw new PreviewError('INVALID_INPUT', `--${key} is not supported for ${command}.`);
   const counts: Record<string, [number, number]> = { get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
   const [minimum, maximum] = counts[command] ?? [1, 1];
-  if (positionals.length < minimum || positionals.length > maximum) throw new PreviewError('INVALID_INPUT', `Invalid arguments for ${command}. Run previewd --help.`);
+  if (positionals.length < minimum || positionals.length > maximum) throw new PreviewError('INVALID_INPUT', `Invalid arguments for ${command}. Run previewhost --help.`);
   const endpoint = values.endpoint;
   const tokenFile = values['token-file'] ? resolve(values['token-file']) : defaultTokenFile();
   const timeoutMs = integer(values['timeout-ms'], '--timeout-ms', limits.waitMs);
@@ -200,7 +200,7 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
   };
   if (!Object.hasOwn(accepted, command) || Object.keys(values).some((key) => !accepted[command].includes(key))
     || positionals.length !== (['setup', 'list'].includes(command) ? 1 : 2)) {
-    throw new PreviewError('INVALID_INPUT', 'Invalid secrets command arguments. Values belong only in hidden terminal input or --stdin. Run previewd --help.');
+    throw new PreviewError('INVALID_INPUT', 'Invalid secrets command arguments. Values belong only in hidden terminal input or --stdin. Run previewhost --help.');
   }
   if (['set', 'edit', 'remove'].includes(command)) validateSecretId(positionals[1]);
   const controller = new AbortController();

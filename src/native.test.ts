@@ -110,7 +110,7 @@ nativeTest('missing executable fails and joins supervisor cleanup', async () => 
   let resource: NativeResource | undefined;
   try {
     await assert.rejects(startNative({
-      spec: spec(root, { command: ['/previewd-missing-executable'] }), signal: new AbortController().signal,
+      spec: spec(root, { command: ['/previewhost-missing-executable'] }), signal: new AbortController().signal,
       url: 'http://127.0.0.1:45678', appendLog() {}, onResource(value) { resource = value; },
     }), { code: 'START_FAILED' });
     assert.ok(resource);
@@ -391,7 +391,7 @@ async function launch(cwd: string, overrides: Partial<CommandSpec> = {}, appendL
 }
 
 async function fixture(source: string): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'previewd native '));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'previewhost native '));
   await writeFile(path.join(root, 'server.mjs'), source);
   return root;
 }

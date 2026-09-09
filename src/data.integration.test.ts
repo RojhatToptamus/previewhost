@@ -23,7 +23,7 @@ const signal = () => new AbortController().signal;
 
 test('real owned PostgreSQL and Redis retain authenticated data across stop/reopen and report unexpected exit', enabled, async (t) => {
   await testKeychain(t);
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-real-data-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-real-data-'));
   let owner = await createDataOwner({ directory, dockerSocket });
   const docker = await Docker.connect(dockerSocket!);
   const marker = randomBytes(16).toString('hex');
@@ -85,8 +85,8 @@ test('real owned PostgreSQL and Redis retain authenticated data across stop/reop
 
 test('real owner SIGKILL releases the kernel lock; recovery removes only its containers and keeps database data', enabled, async (t) => {
   const keychainFixture = await testKeychain(t);
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-owner-crash-'));
-  const otherDirectory = await mkdtemp(join(tmpdir(), 'previewd-other-owner-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-owner-crash-'));
+  const otherDirectory = await mkdtemp(join(tmpdir(), 'previewhost-other-owner-'));
   let owner: DataOwner | undefined;
   const other = await createDataOwner({ directory: otherDirectory, dockerSocket });
   let child: ChildProcess | undefined;

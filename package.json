@@ -1,5 +1,5 @@
 {
-  "name": "previewd",
+  "name": "previewhost",
   "version": "0.1.0",
   "description": "Local HTTP previews for applications and coding agents.",
   "type": "module",
@@ -14,7 +14,7 @@
     }
   },
   "bin": {
-    "previewd": "./dist/cli.js"
+    "previewhost": "./dist/cli.js"
   },
   "files": [
     "dist",

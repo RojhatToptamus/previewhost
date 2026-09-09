@@ -39,7 +39,7 @@ async function request(url, pathname, body) {
 }
 
 test('the task recipe rejects missing paths and a different application recipe without writing a partial spec', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-recipe-input-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-recipe-input-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, 'static.json'), JSON.stringify({ name: 'site', type: 'static', directory }));
   for (const args of [[], ['--name', 'task', '--frontend', directory, '--backend', directory, '--file', join(directory, 'static.json')]]) {
@@ -56,7 +56,7 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
   skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000,
 }, async (t) => {
   await testKeychain(t);
-  const root = await mkdtemp(join(tmpdir(), 'previewd-task-worktrees-'));
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-task-worktrees-'));
   const frontend = join(root, 'frontend task');
   const backend = join(root, 'backend task');
   const gitEnv = { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: '1',

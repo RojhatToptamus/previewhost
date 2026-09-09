@@ -151,7 +151,7 @@ export class SecretSetup {
       child.once('error', () => { failed = true; });
       child.once('close', (code) => {
         clearTimeout(timer); signal.removeEventListener('abort', abort);
-        if (failed || code !== 0) reject(new PreviewError('START_FAILED', 'The browser could not open. Use previewd secrets set with hidden terminal input, then retry.'));
+        if (failed || code !== 0) reject(new PreviewError('START_FAILED', 'The browser could not open. Use previewhost secrets set with hidden terminal input, then retry.'));
         else resolve();
       });
       if (signal.aborted) abort();

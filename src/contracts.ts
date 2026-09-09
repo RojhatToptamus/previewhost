@@ -46,7 +46,7 @@ const argv = z.array(z.string().max(8192).refine((value) => !value.includes('\0'
 const envSchema = z.record(envKey, scalarValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'PORT, HOST and PREVIEW_URL are reserved.')
-  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and numeric public origin. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewd does not load .env files; the application can.');
+  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and numeric public origin. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
 
 export const environmentValueSchema = z.union([
   scalarValueSchema,
@@ -57,7 +57,7 @@ export const environmentValueSchema = z.union([
 const serviceEnvironment = z.record(envKey, environmentValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'PORT, HOST and PREVIEW_URL are reserved.')
-  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewd does not load .env files; the application can.');
+  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
 export const environmentServiceSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('static'), directory, spa: z.boolean().default(false) }),
   z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs }),

@@ -1,8 +1,8 @@
-# previewd
+# previewhost
 
 Local HTTP previews for applications and coding agents.
 
-previewd serves static files, runs development servers, and connects services
+previewhost serves static files, runs development servers, and connects services
 from separate repositories or worktrees. Applications and agent hosts can start,
 inspect, replace, and stop previews through an ESM library, CLI, local HTTP API,
 or MCP tools.
@@ -24,17 +24,19 @@ See [tested platforms and clients](docs/integrations.md).
 Clone the repository and build the package:
 
 ```sh
-git clone https://github.com/RojhatToptamus/previewd.git
-cd previewd
+git clone https://github.com/RojhatToptamus/previewhost.git
+cd previewhost
 npm ci
 npm pack
 ```
 
+For an existing `previewd` installation, read the [upgrade steps](#move-from-previewd) first.
+
 From your application directory, install the generated tarball.
-Replace `/absolute/path/to/previewd` with the repository path:
+Replace `/absolute/path/to/previewhost` with the repository path:
 
 ```sh
-npm install /absolute/path/to/previewd/previewd-0.1.0.tgz
+npm install /absolute/path/to/previewhost/previewhost-0.1.0.tgz
 ```
 
 `npm pack` builds the package. Installation from the tarball does not compile
@@ -45,7 +47,7 @@ native code. For release verification, follow the [contribution guide](CONTRIBUT
 From your application directory, start the daemon in the first terminal:
 
 ```sh
-./node_modules/.bin/previewd serve --root "$PWD"
+./node_modules/.bin/previewhost serve --root "$PWD"
 ```
 
 The daemon stays in the foreground. It prints its control endpoint and token
@@ -54,7 +56,7 @@ file path. CLI and MCP clients require this separate daemon.
 In a second terminal, open the same application directory and run:
 
 ```sh
-./node_modules/.bin/previewd start --file node_modules/previewd/examples/static.json
+./node_modules/.bin/previewhost start --file node_modules/previewhost/examples/static.json
 ```
 
 Open the `url` from the returned JSON in a browser.
@@ -64,8 +66,8 @@ Source paths in a JSON or YAML file resolve relative to that file.
 To stop the preview and shut down the daemon, run:
 
 ```sh
-./node_modules/.bin/previewd stop example
-./node_modules/.bin/previewd shutdown
+./node_modules/.bin/previewhost stop example
+./node_modules/.bin/previewhost shutdown
 ```
 
 A client disconnect leaves previews active. Stop preserves source files.
@@ -80,13 +82,13 @@ It does not provide a sandbox. Project dependencies must already exist.
 After the previous daemon stops, run this command from your application directory:
 
 ```sh
-./node_modules/.bin/previewd serve --root "$PWD" --allow-exec
+./node_modules/.bin/previewhost serve --root "$PWD" --allow-exec
 ```
 
 In the second terminal, start the packaged Node server:
 
 ```sh
-./node_modules/.bin/previewd start --file node_modules/previewd/examples/command.json
+./node_modules/.bin/previewhost start --file node_modules/previewhost/examples/command.json
 ```
 
 Open the returned `url`. The example needs no additional packages.
@@ -96,9 +98,9 @@ See the [framework configurations](docs/integrations.md#framework-configuration)
 To read logs and stop the example, run:
 
 ```sh
-./node_modules/.bin/previewd logs node-example
-./node_modules/.bin/previewd stop node-example
-./node_modules/.bin/previewd shutdown
+./node_modules/.bin/previewhost logs node-example
+./node_modules/.bin/previewhost stop node-example
+./node_modules/.bin/previewhost shutdown
 ```
 
 ## Connect services from separate repositories
@@ -123,7 +125,7 @@ uses a directory before the host removes it.
 - [Stored secrets](docs/api.md#stored-secrets): select Keychain entries and enter missing values through a private browser form.
 - [Security guide](docs/security.md): execution permissions, secret access, and recovery limits.
 
-previewd does not load `.env` files. Application commands can load their own files.
+previewhost does not load `.env` files. Application commands can load their own files.
 The daemon selects environment inputs and secret names before clients use them.
 
 ## Embed the library
@@ -133,9 +135,9 @@ It serves the packaged example, makes one HTTP request, and closes the runtime:
 
 ```js
 import { fileURLToPath } from 'node:url';
-import { createPreviewRuntime } from 'previewd';
+import { createPreviewRuntime } from 'previewhost';
 
-const directory = fileURLToPath(new URL('./node_modules/previewd/examples/site', import.meta.url));
+const directory = fileURLToPath(new URL('./node_modules/previewhost/examples/site', import.meta.url));
 const runtime = await createPreviewRuntime({ allowedRoots: [directory] });
 try {
   const started = await runtime.start({ name: 'site', type: 'static', directory });
@@ -154,7 +156,23 @@ The embedded runtime does not require a separate daemon.
 See the [API and CLI reference](docs/api.md) for configuration and lifecycle contracts.
 For a TypeScript project, install `typescript` and `@types/node` as development dependencies.
 
+## Move from previewd
+
+The package and command are now `previewhost`.
+Update imports to `previewhost` and command paths to `node_modules/.bin/previewhost`.
+Replace the MCP executable path and update server names and their permission rules together.
+The library methods, HTTP routes, and `preview_*` tool names are unchanged.
+
+With the existing endpoint and token arguments, run `./node_modules/.bin/previewd shutdown` from your application directory.
+Start `./node_modules/.bin/previewhost serve` with the same roots, port, data directory, inputs, secret selections, and permissions.
+For a custom token location, retain the same `--token-file` path.
+The default remains `~/.local/share/previewd/token`.
+No data-directory move or Keychain migration is required.
+
+If data lives inside an installed package directory, retain that directory until you move the data separately.
+See [retained storage identifiers](docs/security.md#retained-storage-identifiers).
+
 ## License
 
-previewd uses the MIT license. The gateway and native supervisor adapt MIT-licensed
+previewhost uses the MIT license. The gateway and native supervisor adapt MIT-licensed
 code from Task Monki. See [NOTICE](NOTICE) for attribution.

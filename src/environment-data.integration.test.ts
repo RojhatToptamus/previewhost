@@ -37,7 +37,7 @@ async function until(check: () => Promise<boolean>) {
 }
 
 test('two consumers share external authenticated databases without acquiring deletion authority', enabled, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-external-data-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-external-data-'));
   const owner = await createDataOwner({ directory: join(directory, 'external'), dockerSocket });
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => true });
   try {
@@ -90,7 +90,7 @@ test('two consumers share external authenticated databases without acquiring del
 });
 
 test('owned database loss aborts a replacement and stops only its complete environment', enabled, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-environment-loss-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-environment-loss-'));
   await writeFile(join(directory, 'index.html'), 'available');
   const dataDirectory = join(directory, 'data');
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], dataDirectory, dockerSocket, authorize: () => true });
@@ -133,7 +133,7 @@ test('owned database loss aborts a replacement and stops only its complete envir
 });
 
 test('persistent-data authorization reserves the name and stop cancels pending deletion or recovery', enabled, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-data-authorization-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-data-authorization-'));
   await writeFile(join(directory, 'index.html'), 'available');
   let allowData = false;
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket,

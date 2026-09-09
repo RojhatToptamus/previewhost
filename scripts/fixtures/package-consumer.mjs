@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPreviewRuntime, connectPreviewDaemon } from 'previewd';
+import { createPreviewRuntime, connectPreviewDaemon } from 'previewhost';
 
 const directory = dirname(fileURLToPath(import.meta.url));
-const root = join(directory, 'node_modules/previewd');
-const binary = join(directory, 'node_modules/.bin/previewd');
+const root = join(directory, 'node_modules/previewhost');
+const binary = join(directory, 'node_modules/.bin/previewhost');
 const site = join(directory, 'site');
+const previousHome = process.env.HOME;
+process.env.HOME = join(directory, 'home');
 const children = new Set();
 let runtime, client, daemon, rpcChild;
 let daemonInfo;
@@ -42,8 +45,10 @@ async function fetchText(url) { const response = await fetch(url, { signal: Abor
 async function gone(url) { await assert.rejects(fetch(url, { signal: AbortSignal.timeout(2000) })); }
 
 try {
-  assert.equal(import.meta.resolve('previewd'), new URL('./node_modules/previewd/dist/index.js', import.meta.url).href);
+  assert.equal(import.meta.resolve('previewhost'), new URL('./node_modules/previewhost/dist/index.js', import.meta.url).href);
   const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  assert.equal(manifest.name, 'previewhost');
+  assert.deepEqual(manifest.bin, { previewhost: './dist/cli.js' });
   for (const hook of ['preinstall', 'install', 'postinstall']) assert.equal(manifest.scripts[hook], undefined);
   for (const extra of ['typescript', '@types/node', '@modelcontextprotocol/client']) await assert.rejects(stat(join(directory, 'node_modules', extra)));
   assert((await stat(binary)).mode & 0o111);
@@ -51,7 +56,7 @@ try {
   await writeFile(join(site, 'index.html'), 'packaged-static');
   await writeFile(join(site, 'server.mjs'), 'import http from "node:http"; http.createServer((_q,r)=>r.end(JSON.stringify({message:"packaged-native",pid:process.pid}))).listen(Number(process.env.PORT),"127.0.0.1");');
   const help = child(['--help']); help.stdin.end();
-  assert.equal((await bounded(help.closed)).code, 0); assert.match(help.output, /previewd serve/); assert.equal(help.errors, '');
+  assert.equal((await bounded(help.closed)).code, 0); assert.match(help.output, /previewhost serve/); assert.equal(help.errors, '');
   record('installed-inventory-and-cli-help', { node: process.version });
 
   runtime = await createPreviewRuntime({ allowedRoots: [site] });
@@ -61,14 +66,19 @@ try {
   await runtime.close(); runtime = undefined; await gone(ready.url);
   record('clean-esm-library-static-start-fetch-close');
 
-  const tokenFile = join(directory, 'private', 'token');
-  daemon = child(['serve', '--root', site, '--allow-exec', '--port', '0', '--token-file', tokenFile]);
+  const tokenFile = join(process.env.HOME, '.local/share/previewd/token');
+  await mkdir(dirname(tokenFile), { recursive: true, mode: 0o700 });
+  const existingToken = randomBytes(32).toString('hex');
+  await writeFile(tokenFile, existingToken, { mode: 0o600 });
+  daemon = child(['serve', '--root', site, '--allow-exec', '--port', '0']);
   await bounded(new Promise((resolve, reject) => {
     const inspect = () => { if (daemon.output.includes('\n')) { daemon.stdout.off('data', inspect); try { daemonInfo = JSON.parse(daemon.output.split('\n')[0]); resolve(); } catch (error) { reject(error); } } };
     daemon.stdout.on('data', inspect); daemon.once('close', () => reject(new Error('Daemon exited before readiness'))); inspect();
   }));
-  const flags = ['--endpoint', daemonInfo.endpoint, '--token-file', tokenFile];
-  client = connectPreviewDaemon({ endpoint: daemonInfo.endpoint, tokenFile });
+  assert.equal(daemonInfo.tokenFile, tokenFile);
+  assert.equal(await readFile(tokenFile, 'utf8'), existingToken);
+  const flags = ['--endpoint', daemonInfo.endpoint];
+  client = connectPreviewDaemon({ endpoint: daemonInfo.endpoint });
   const filename = join(directory, 'static.json');
   await writeFile(filename, JSON.stringify({ name: 'cli-static', type: 'static', directory: site }));
   const cliReady = await cli(['start', '--file', filename, ...flags]);
@@ -108,7 +118,8 @@ try {
     rpcChild.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
     return bounded(result);
   }
-  await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'previewd-package-review', version: '1.0.0' } });
+  const initialization = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'previewhost-package-review', version: '1.0.0' } });
+  assert.equal(initialization.serverInfo.name, 'previewhost');
   rpcChild.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
   const tools = await rpc('tools/list');
   assert.equal(tools.tools.length, 12);
@@ -131,8 +142,10 @@ try {
   await gone(daemonInfo.endpoint);
   await gone(cliNative.url);
   assert.throws(() => process.kill(cliApplication.pid, 0), { code: 'ESRCH' });
-  record('daemon-shutdown-resource-cleanup', { reusableTokenRetainedPrivately: true });
+  assert.equal(await readFile(tokenFile, 'utf8'), existingToken);
+  record('daemon-shutdown-resource-cleanup', { existingPreviewdTokenReused: true });
 } finally {
+  if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
   await runtime?.close();
   if (client) { await client.shutdown().catch(() => {}); await client.close(); }
   for (const proc of children) proc.kill('SIGTERM');

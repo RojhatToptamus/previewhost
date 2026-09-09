@@ -14,7 +14,7 @@ import { PreviewError } from './errors.js';
 import { createPreviewRuntime } from './runtime.js';
 
 async function fixture(t: TestContext, authorize?: RuntimeOptions['authorize']) {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd transport '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost transport '));
   const tokenFile = join(directory, 'private', 'token');
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize });
   const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
@@ -116,7 +116,7 @@ test('private token files reject symlinks, broad permissions, and unsafe directo
 });
 
 test('daemon token directories are excluded from existing and future static previews, including aliases', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd private source '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost private source '));
   const privateDirectory = join(directory, 'private');
   await mkdir(privateDirectory, { mode: 0o700 });
   await writeFile(join(directory, 'index.html'), 'public');
@@ -208,7 +208,7 @@ test('long waits leave control capacity for exact cancellation, and aborting a w
 });
 
 test('shutdown returns cleanup failure before closing the control connection', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd shutdown '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost shutdown '));
   const runtime = await createPreviewRuntime({ allowedRoots: [directory] });
   const originalClose = runtime.close.bind(runtime);
   runtime.close = async () => { await originalClose(); throw new PreviewError('CLEANUP_INCOMPLETE', 'Unverified fixture resource.'); };

@@ -21,7 +21,7 @@ An edit can affect the active server before replacement.
 Separate prepared directories are necessary for source isolation.
 
 Attached HTTP servers, PostgreSQL, and Redis remain external resources.
-previewd closes its connections but does not stop or delete an attached service.
+previewhost closes its connections but does not stop or delete an attached service.
 
 ## Authority
 
@@ -31,7 +31,7 @@ Origin header. Preview listeners contain no control routes.
 Private secret forms use separate browser authorization, described below.
 
 The token file uses mode 0600 in an owner-only directory.
-previewd rejects unsafe permissions, wrong ownership, symlinks, and non-regular files.
+previewhost rejects unsafe permissions, wrong ownership, symlinks, and non-regular files.
 Anyone who can read the token can call every daemon operation.
 The token remains after shutdown so configured clients can reconnect.
 
@@ -74,6 +74,22 @@ and directory listings. They exclude the private data directory and its resolved
 Attachments connect only to IPv4 loopback.
 These checks do not isolate hostile filesystem changes by another same-user process.
 
+## Retained storage identifiers
+
+The package rename preserves existing storage and credentials:
+
+- The default token remains at `~/.local/share/previewd/token`.
+- `--data-dir` and `dataDirectory` still select the exact directory supplied by the owner.
+- Docker names retain `previewd-`. Ownership labels retain `io.previewd.*`.
+- Managed PostgreSQL retains its `previewd` user and database.
+- Keychain services retain `dev.previewd.user`, `dev.previewd.database`, and `dev.previewd.migration`.
+- The native helper retains its signing identifier and the `previewd: ` item label.
+
+Existing records and credential references remain in place.
+The rename creates no second storage namespace and rotates no credentials.
+The [Keychain access rules](#stored-secrets-and-private-entry) still apply to package updates.
+The internal `x-previewd-hops` header also remains unchanged so old and new gateways detect loops together.
+
 ## Native processes
 
 macOS commands run in a separate process group with an IPC-connected supervisor.
@@ -100,19 +116,19 @@ If the supervisor fails first, the runtime checks the recorded process identity 
 A changed process title can prevent that match.
 Normal cleanup through a live supervisor still works.
 
-If ownership cannot be established, previewd reports `CLEANUP_INCOMPLETE` and retains the cleanup handle.
+If ownership cannot be established, previewhost reports `CLEANUP_INCOMPLETE` and retains the cleanup handle.
 The name remains unavailable for replacement until `stop` completes cleanup.
 A new daemon lacks the records needed to retry cleanup of those processes.
 
 If both owner and supervisor die before cleanup, remaining processes can require manual inspection.
-previewd does not infer their ownership after restart.
+previewhost does not infer their ownership after restart.
 See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
 
 ## Database ownership and recovery
 
 Managed PostgreSQL/Redis require macOS Keychain, local Docker Engine, cached
 `postgres:17-alpine`/`redis:7-alpine` images, and an explicit private data directory.
-previewd does not pull images, create networks, use remote Engines, or change Docker contexts.
+previewhost does not pull images, create networks, use remote Engines, or change Docker contexts.
 
 The data directory uses mode 0700 and records use mode 0600.
 Schema 2 records retain resource identities, credential references, and pending mutations.
@@ -121,7 +137,7 @@ User-secret commands cannot read or edit those items.
 
 A lifetime kernel lock permits one owner per data directory.
 The lock uses a permanent inode. Deleting a stale PID file cannot transfer ownership.
-Before mutation, previewd checks the Engine identity, exact objects, and reserved ownership labels.
+Before mutation, previewhost checks the Engine identity, exact objects, and reserved ownership labels.
 Friendly names or prefixes alone never authorize deletion.
 
 Credentials reach managed containers through stdin, without container environment
@@ -130,13 +146,13 @@ The local account and Docker administrator still control these resources.
 
 ### Credentials and backups
 
-On authorized open, previewd migrates schema 1 records by copying and checking
+On authorized open, previewhost migrates schema 1 records by copying and checking
 each password before it atomically saves the reference-only record.
 A conflict or failed copy preserves the original record.
 Retry compares exact values and never rotates the database password.
 Explicit schema 1 deletion also removes identifiable partial migration copies.
 
-For a new database, previewd stores and checks its password before it saves the
+For a new database, previewhost stores and checks its password before it saves the
 owner record and requests Docker creation. A crash before record creation can
 leave an unused Keychain item. No Docker data exists at that point.
 Keychain and filesystem writes do not share a transaction.
@@ -145,7 +161,7 @@ Missing retained credentials block database open without password or volume rege
 A data-directory backup does not contain schema 2 passwords.
 Back up or transfer the Keychain separately.
 Old schema 1 backups can contain plaintext passwords.
-previewd provides no credential export or automatic synchronization.
+previewhost provides no credential export or automatic synchronization.
 
 ### Stop and data deletion
 
@@ -153,7 +169,7 @@ Normal stop removes owned containers and preserves volumes and credentials.
 Authorized `deleteData` removes a stopped environment's owned data.
 It excludes source directories, external databases, images, caches, and networks.
 
-After Docker removal, previewd records the pending credential deletion before it
+After Docker removal, previewhost records the pending credential deletion before it
 calls Keychain. An unknown result remains pending for an explicit retry.
 Stop and daemon shutdown remain available. The next owner permits deletion retry
 and blocks database reopen until it completes.
@@ -168,7 +184,7 @@ It removes owned containers, preserves volumes, and waits for an explicit start.
 Retained names and cleanup errors appear in `get` and `list`.
 
 An Engine request can complete after its caller disconnects.
-previewd records the requested change before it sends the Engine request.
+previewhost records the requested change before it sends the Engine request.
 It waits for the result before normal cleanup. A missing object alone does not prove that an uncertain
 creation failed.
 

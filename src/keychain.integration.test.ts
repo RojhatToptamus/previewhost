@@ -22,6 +22,8 @@ test('real Keychain preserves exact values, atomic creation, private namespaces,
   assert.equal(await store.has('user', 'missing'), false);
   await setSecret('shared/sample', value);
   assert.equal(await store.get('user', 'shared/sample'), value);
+  // Existing entries must remain under the same Keychain service after a package rename.
+  await execute('/usr/bin/security', ['find-generic-password', '-s', 'dev.previewd.user', '-a', 'shared/sample', fixture.path]);
   assert.deepEqual(await listSecrets(), { ids: ['shared/sample'], truncated: false });
   assert.equal(await store.update('user', 'missing', 'FAKE_other'), false);
   const race = await Promise.all([store.add('user', 'race', 'FAKE_A'), store.add('user', 'race', 'FAKE_B')]);

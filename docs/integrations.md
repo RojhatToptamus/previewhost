@@ -3,9 +3,9 @@
 ## Platforms and interfaces
 
 Applications can call the ESM library, execute the CLI, send local HTTP requests,
-or expose MCP tools to a model. previewd does not select a model.
+or expose MCP tools to a model. previewhost does not select a model.
 Remote hosts need access to this machine's files and loopback network.
-previewd does not provide remote access.
+previewhost does not provide remote access.
 
 The initial release supports macOS. Checks used macOS 26.5.1 on arm64 with
 Node.js 22.23.1 and 24.19.0. Native execution rejects other operating systems.
@@ -19,16 +19,19 @@ Linux and Windows remain unverified, including static and attached previews.
 | Coding-task worktrees | Live edits, replacement, data retention, and source preservation | The host prepares and removes source directories |
 | Task Monki | HTTP attachment, approval, readiness, replacement, and independent stop | Embedded runtime and browser UI integration remain unverified |
 
-The client results below apply to the named versions and configurations.
+The recorded client, framework, browser, and Task Monki checks below used the package under its former name, `previewd`.
+The renamed package remains untested in those hosts.
+The configuration examples use the new package and server name.
+The client results apply to the named versions and configurations.
 A configuration example or successful discovery alone does not establish a working preview workflow.
 
 ## Connect an MCP client
 
-1. [Install previewd](../README.md#install-locally) in your application directory.
+1. [Install previewhost](../README.md#install-locally) in your application directory.
 2. From that directory, start the daemon in a separate terminal:
 
    ```sh
-   ./node_modules/.bin/previewd serve --root "$PWD" --allow-exec
+   ./node_modules/.bin/previewhost serve --root "$PWD" --allow-exec
    ```
 
    This permits project code to execute as your user. It does not provide a sandbox.
@@ -38,20 +41,20 @@ A configuration example or successful discovery alone does not establish a worki
 4. Add the configuration for your client below.
 5. Replace `/absolute/node/bin/node` and `/absolute/app` with your Node executable and application directory.
 6. Copy the [packaged command spec](../examples/command.json) into your client request.
-7. Set its `cwd` to `/absolute/app/node_modules/previewd/examples`.
+7. Set its `cwd` to `/absolute/app/node_modules/previewhost/examples`.
 8. Ask the client to inspect that spec.
 9. Ask the client to start the preview.
 10. Ask the client to call `preview_wait` with the attempt ID from `preview_start`.
-11. Open the returned URL. The example responds with `Hello from previewd.`
+11. Open the returned URL. The example responds with `Hello from previewhost.`
 12. Ask the client to stop `node-example`.
-13. After you finish, run `./node_modules/.bin/previewd shutdown` from your application directory.
+13. After you finish, run `./node_modules/.bin/previewhost shutdown` from your application directory.
 
 Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.
 
 The absolute Node command works without Node on the client's PATH.
-An absolute `previewd` executable still uses `env node` and needs Node on PATH.
+An absolute `previewhost` executable still uses `env node` and needs Node on PATH.
 The daemon also needs a PATH that resolves application commands, or absolute command paths.
 
 Discovery exposes twelve `preview_*` tools without a daemon. Tool operations
@@ -63,9 +66,9 @@ A client disconnect leaves daemon previews active.
 Add this server to your [Codex MCP configuration](https://developers.openai.com/codex/mcp/):
 
 ```toml
-[mcp_servers.previewd]
+[mcp_servers.previewhost]
 command = "/absolute/node/bin/node"
-args = ["/absolute/app/node_modules/previewd/dist/cli.js", "mcp"]
+args = ["/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"]
 ```
 
 ### MCP approvals
@@ -87,7 +90,7 @@ All configurations below used a read-only sandbox.
 | App Server, `on-request` | `auto_review`, start/stop approval mode `prompt` | Four agent decisions reported `approved`. No client approval requests occurred |
 
 For the verified automatic-review path, use this server and approval configuration.
-Replace the earlier `previewd` server entry with this example.
+Replace the earlier `previewhost` server entry with this example.
 Place the first five options before any table headers in the Codex configuration:
 
 ```toml
@@ -96,14 +99,14 @@ approvals_reviewer = "auto_review"
 sandbox_mode = "read-only"
 features.guardian_approval = true
 features.tool_call_mcp_elicitation = true
-[mcp_servers.previewd]
+[mcp_servers.previewhost]
 command = "/absolute/node/bin/node"
-args = ["/absolute/app/node_modules/previewd/dist/cli.js", "mcp"]
+args = ["/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"]
 
-[mcp_servers.previewd.tools.preview_start]
+[mcp_servers.previewhost.tools.preview_start]
 approval_mode = "prompt"
 
-[mcp_servers.previewd.tools.preview_stop]
+[mcp_servers.previewhost.tools.preview_stop]
 approval_mode = "prompt"
 ```
 
@@ -130,7 +133,7 @@ Codex Desktop in ChatGPT 26.901.51231, build 8109, remains unverified.
 The computer-use tool blocked access to `com.openai.codex` before a model turn.
 The block prevented selection of **Approve for me** and inspection of the effective configuration.
 No desktop MCP calls or reviewer decisions were observed.
-This test access restriction does not establish a previewd defect.
+This test access restriction does not establish a previewhost defect.
 
 ## Cursor and other MCP hosts
 
@@ -139,9 +142,9 @@ In Cursor, add this server to the project's `.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "previewd": {
+    "previewhost": {
       "command": "/absolute/node/bin/node",
-      "args": ["/absolute/app/node_modules/previewd/dist/cli.js", "mcp"]
+      "args": ["/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"]
     }
   }
 }
@@ -177,11 +180,11 @@ identify the model or establish IDE database support.
 
 ## Claude Code
 
-Use the `mcpServers` JSON structure above in a file such as `previewd.mcp.json`.
+Use the `mcpServers` JSON structure above in a file such as `previewhost.mcp.json`.
 From the project directory, start Claude Code with that file:
 
 ```sh
-claude --mcp-config ./previewd.mcp.json --strict-mcp-config --model sonnet --effort low --permission-mode manual
+claude --mcp-config ./previewhost.mcp.json --strict-mcp-config --model sonnet --effort low --permission-mode manual
 ```
 
 Claude Code 2.1.239 passed both standalone-command and API/web workflows in its
@@ -205,17 +208,17 @@ Add this server to your OpenCode configuration:
 ```json
 {
   "mcp": {
-    "previewd": {
+    "previewhost": {
       "type": "local",
-      "command": ["/absolute/node/bin/node", "/absolute/app/node_modules/previewd/dist/cli.js", "mcp"],
+      "command": ["/absolute/node/bin/node", "/absolute/app/node_modules/previewhost/dist/cli.js", "mcp"],
       "enabled": true
     }
   },
   "permission": {
-    "previewd_preview_inspect": "allow",
-    "previewd_preview_wait": "allow",
-    "previewd_preview_start": "ask",
-    "previewd_preview_stop": "ask"
+    "previewhost_preview_inspect": "allow",
+    "previewhost_preview_wait": "allow",
+    "previewhost_preview_start": "ask",
+    "previewhost_preview_stop": "ask"
   }
 }
 ```
@@ -275,17 +278,17 @@ See [preparation ownership](worktrees.md#prepare-and-start).
 
 ## Task Monki
 
-Task Monki can attach to previewd's numeric loopback URL.
+Task Monki can attach to previewhost's numeric loopback URL.
 It owns the consumer recipe, attachment, approval, worktree, and consumer process.
 
-1. Start the backend through previewd.
+1. Start the backend through previewhost.
 2. Add an HTTP attachment and its service dependency to the Task Monki consumer recipe.
 3. Pass the attachment origin through the recipe's `attached-http-origin` environment binding.
-4. Bind that attachment to the ready previewd URL.
+4. Bind that attachment to the ready previewhost URL.
 5. Resolve and approve the Task Monki preview plan.
 6. Start the Task Monki consumer preview.
 7. After use, stop the consumer in Task Monki.
-8. Stop the backend through previewd.
+8. Stop the backend through previewhost.
 
 Task Monki revision `aded142d47e1453d88fc028d9b060d5dd43babe0` passed this workflow
 with its real service, SQLite store, Git worktree, approval, and native consumer.
@@ -304,13 +307,13 @@ Save the selected spec as `preview.json` in your application directory.
 With the daemon active, run these commands from that directory:
 
 ```sh
-./node_modules/.bin/previewd start --file preview.json
-./node_modules/.bin/previewd get PREVIEW_NAME
+./node_modules/.bin/previewhost start --file preview.json
+./node_modules/.bin/previewhost get PREVIEW_NAME
 ```
 
 Replace `PREVIEW_NAME` with the spec's `name`. Open the returned URL.
-After use, run `./node_modules/.bin/previewd stop PREVIEW_NAME`.
-To close the daemon, run `./node_modules/.bin/previewd shutdown`.
+After use, run `./node_modules/.bin/previewhost stop PREVIEW_NAME`.
+To close the daemon, run `./node_modules/.bin/previewhost shutdown`.
 
 Vite 8.2.2 and Next.js 16.3.4 passed Chrome 152 checks on Node.js 22.23.1.
 Both served interactive pages and source updates through numeric URLs and
@@ -376,4 +379,4 @@ See the [Next.js CLI reference](https://nextjs.org/docs/app/api-reference/cli/ne
 ```
 
 Python must exist on the daemon PATH. This command uses Python's file server
-and its file-access rules. Use a `static` spec for previewd's own file restrictions.
+and its file-access rules. Use a `static` spec for previewhost's own file restrictions.

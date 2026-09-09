@@ -23,7 +23,7 @@ const pg = { database: { type: 'postgres' as const } };
 const dataModule = new URL('./data.js', import.meta.url).href;
 
 test('the permanent data lock excludes another process and is not inherited by unrelated children', mac, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-lock-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-lock-'));
   const owner = await createDataOwner({ directory });
   let sleeper: ReturnType<typeof spawn> | undefined;
   try {
@@ -41,7 +41,7 @@ test('the permanent data lock excludes another process and is not inherited by u
 });
 
 test('unsafe or corrupt retained records fail closed before Docker access', mac, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-record-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-record-'));
   const outside = join(directory, 'outside');
   try {
     const owner = await createDataOwner({ directory }); await owner.close();
@@ -63,7 +63,7 @@ test('unsafe or corrupt retained records fail closed before Docker access', mac,
 });
 
 test('a FIFO retained record cannot block owner startup while holding the kernel lock', mac, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-record-fifo-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-record-fifo-'));
   try {
     const owner = await createDataOwner({ directory }); await owner.close();
     await promisify(execFile)('/usr/bin/mkfifo', ['-m', '600', join(directory, 'sample.json')]);
@@ -273,7 +273,7 @@ test('failed intent publication and missing cached images dispatch no Docker mut
 
 type FaultMode = 'volume-lost-absent' | 'container-lost-created' | 'start-lost-created' | 'container-remove-lost';
 async function faultEngine(mode: FaultMode) {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-engine-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-engine-'));
   const data = join(directory, 'data');
   const socket = join(directory, 'engine.sock');
   const volumes = new Map<string, Record<string, any>>();

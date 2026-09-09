@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { createPreviewRuntime } from 'previewd';
+import { createPreviewRuntime } from 'previewhost';
 
 const directory = fileURLToPath(new URL('./site', import.meta.url));
 const runtime = await createPreviewRuntime({ allowedRoots: [directory] });

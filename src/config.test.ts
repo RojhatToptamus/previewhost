@@ -8,7 +8,7 @@ import { loadPreviewSpec, readPreviewSpec } from './config.js';
 import { limits } from './contracts.js';
 
 test('JSON and YAML files produce the same environment with file-relative repositories and symbolic inputs', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd config '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost config '));
   const configDirectory = join(directory, 'config');
   await mkdir(configDirectory);
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -52,7 +52,7 @@ services:
 });
 
 test('configuration rejects ambiguous YAML, extra fields, oversized input, and source excerpts in errors', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd unsafe config '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost unsafe config '));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'preview.yml');
   const secret = 'private-value-must-not-appear-in-errors';
@@ -84,7 +84,7 @@ test('configuration rejects ambiguous YAML, extra fields, oversized input, and s
 });
 
 test('the file loader preserves legacy relative specs and honors cancellation', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd legacy config '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost legacy config '));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'preview.json');
   await writeFile(file, JSON.stringify({ name: 'site', type: 'static', directory: '.' }));

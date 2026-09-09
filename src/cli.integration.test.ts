@@ -15,7 +15,7 @@ const execute = promisify(execFile);
 const cli = resolve('dist/cli.js');
 
 test('CLI file and stdin workflows share the daemon, resolve paths once, and return useful failures', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd cli '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost cli '));
   await mkdir(join(directory, 'site'));
   await writeFile(join(directory, 'site', 'index.html'), 'CLI preview');
   const file = join(directory, 'spec.json');
@@ -71,7 +71,7 @@ services:
 });
 
 test('the foreground CLI owns its daemon and explicit shutdown ends it without a hidden child owner', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd serve '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost serve '));
   const tokenFile = join(directory, 'private', 'token');
   const secret = 'selected-owner-input-must-stay-private';
   const owner = spawn(process.execPath, [cli, 'serve', '--root', directory, '--env', 'PREVIEWD_SELECTED_INPUT', '--token-file', tokenFile, '--port', '0'], {
@@ -108,7 +108,7 @@ test('the foreground CLI owns its daemon and explicit shutdown ends it without a
 });
 
 test('interrupting CLI wait closes its request but leaves the daemon candidate cancelable', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd wait '));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost wait '));
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: ({ signal }) => new Promise<boolean>((resolveApproval) => {
     signal.addEventListener('abort', () => resolveApproval(false), { once: true });
   }) });

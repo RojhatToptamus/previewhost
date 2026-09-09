@@ -6,7 +6,7 @@ The ESM package exports `createPreviewRuntime`, `connectPreviewDaemon`,
 `loadPreviewSpec`, `PreviewError`, and public TypeScript types. The runtime and
 daemon client implement `PreviewApi`.
 
-These configuration fragments assume imports from `previewd`.
+These configuration fragments assume imports from `previewhost`.
 Replace `/absolute/...` paths with your source and private storage directories.
 For a complete program with cleanup, see [Embed the library](../README.md#embed-the-library).
 
@@ -103,11 +103,11 @@ uses the root index for missing extensionless routes. Missing assets still retur
 
 Commands use argv directly, without a shell. Each literal `{port}` becomes the
 allocated port. The command must listen on that port and bind to loopback.
-previewd does not add arguments or retry a command after a port conflict.
+previewhost does not add arguments or retry a command after a port conflict.
 
 The environment inherits only `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`,
 `LC_ALL`, and `TERM`. Explicit `env` values override these values.
-`PORT`, `HOST`, and `PREVIEW_URL` are reserved for previewd.
+`PORT`, `HOST`, and `PREVIEW_URL` are reserved for previewhost.
 Other host environment values require selected `{fromEnv: NAME}` bindings or explicit literals.
 Standalone command entries accept literals, `{fromEnv: NAME}`, and `{secret: ID}`.
 Resolved `env` entries are limited to 64 KiB of UTF-8 JSON.
@@ -193,7 +193,7 @@ listed above but no per-service `name`. Owned resource types are `postgres` and
 Missing inputs, invalid references, and service-reference cycles fail before
 resource startup. Public URL references do not create readiness dependencies.
 The frontend can receive the API URL while the API receives the frontend origin for CORS.
-previewd does not search `.env` files or forward arbitrary host environment values.
+previewhost does not search `.env` files or forward arbitrary host environment values.
 Application commands can load their own files under ordinary user permissions.
 
 The numeric URL reaches only `primary`. Each HTTP service also has
@@ -264,7 +264,7 @@ active and status reports `cleanup-incomplete`. Another replacement requires a s
 An environment changes all application routes together. Database resources stay
 shared across active and candidate applications. Candidate failure preserves
 the active application and its databases.
-If an owned service fails after startup, previewd stops the environment's owned services.
+If an owned service fails after startup, previewhost stops the environment's owned services.
 External connection checks run only at startup.
 
 Replacement cannot undo source edits, database writes, or migrations performed
@@ -285,12 +285,12 @@ removes an attached database, source directory, image, or unrelated Docker objec
 For an uncertain Docker creation, an absent object alone does not permit cleanup.
 After the operator restarts the actual local Engine, explicit
 `stop(name, {afterEngineRestart: true})` requests authorized recovery.
-The flag asserts that the Engine restart occurred. previewd does not restart Docker or
+The flag asserts that the Engine restart occurred. previewhost does not restart Docker or
 infer completion from an absent object alone.
 
 ## CLI
 
-Run `previewd --help` for the complete syntax. Results use JSON on stdout.
+Run `previewhost --help` for the complete syntax. Results use JSON on stdout.
 Errors use `{ "error": { "code": "...", "message": "..." } }` on stderr.
 Successful commands exit 0. Errors exit nonzero. An interrupted client exits 130.
 
@@ -301,19 +301,19 @@ An error after a successful start request includes the name and attempt ID.
 
 The command examples below assume a spec named `app` in `preview.json` and an active daemon.
 They show separate operations. `ATTEMPT_ID` is the candidate ID from start or status.
-Use `./node_modules/.bin/previewd` for a local installation without `previewd` on PATH.
+Use `./node_modules/.bin/previewhost` for a local installation without `previewhost` on PATH.
 
 ```sh
-previewd inspect --file preview.json
-previewd start --file preview.json --no-wait
-previewd wait app ATTEMPT_ID --timeout-ms 30000
-previewd replace --file preview.json
-previewd get app
-previewd logs app ATTEMPT_ID --max-bytes 8192
-previewd cancel app ATTEMPT_ID
-previewd stop app
-previewd delete-data shop
-previewd shutdown
+previewhost inspect --file preview.json
+previewhost start --file preview.json --no-wait
+previewhost wait app ATTEMPT_ID --timeout-ms 30000
+previewhost replace --file preview.json
+previewhost get app
+previewhost logs app ATTEMPT_ID --max-bytes 8192
+previewhost cancel app ATTEMPT_ID
+previewhost stop app
+previewhost delete-data shop
+previewhost shutdown
 ```
 
 `shop` represents a stopped environment with managed data.
@@ -338,7 +338,7 @@ requests recovery after a Docker Engine restart, as described above. It never im
 ## Stored secrets
 
 Stored secrets require macOS 13 or later and the packaged Keychain helper.
-Commands below use `previewd` from PATH, or `./node_modules/.bin/previewd` from your application directory.
+Commands below use `previewhost` from PATH, or `./node_modules/.bin/previewhost` from your application directory.
 `shop/dev/token` is an example name. `preview.yaml` must bind that name with `{secret: shop/dev/token}`.
 For setup or edit, start the daemon with `--allow-exec --secret shop/dev/token`.
 Replace `REQUEST_ID` with the ID from setup or edit.
@@ -355,14 +355,14 @@ authorization and source checks, before candidate resources or databases start.
 Only declared recipients receive each value. Failed replacement preserves active routes.
 
 ```sh
-previewd secrets setup --file preview.yaml
-previewd secrets setup --file preview.yaml --reopen
-previewd secrets edit shop/dev/token
-previewd secrets status REQUEST_ID
-previewd secrets set shop/dev/token
-previewd secrets set shop/dev/token --stdin
-previewd secrets list
-previewd secrets remove shop/dev/token
+previewhost secrets setup --file preview.yaml
+previewhost secrets setup --file preview.yaml --reopen
+previewhost secrets edit shop/dev/token
+previewhost secrets status REQUEST_ID
+previewhost secrets set shop/dev/token
+previewhost secrets set shop/dev/token --stdin
+previewhost secrets list
+previewhost secrets remove shop/dev/token
 ```
 
 Setup/edit/status use the daemon and accept `--endpoint` and `--token-file`.
@@ -406,12 +406,12 @@ Updates affect later resolutions. Running applications can retain old values.
 For credentials that must change together, first cancel pending starts.
 Stop all consuming daemons before you update the entries.
 After the update, restart those daemons.
-previewd does not track secret use across daemons.
+previewhost does not track secret use across daemons.
 Local removal does not revoke a credential at its issuer.
 
 After use, stop the preview.
 Shut down its daemon.
-To remove the example entry, run `previewd secrets remove shop/dev/token`.
+To remove the example entry, run `previewhost secrets remove shop/dev/token`.
 
 See [Keychain permissions and recovery](security.md#stored-secrets-and-private-entry).
 

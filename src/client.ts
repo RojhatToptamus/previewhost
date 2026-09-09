@@ -8,6 +8,7 @@ import { PreviewError } from './errors.js';
 
 export interface ClientOptions { endpoint?: string; tokenFile?: string }
 export const defaultEndpoint = 'http://127.0.0.1:9400';
+// Retain the existing token path so renamed clients reconnect without moving secrets.
 export const defaultTokenFile = (): string => join(homedir(), '.local', 'share', 'previewd', 'token');
 
 /** Shared by the local transport's reader and creator, not a permission grant. */
@@ -39,7 +40,7 @@ export async function readToken(path: string): Promise<string> {
   } catch (error) {
     if (error instanceof PreviewError) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new PreviewError('DAEMON_UNAVAILABLE', `No daemon token exists at ${path}. Start previewd serve with this --token-file.`);
+      throw new PreviewError('DAEMON_UNAVAILABLE', `No daemon token exists at ${path}. Start previewhost serve with this --token-file.`);
     }
     throw new PreviewError('UNAUTHORIZED', 'Cannot read the token file safely. Check its ownership, permissions, and symlinks.');
   }
@@ -95,7 +96,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
       });
       req.once('error', (error) => {
         finish(error instanceof PreviewError ? error : new PreviewError('DAEMON_UNAVAILABLE',
-          `Cannot reach previewd at ${endpoint.origin}. Start previewd serve --port ${port} with the same --token-file. A failed mutation response does not prove the operation stopped.`));
+          `Cannot reach previewhost at ${endpoint.origin}. Start previewhost serve --port ${port} with the same --token-file. A failed mutation response does not prove the operation stopped.`));
       });
       req.once('upgrade', (_res, socket) => {
         socket.destroy();
@@ -127,7 +128,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
             } else if (res.statusCode === 200 && 'result' in data) finish(undefined, data.result as T);
             else throw new Error('Invalid response');
           } catch {
-            finish(new PreviewError('DAEMON_UNAVAILABLE', 'The control endpoint returned an invalid previewd response.'));
+            finish(new PreviewError('DAEMON_UNAVAILABLE', 'The control endpoint returned an invalid previewhost response.'));
           }
         });
       });
@@ -154,7 +155,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
       closed = true;
       await Promise.all([...pending].map((req) => new Promise<void>((done) => {
         req.once('close', done);
-        req.destroy(new PreviewError('CLOSED', 'The previewd client was closed.'));
+        req.destroy(new PreviewError('CLOSED', 'The previewhost client was closed.'));
       })));
     },
   };

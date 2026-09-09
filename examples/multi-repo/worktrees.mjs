@@ -10,7 +10,7 @@ const usage = `Use existing shared-notes task directories:
 The frontend directory contains server.mjs. The backend directory contains api/
 and reporting/. The selected file owns commands, bindings, and readiness rules.
 The default file is environment.yaml beside this script. Paths resolve from the
-current directory. Output is one JSON spec for previewd inspect/start/replace --file -.
+current directory. Output is one JSON spec for previewhost inspect/start/replace --file -.
 This command does not install packages, start previews, or change source files.
 `;
 

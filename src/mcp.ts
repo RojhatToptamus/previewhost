@@ -6,7 +6,7 @@ import { failure, PreviewError } from './errors.js';
 
 /** All tools call the same public API; the MCP host owns tool approval UI. */
 export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi, 'secretsSetup' | 'secretsStatus'>>): McpServer {
-  const server = new McpServer({ name: 'previewd', version: '0.1.0' }, {
+  const server = new McpServer({ name: 'previewhost', version: '0.1.0' }, {
     instructions:
       'Use existing task sources with an explicitly started daemon. Commands run as argv without a shell. Use ' +
       '{port} and 127.0.0.1 for listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. ' +
@@ -97,7 +97,7 @@ export function createMcpServer(client: PreviewApi & Partial<Pick<SecretSetupApi
   }, ({ name }) => run('request', () => client.deleteData(name)));
   if (client.secretsSetup && client.secretsStatus) {
     server.registerTool('preview_secrets_setup', {
-      description: 'Open the owner’s private local browser form for missing selected secret names in this spec. Returns public request metadata only. Never supply credential values. Requires daemon owner setup authorization. If browser opening fails, ask the owner to use previewd secrets set with hidden input. Existing entries are never overwritten. Saving starts no code; retry ordinary start/replace after checking status.',
+      description: 'Open the owner’s private local browser form for missing selected secret names in this spec. Returns public request metadata only. Never supply credential values. Requires daemon owner setup authorization. If browser opening fails, ask the owner to use previewhost secrets set with hidden input. Existing entries are never overwritten. Saving starts no code; retry ordinary start/replace after checking status.',
       inputSchema: secretRequestSchemas.setup.omit({ reopen: true }), annotations: write,
     }, ({ spec }, context) => run('request', () => client.secretsSetup!(spec, { signal: context.mcpReq.signal })));
     server.registerTool('preview_secrets_status', {
@@ -114,7 +114,7 @@ export function runMcp(options: ClientOptions = {}): { close(): Promise<void> } 
   let closing: Promise<void> | undefined;
   const handle = serveStdio(() => createMcpServer(client), {
     transport: new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: limits.controlBytes }),
-    onerror: () => { process.stderr.write('previewd MCP transport error.\n'); void close(); },
+    onerror: () => { process.stderr.write('previewhost MCP transport error.\n'); void close(); },
   });
   function close(): Promise<void> {
     if (!closing) {
