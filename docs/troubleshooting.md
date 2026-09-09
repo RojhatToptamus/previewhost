@@ -42,10 +42,22 @@ Verify that review events and decisions occur. Reviewer selection alone is insuf
 The [tested approval configurations](integrations.md#mcp-approvals) distinguish
 automatic review from App Server responses supplied by a client.
 
+The [desktop interface record](integrations.md#codex-desktop) lists the separate
+UI access blocker. The successful headless checks do not verify “Approve for me”
+through the desktop interface.
+
 A reviewer denial, a timeout, and a canceled client elicitation are different outcomes.
 For a denial, read the review rationale. For client-mediated approval, approve the
 specific operation through that client. The daemon still requires its own launch
 permission for native execution.
+
+## Cursor waits for MCP approval
+
+Check the tool name and arguments, then use Cursor's `Run` or `Skip` control.
+The [Cursor IDE check](integrations.md#cursor-ide) required manual approval for
+both stop calls. Inspect, start, and wait had no observed per-call prompts.
+Successful dispatch alone does not establish that an automatic reviewer approved
+a call. Cursor's observed approval behavior differs from the Codex review records.
 
 ## Startup fails or times out
 

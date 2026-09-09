@@ -63,8 +63,9 @@ On success, the check removes its temporary consumer after its owned processes c
 On failure, it retains that directory for diagnosis and cleanup verification.
 
 Review `npm pack --dry-run` for unintended files. Current release evidence covers
-macOS 26.5.1 on arm64. Codex Desktop and Cursor IDE remain unverified; headless and
-SDK checks do not establish GUI compatibility.
+macOS 26.5.1 on arm64. See [tested integrations](docs/integrations.md) for each
+client's results and blockers. Headless and SDK checks do not establish
+GUI compatibility.
 
 ## Change the product
 

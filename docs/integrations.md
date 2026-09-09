@@ -20,7 +20,8 @@ require macOS process tools, but Linux and Windows behavior remains unverified.
 | CLI and daemon | JSON/YAML environment startup, service outcomes, selected owner inputs, authentication, and shutdown | Foreground daemon must already run |
 | MCP SDK | Environment lifecycle and private secret setup/status. Both protocol eras discover tools and return tool errors | Host-specific approval UI remains outside previewd |
 | Codex 0.146.0 | Automatic MCP review in exec and App Server; command/environment startup and stop; database and secret lifecycles | Model checks use `gpt-5.5`; database checks use direct App Server MCP. Desktop UI remains unverified |
-| Cursor Agent | Three-application database lifecycle; private secret setup and retry | Headless model sessions on the versions named below. IDE behavior remains unverified |
+| Cursor Agent | Three-application database lifecycle; private secret setup and retry | Headless model sessions on the versions named below |
+| Cursor IDE 3.19.14 | Model-driven inspect, start, wait, and stop for standalone and API/web previews | Composer 2.5 Fast; both stop calls required manual approval |
 | Task Monki | Real HTTP dependency approval, readiness, replacement, and independent stop | Engine embedding and production UI integration remain unverified |
 
 Additional client and framework results appear in their sections. Client versions
@@ -151,6 +152,18 @@ with the received request ID. This response grants the current call without a
 saved approval. See the [App Server protocol](https://learn.chatgpt.com/docs/app-server).
 The `never`-policy harness test used this separate approval path.
 
+### Codex Desktop
+
+The interface check targeted Codex Desktop in ChatGPT 26.901.51231, build 8109,
+on macOS 26.5.1 arm64. The computer-use tool refused access to `com.openai.codex`
+with “Computer Use is not allowed to use the app 'com.openai.codex' for safety reasons.”
+
+The check could not select “Approve for me”, inspect effective configuration,
+or submit a model turn. No desktop MCP calls or reviewer decisions were observed.
+The model and approval behavior remain unverified. This access restriction is a
+test blocker, not a previewd runtime failure. The exec and App Server results
+above remain separate evidence.
+
 ## Cursor and other MCP hosts
 
 Use this project-level `.cursor/mcp.json` configuration in Cursor:
@@ -169,7 +182,38 @@ Use this project-level `.cursor/mcp.json` configuration in Cursor:
 Start the daemon separately. Use the host approval controls to enable the server
 and its tools. Native execution also requires the daemon launch permission.
 Substitute actual Node and CLI paths as described above. The minimal-PATH package
-check verifies this launch form; Cursor IDE remains unverified.
+check verifies this launch form.
+
+Other stdio MCP hosts can use the same executable and arguments. previewd supports
+tool discovery without a running daemon. Actual tool operations require the daemon.
+Host and model combinations that do not appear in the verified table remain unverified.
+
+### Cursor IDE
+
+Cursor IDE 3.19.14 with Composer 2.5 Fast passed both fixture workflows on macOS
+26.5.1 arm64 with Node.js 22.23.1. Its model made eight MCP calls: inspect, start,
+wait, and stop for a standalone command and an API/web environment.
+
+The project-local `previewd_desktop_test` server used the installed package, an
+absolute Node executable, and a transparent stdio recorder. Its arguments selected
+the dedicated daemon endpoint and token file. No MCP approval overrides were added.
+Cursor discovered twelve tools. The effective mode was `Allowlist (with Sandbox)`,
+with an empty MCP allowlist and `MCP Tools Protection` off.
+
+Inspect, start, and wait dispatched without observed per-call prompts. Each stop
+displayed `Waiting for Approval` with `Run` and `Skip`. The recorder showed that
+each stop had not dispatched before its `Run` button was clicked. Both approved
+calls then dispatched and stopped their previews. These were manual client
+approvals. No automatic-review decision payload was captured for any call.
+
+Independent HTTP checks verified availability, web-to-API connectivity, and the
+injected numeric and service origins. Cleanup checks found all three application
+processes, their groups, both MCP connections, and all six listeners gone after
+daemon shutdown. The temporary server configuration was removed, and Cursor's
+original run mode was restored. Global configuration files and fixture sources
+remained unchanged. This IDE check used no databases or stored secrets.
+
+### Cursor Agent
 
 Cursor Agent 2026.08.25-3e8eec8 discovered all ten tools and completed one headless model turn.
 The turn made twelve previewd calls through inspect, start, wait, get, list,
@@ -180,11 +224,7 @@ switched to v2 at the same public URL.
 Stop retained both databases. A separate public client reopened the environment
 and verified both values before deleting the fixture data. Only previewd's MCP
 server was enabled. Temporary project settings preserved global configuration.
-Cursor IDE behavior remains unverified.
-
-Other stdio MCP hosts can use the same executable and arguments. previewd supports
-tool discovery without a running daemon. Actual tool operations require the daemon.
-Host and model combinations that do not appear in the verified table remain unverified.
+These database checks used the headless client.
 
 ### Private secret setup
 
