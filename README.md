@@ -1,8 +1,13 @@
 <p align="center">
   <img src="./assets/previewhost.svg" width="144" height="144" alt="previewhost app icon">
 </p>
-<h1 align="center">previewhost</h1>
 
+<h1 align="center">previewhost</h1>
+  <p align="center">
+    <a href="https://www.npmjs.com/package/previewhost">
+      <img src="https://img.shields.io/npm/v/previewhost.svg?style=flat-square" alt="NPM version" />
+    </a>
+  </p>
 previewhost runs local preview environments for applications with multiple services.
 An environment can connect frontends, backends, and PostgreSQL or Redis databases across repositories and Git worktrees.
 
