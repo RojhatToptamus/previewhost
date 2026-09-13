@@ -24,6 +24,11 @@ export function isWithin(root: string, filename: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+export function sourceDirectories(spec: EffectiveSpec): string[] {
+  const services = spec.type === 'environment' ? Object.values(spec.services) : [spec];
+  return [...new Set(services.flatMap(service => service.type === 'command' ? [service.cwd] : service.type === 'static' ? [service.directory] : []))].sort();
+}
+
 export async function canonicalDirectory(directory: string): Promise<string> {
   if (typeof directory !== 'string' || !path.isAbsolute(directory)) throw new PreviewError('INVALID_INPUT', 'Use an absolute source directory.');
   try {
@@ -36,17 +41,26 @@ export async function canonicalDirectory(directory: string): Promise<string> {
 }
 
 export async function normalizeSpec(spec: EffectiveSpec, roots: string[], inputs: Readonly<Record<string, string>> = {}, privateDirectories: ReadonlySet<string> = new Set()): Promise<EffectiveSpec> {
+  const services = spec.type === 'environment' ? Object.values(spec.services) : [spec];
+  for (const service of services) {
+    if (service.type === 'command') {
+      for (const value of Object.values(service.env)) {
+        if (typeof value === 'object' && 'fromEnv' in value) resolveInput(value, inputs);
+      }
+    } else if ((service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'object' && 'fromEnv' in service.url) {
+      validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', resolveInput(service.url, inputs));
+    }
+  }
+  return normalizeSources(spec, roots, privateDirectories);
+}
+
+/** Source validation shared with configuration saving, without resolving any values. */
+export async function normalizeSources(spec: EffectiveSpec, roots: string[], privateDirectories: ReadonlySet<string> = new Set()): Promise<EffectiveSpec> {
   if (spec.type === 'attach') return spec;
   if (spec.type === 'environment') {
     const services = Object.fromEntries(await Promise.all(Object.entries(spec.services).map(async ([id, service]) => {
-      if (service.type === 'command') {
-        for (const value of Object.values(service.env)) {
-          if (typeof value === 'object' && 'fromEnv' in value) resolveInput(value, inputs);
-        }
-      } else if (service.type === 'external-postgres' || service.type === 'external-redis') {
-        if (typeof service.url === 'string' || 'fromEnv' in service.url) {
-          validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', resolveInput(service.url, inputs));
-        }
+      if ((service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'string') {
+        validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', service.url);
       }
       if (service.type !== 'static' && service.type !== 'command') return [id, service];
       const directory = await allowedDirectory(service.type === 'static' ? service.directory : service.cwd, roots);
@@ -57,7 +71,6 @@ export async function normalizeSpec(spec: EffectiveSpec, roots: string[], inputs
   }
   const directory = await allowedDirectory(spec.type === 'static' ? spec.directory : spec.cwd, roots);
   if (spec.type === 'static') checkStaticSource(directory, privateDirectories);
-  else for (const value of Object.values(spec.env)) if (typeof value === 'object' && 'fromEnv' in value) resolveInput(value, inputs);
   return spec.type === 'static' ? { ...spec, directory } : { ...spec, cwd: directory };
 }
 

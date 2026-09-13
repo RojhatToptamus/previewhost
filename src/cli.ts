@@ -2,24 +2,28 @@
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { connectPreviewDaemon, defaultTokenFile } from './client.js';
-import { limits, type PreviewSpec } from './contracts.js';
+import { limits, type AttemptResult, type PreviewSpec } from './contracts.js';
 import { loadPreviewSpec, readPreviewSpec } from './config.js';
 import { startDaemon } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
 import { listSecrets, removeSecret, setSecret, validateSecretId } from './secrets.js';
 import { readSecretInput } from './secret-input.js';
+import { connectProject, projectDirectory, type ProjectOptions } from './project.js';
+import { version } from './version.js';
 
 const help = `previewhost — local previews and application environments
 
 Owner:
   previewhost serve [--root DIR ...] [--allow-exec] [--env NAME ...] [--secret ID ...]
                     [--data-dir DIR] [--docker-socket PATH] [--port 9400] [--token-file PATH]
-  previewhost mcp [--endpoint http://127.0.0.1:9400] [--token-file PATH]
+  previewhost mcp [--project DIR] [--allow-exec] [--root DIR ...]
+                  [--env NAME ...] [--secret ID ...] [--data-dir DIR] [--docker-socket PATH]
+  previewhost --version
 
 Preview operations:
-  previewhost inspect --file spec.yaml
-  previewhost start --file spec.yaml [--no-wait] [--timeout-ms 30000]
-  previewhost replace --file spec.yaml [--no-wait] [--timeout-ms 30000]
+  previewhost inspect [--file spec.yaml]
+  previewhost start [--file spec.yaml] [--allow-exec] [--no-wait] [--timeout-ms 30000]
+  previewhost replace [--file spec.yaml] [--no-wait] [--timeout-ms 30000]
   previewhost list
   previewhost get NAME
   previewhost wait NAME ATTEMPT_ID [--timeout-ms 30000]
@@ -30,23 +34,31 @@ Preview operations:
   previewhost shutdown
 
 Secrets:
-  previewhost secrets setup --file spec.yaml [--reopen]
+  previewhost secrets setup [--file spec.yaml] [--allow-exec] [--reopen]
   previewhost secrets edit ID
-  previewhost secrets status REQUEST_ID
+  previewhost secrets status REQUEST_ID [--timeout-ms 25000]
   previewhost secrets set ID [--stdin]
   previewhost secrets list
   previewhost secrets remove ID
 
-All client commands accept --endpoint and --token-file. The default token file is
-~/.local/share/previewd/token. Serve stays in the foreground; its default allowed
-root is the current directory. --allow-exec grants native execution, managed
-database operations, and explicit data deletion/recovery. It is not a sandbox.
+Clients use one persistent owner per Git worktree root (cwd outside Git), or
+--project DIR. Start/replace and secret setup/edit start it automatically.
+Inspection works offline. Read/status/cleanup commands never create an owner.
+MCP, inspect/start/replace, and secrets setup/edit accept the owner launch options
+shown above. Incompatible options leave a living owner unchanged.
+Explicit --endpoint or --token-file selects connection-only mode. Its defaults
+are http://127.0.0.1:9400 and ~/.local/share/previewd/token. This mode accepts no
+launch permissions. Serve remains a supported foreground owner.
+--allow-exec grants native execution, managed database operations, private secret
+setup, and explicit data deletion/recovery. It is not a sandbox.
 --env NAME selects that host environment value once at startup. Values stay out
 of status. Managed PostgreSQL/Redis require --data-dir and local Docker images.
 --docker-socket selects a local Engine socket and requires --data-dir.
 --secret ID selects an exact macOS Keychain entry for {secret: ID} bindings.
 --allow-exec selects no secrets by itself. Private browser setup/edit needs owner
-authorization. Save starts nothing; retry the ordinary preview operation afterward.
+authorization. The private form approves unselected names for this owner lifetime,
+then collects only missing values. Shared names reuse one Keychain value.
+Save starts nothing; check status and retry the ordinary preview operation afterward.
 Set/list/remove work without a daemon. Set uses hidden terminal input or bounded
 UTF-8 stdin, never an argument value. Stdin preserves whitespace and newlines.
 Terminal Enter submits; bracketed paste preserves pasted newlines. Ctrl-C cancels.
@@ -54,10 +66,13 @@ An edit affects future readers; running applications retain their delivered valu
 
 Use --file - (or omit --file with piped stdin) to read JSON. Source paths in a file
 resolve relative to that file; stdin paths resolve relative to the current directory.
+Without explicit file or nonempty stdin, use project-root preview.yml. It is optional;
+direct JSON input works without creating a file. Invalid default files are errors.
 YAML files reject aliases, tags, merge keys, and duplicate keys. previewhost does not
 load .env files. Application commands can. Source directories stay live and caller-owned.
 Environment status includes each service and retained database data.
-Start/replace wait up to 30 seconds by default. A timeout or interrupted wait does
+Start/replace wait up to 30 seconds by default and return state starting if still
+pending after that wait. A timeout or interrupted wait does
 not cancel the preview. Use get/list after an uncertain response, or cancel with
 the exact attempt id. A disconnected MCP adapter leaves daemon previews running.
 
@@ -77,10 +92,20 @@ function integer(value: string | undefined, name: string, maximum: number, minim
   return Number(value);
 }
 
-async function readSpec(file: string | undefined, signal: AbortSignal): Promise<PreviewSpec> {
-  if ((!file || file === '-') && process.stdin.isTTY) throw new PreviewError('INVALID_INPUT', 'Use --file spec.json or pipe one JSON spec to stdin.');
-  return file && file !== '-' ? loadPreviewSpec(file, { signal }) :
-    readPreviewSpec(process.stdin, { baseDirectory: process.cwd(), format: 'json', signal });
+async function readSpec(file: string | undefined, signal: AbortSignal, project: string): Promise<PreviewSpec> {
+  if (file && file !== '-') return loadPreviewSpec(file, { signal });
+  if (file === '-' && process.stdin.isTTY) throw new PreviewError('INVALID_INPUT', 'Pipe one JSON spec to --file -.');
+  const fallbackFile = file === undefined ? resolve(project, 'preview.yml') : undefined;
+  if (process.stdin.isTTY) return loadPreviewSpec(fallbackFile!, { signal });
+  return readPreviewSpec(process.stdin, { baseDirectory: process.cwd(), format: 'json', signal, fallbackFile });
+}
+
+const launchFlags = ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket'];
+function projectOptions(values: ReturnType<typeof parseCliArgs>['values'], project: string): ProjectOptions {
+  return { projectDirectory: project, endpoint: values.endpoint, tokenFile: values['token-file'],
+    allowedRoots: values.root?.map(root => resolve(root)), allowExec: values['allow-exec'], inputKeys: values.env,
+    secretIds: values.secret, dataDirectory: values['data-dir'], dockerSocket: values['docker-socket'],
+  };
 }
 
 async function main(): Promise<void> {
@@ -89,6 +114,7 @@ async function main(): Promise<void> {
   catch { throw new PreviewError('INVALID_INPUT', 'Invalid command arguments. Run previewhost --help.'); }
   const { values, positionals } = parsed;
   const command = positionals[0];
+  if (values.version) { process.stdout.write(`${version}\n`); return; }
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
   if (command === 'secrets') { await secretCommand(positionals.slice(1), values); return; }
   const accepted: Record<string, string[]> = {
@@ -103,11 +129,12 @@ async function main(): Promise<void> {
     'delete-data': ['endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
   };
   if (!Object.hasOwn(accepted, command)) throw new PreviewError('INVALID_INPUT', 'Unknown command. Run previewhost --help.');
+  if (command !== 'serve') accepted[command].push('project');
+  if (['mcp', 'inspect', 'start', 'replace'].includes(command)) accepted[command].push(...launchFlags);
   for (const key of Object.keys(values)) if (!accepted[command].includes(key)) throw new PreviewError('INVALID_INPUT', `--${key} is not supported for ${command}.`);
   const counts: Record<string, [number, number]> = { get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
   const [minimum, maximum] = counts[command] ?? [1, 1];
   if (positionals.length < minimum || positionals.length > maximum) throw new PreviewError('INVALID_INPUT', `Invalid arguments for ${command}. Run previewhost --help.`);
-  const endpoint = values.endpoint;
   const tokenFile = values['token-file'] ? resolve(values['token-file']) : defaultTokenFile();
   const timeoutMs = integer(values['timeout-ms'], '--timeout-ms', limits.waitMs);
   const maxBytes = integer(values['max-bytes'], '--max-bytes', limits.logBytes);
@@ -146,11 +173,12 @@ async function main(): Promise<void> {
   }
   if (command === 'mcp') {
     const { runMcp } = await import('./mcp.js');
-    runMcp({ endpoint, tokenFile });
+    runMcp(projectOptions(values, await projectDirectory(values.project)));
     return;
   }
 
-  const client = connectPreviewDaemon({ endpoint, tokenFile });
+  const project = await projectDirectory(values.project);
+  const client = connectProject(projectOptions(values, project));
   const inputController = new AbortController();
   const interrupt = () => { process.exitCode = 130; inputController.abort(); void client.close(); };
   process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
@@ -158,17 +186,25 @@ async function main(): Promise<void> {
   try {
     let result: unknown;
     switch (command) {
-      case 'inspect': result = await client.inspect(await readSpec(values.file, inputController.signal)); break;
+      case 'inspect': result = await client.inspect(await readSpec(values.file, inputController.signal, project)); break;
       case 'start': case 'replace': {
-        const spec = await readSpec(values.file, inputController.signal);
+        const spec = await readSpec(values.file, inputController.signal, project);
         const status = command === 'start' ? await client.start(spec) : await client.replace(spec.name, spec);
         result = status;
         if (!values['no-wait']) {
           const id = status.candidate?.id ?? status.latest?.id ?? status.active?.id;
           if (!id) throw new PreviewError('START_FAILED', 'The daemon returned no attempt id. Use get/list before retrying.');
           attempt = { name: spec.name, attemptId: id };
-          const outcome = await client.wait(spec.name, id, { timeoutMs });
-          if (outcome.state !== 'ready') throw new PreviewError(outcome.error?.code ?? 'CLOSED', outcome.error?.message ?? `The preview attempt is ${outcome.state}.`, outcome.error);
+          let outcome: AttemptResult;
+          try { outcome = await client.wait(spec.name, id, { timeoutMs }); }
+          catch (error) {
+            if (!(error instanceof PreviewError) || error.code !== 'TIMEOUT') throw error;
+            const current = await client.get(spec.name);
+            const observed = [current.active, current.candidate, current.latest].find(item => item?.id === id);
+            if (!observed) throw new PreviewError('ATTEMPT_EXPIRED', 'The attempt is no longer retained. Inspect current status.');
+            outcome = { ...observed, name: spec.name, ...(current.active?.id === id ? { url: current.url } : {}) };
+          }
+          if (outcome.state !== 'ready' && outcome.state !== 'starting') throw new PreviewError(outcome.error?.code ?? 'CLOSED', outcome.error?.message ?? `The preview attempt is ${outcome.state}.`, outcome.error);
           result = outcome;
         }
         break;
@@ -195,9 +231,11 @@ async function main(): Promise<void> {
 async function secretCommand(positionals: string[], values: ReturnType<typeof parseCliArgs>['values']): Promise<void> {
   const command = positionals[0];
   const accepted: Record<string, string[]> = {
-    setup: ['file', 'endpoint', 'token-file', 'reopen'], edit: ['endpoint', 'token-file'], status: ['endpoint', 'token-file'],
+    setup: ['file', 'endpoint', 'token-file', 'reopen'], edit: ['endpoint', 'token-file'], status: ['endpoint', 'token-file', 'timeout-ms'],
     set: ['stdin'], list: [], remove: [],
   };
+  for (const name of ['setup', 'edit', 'status']) accepted[name].push('project');
+  for (const name of ['setup', 'edit']) accepted[name].push(...launchFlags);
   if (!Object.hasOwn(accepted, command) || Object.keys(values).some((key) => !accepted[command].includes(key))
     || positionals.length !== (['setup', 'list'].includes(command) ? 1 : 2)) {
     throw new PreviewError('INVALID_INPUT', 'Invalid secrets command arguments. Values belong only in hidden terminal input or --stdin. Run previewhost --help.');
@@ -218,9 +256,12 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
       result = { removed: positionals[1] };
     } else if (command === 'list') result = await listSecrets({ signal: controller.signal });
     else {
-      client = connectPreviewDaemon({ endpoint: values.endpoint, tokenFile: values['token-file'] });
-      result = command === 'setup' ? await client.secretsSetup(await readSpec(values.file, controller.signal), { reopen: values.reopen, signal: controller.signal }) :
-        command === 'edit' ? await client.secretsEdit(positionals[1], { signal: controller.signal }) : await client.secretsStatus(positionals[1]);
+      const project = await projectDirectory(values.project);
+      client = connectProject(projectOptions(values, project));
+      result = command === 'setup' ? await client.secretsSetup(await readSpec(values.file, controller.signal, project), { reopen: values.reopen, signal: controller.signal }) :
+        command === 'edit' ? await client.secretsEdit(positionals[1], { signal: controller.signal }) : await client.secretsStatus(positionals[1], {
+          timeoutMs: integer(values['timeout-ms'], '--timeout-ms', limits.secretWaitMs), signal: controller.signal,
+        });
     }
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally {
@@ -231,7 +272,7 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
 
 function parseCliArgs() {
   return parseArgs({ allowPositionals: true, options: {
-    help: { type: 'boolean', short: 'h' }, root: { type: 'string', multiple: true },
+    help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' }, project: { type: 'string' }, root: { type: 'string', multiple: true },
     'allow-exec': { type: 'boolean' }, port: { type: 'string' },
     env: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'data-dir': { type: 'string' }, 'docker-socket': { type: 'string' },
     stdin: { type: 'boolean' }, reopen: { type: 'boolean' },

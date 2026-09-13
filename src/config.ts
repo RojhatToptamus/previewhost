@@ -1,16 +1,30 @@
-import { createReadStream } from 'node:fs';
-import { dirname, extname, resolve } from 'node:path';
-import type { Readable } from 'node:stream';
+import { constants } from 'node:fs';
+import { link, open, realpath, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { dirname, extname, join, relative, resolve } from 'node:path';
+import { Readable } from 'node:stream';
+import { isDeepStrictEqual } from 'node:util';
 import { limits, previewSpecSchema, type PreviewSpec } from './contracts.js';
 import { PreviewError } from './errors.js';
+import { canonicalDirectory, isWithin, normalizeSources, parseSpec } from './spec.js';
 
 /** Loads one JSON/YAML file. Source paths resolve relative to that file. */
-export async function loadPreviewSpec(file: string, options: { signal?: AbortSignal } = {}): Promise<PreviewSpec> {
+export async function loadPreviewSpec(file: string, options: { allowedRoots?: string[]; signal?: AbortSignal } = {}): Promise<PreviewSpec> {
   const path = resolve(file);
   try {
-    return await readPreviewSpec(createReadStream(path), {
-      baseDirectory: dirname(path), format: /\.ya?ml$/i.test(extname(path)) ? 'yaml' : 'json', signal: options.signal,
-    });
+    const target = await realpath(path);
+    if (options.allowedRoots) {
+      const roots = await Promise.all(options.allowedRoots.map(canonicalDirectory));
+      if (!roots.some(root => isWithin(root, target))) throw new PreviewError('SOURCE_DENIED', 'The spec file must be inside the project or an explicitly allowed root.');
+    }
+    const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.size > limits.controlBytes) throw new PreviewError('INVALID_INPUT', 'Use a regular spec file of at most 1 MiB. Pipes belong on JSON stdin.');
+      return await readPreviewSpec(handle.createReadStream(), {
+        baseDirectory: dirname(path), format: /\.ya?ml$/i.test(extname(path)) ? 'yaml' : 'json', signal: options.signal,
+      });
+    } finally { await handle.close(); }
   } catch (error) {
     if (error instanceof PreviewError) throw error;
     throw new PreviewError('INVALID_INPUT', 'Cannot read the preview spec file.');
@@ -19,7 +33,7 @@ export async function loadPreviewSpec(file: string, options: { signal?: AbortSig
 
 /** Shared with CLI stdin, which deliberately accepts JSON only. */
 export async function readPreviewSpec(input: Readable, options: {
-  baseDirectory: string; format: 'json' | 'yaml'; signal?: AbortSignal;
+  baseDirectory: string; format: 'json' | 'yaml'; signal?: AbortSignal; fallbackFile?: string;
 }): Promise<PreviewSpec> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -36,6 +50,7 @@ export async function readPreviewSpec(input: Readable, options: {
   } finally { options.signal?.removeEventListener('abort', abort); }
 
   const text = Buffer.concat(chunks).toString('utf8');
+  if (!text.trim() && options.fallbackFile) return loadPreviewSpec(options.fallbackFile, { signal: options.signal });
   let value: unknown;
   if (options.format === 'yaml') value = await parseYaml(text);
   else {
@@ -55,6 +70,53 @@ export async function readPreviewSpec(input: Readable, options: {
   if (spec.type === 'environment') Object.values(spec.services).forEach(source);
   else source(spec);
   return spec;
+}
+
+/** Creates project-root preview.yml from declarative input. Never overwrites or resolves secrets/inputs. */
+export async function savePreviewSpec(input: PreviewSpec, options: {
+  projectDirectory: string; allowedRoots?: string[]; signal?: AbortSignal;
+}): Promise<{ file: string; externalSources: string[] }> {
+  const checkCanceled = () => {
+    if (options.signal?.aborted) throw new PreviewError('CLOSED', 'Configuration saving was canceled.');
+  };
+  let temporary: string | undefined;
+  try {
+    checkCanceled();
+    if (Buffer.byteLength(JSON.stringify(input)) > limits.controlBytes) throw new PreviewError('INVALID_INPUT', 'The spec exceeds 1 MiB.');
+    const project = await canonicalDirectory(options.projectDirectory);
+    const roots = await Promise.all((options.allowedRoots ?? [project]).map(canonicalDirectory));
+    const spec = await normalizeSources(parseSpec(input), roots);
+    const portable = structuredClone(spec);
+    const externalSources = new Set<string>();
+    for (const service of portable.type === 'environment' ? Object.values(portable.services) : [portable]) {
+      if (service.type !== 'command' && service.type !== 'static') continue;
+      const source = service.type === 'command' ? service.cwd : service.directory;
+      if (!isWithin(project, source)) { externalSources.add(source); continue; }
+      const local = relative(project, source) || '.';
+      if (service.type === 'command') service.cwd = local; else service.directory = local;
+    }
+    const { stringify } = await import('yaml');
+    const text = stringify(portable, { aliasDuplicateObjects: false });
+    const restored = await readPreviewSpec(Readable.from([text]), { baseDirectory: project, format: 'yaml', signal: options.signal });
+    if (!isDeepStrictEqual(parseSpec(restored), spec)) throw new PreviewError('INVALID_INPUT', 'The configuration cannot be saved without changing its meaning.');
+    const file = join(project, 'preview.yml');
+    checkCanceled();
+    const candidate = join(project, `.preview-${randomUUID()}.tmp`);
+    const handle = await open(candidate, 'wx', 0o600);
+    temporary = candidate;
+    try { await handle.writeFile(text); await handle.sync(); }
+    finally { await handle.close(); }
+    checkCanceled();
+    // Exclusive publication: readers see a complete file, and existing files/symlinks always win.
+    await link(temporary, file);
+    return { file, externalSources: [...externalSources].sort() };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new PreviewError('ALREADY_EXISTS', 'preview.yml already exists. Use your normal editor for explicitly requested updates, then validate the file.');
+    if (error instanceof PreviewError) throw error;
+    throw new PreviewError('INVALID_INPUT', 'Cannot save preview.yml. Check source paths and project write access; inspect the destination before retrying.');
+  } finally {
+    if (temporary) await unlink(temporary).catch(() => {});
+  }
 }
 
 async function parseYaml(text: string): Promise<unknown> {

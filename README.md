@@ -14,7 +14,7 @@ An environment can connect frontends, backends, and PostgreSQL or Redis database
 Use previewhost when several coding agents or worktrees need separate running copies of the same application.
 Each task gets its own service ports and connections, without manual port assignments or changes to service URLs.
 
-Define the services, commands, and connections in `preview.yaml`.
+Define services, commands, and connections in optional root `preview.yml`, or supply a spec directly through MCP or JSON stdin.
 previewhost starts services in dependency order and waits for them to become ready.
 
 When you replace a preview, its local URL stays the same.
@@ -42,7 +42,7 @@ npm install -g previewhost@alpha
 
 The npm package requires no native build tools.
 
-The GitHub repository is private. Its linked guides and agent skill require repository access.
+The npm package includes the maintained agent skill and its referenced guides under `dist/skills/previewhost`.
 The public npm package does not require GitHub access.
 
 ## Create a frontend and backend
@@ -111,7 +111,7 @@ createServer(async (request, response) => {
 
 </details>
 
-Save this recipe as `preview.yaml` beside those files:
+Save this recipe as `preview.yml` beside those files:
 
 ```yaml
 name: hello
@@ -148,32 +148,30 @@ npm install previewhost@alpha
 
 For a local CLI installation, use `./node_modules/.bin/previewhost` in place of `previewhost` in the commands below.
 
-### Start the daemon for CLI or MCP
+### Project owners
 
-From `previewhost-demo`, start the daemon in a terminal:
+CLI and MCP automatically find or start one persistent owner for the current Git worktree root.
+Outside Git, the current directory is the project. Use `--project /absolute/project` to choose it explicitly.
+An owner survives client disconnection and ordinary inactivity. Explicit shutdown stops all its previews.
 
-```sh
-previewhost serve --root "$PWD" --allow-exec
-```
+`--allow-exec` permits trusted commands, managed database operations, private secret setup, and explicit data deletion/recovery.
+It runs code with your user permissions and provides no sandbox. It selects no secrets by itself.
+Supply it in the current CLI invocation or MCP registration when cold startup needs that authority.
+A living owner's permissions are reused; incompatible explicit launch options produce an error.
 
-`--allow-exec` permits these commands to run with your user permissions. It does not provide a sandbox.
-Leave that terminal open. Use a second terminal in the same directory for client commands.
-The daemon keeps previews active until you stop them or shut it down.
-
-The examples use the default connection at `http://127.0.0.1:9400`.
-The daemon prints its endpoint and token file path.
-Clients need access to that token file and this Mac's loopback network.
-For another port or token location, see [connection configuration](docs/api.md#cli).
+Manual `previewhost serve` remains available. To use it, pass `--endpoint` or `--token-file` explicitly to clients.
+That mode connects only and never starts or reconfigures an owner.
+See [connection configuration](docs/api.md#cli).
 
 ## Use the CLI
 
-With the [daemon active](#start-the-daemon-for-cli-or-mcp), start the example:
+From the demo directory, start the example:
 
 ```sh
-previewhost start --file preview.yaml
+previewhost start --allow-exec
 ```
 
-The command waits for readiness and returns JSON with `state: "ready"` and a `url`.
+The command loads root `preview.yml`, starts its owner, and waits for readiness. It returns `state: "ready"` and a `url`, or `starting` if the wait budget expires. Continue waiting for that attempt when needed.
 Open that URL in a browser. The page shows **Frontend + backend**, then **Hello from the backend.**
 The frontend forwards the browser's `/message` request to the backend.
 
@@ -197,8 +195,8 @@ previewhost shutdown
 
 ## Use MCP
 
-[Start the daemon](#start-the-daemon-for-cli-or-mcp) before you use preview tools.
-The MCP client starts the stdio adapter. The adapter connects to the separate daemon.
+The MCP client starts the stdio adapter, which finds or starts the persistent project owner.
+Use an explicit project path when the client's launch directory is uncertain.
 
 For Cursor, add this server to the project's `.cursor/mcp.json`:
 
@@ -207,7 +205,7 @@ For Cursor, add this server to the project's `.cursor/mcp.json`:
   "mcpServers": {
     "previewhost": {
       "command": "previewhost",
-      "args": ["mcp"]
+      "args": ["mcp", "--project", "${workspaceFolder}", "--allow-exec"]
     }
   }
 }
@@ -220,16 +218,15 @@ If the client cannot find `previewhost`, use the [PATH troubleshooting steps](do
 Ask the agent:
 
 ```text
-Call preview_list to check the connection.
-Read preview.yaml in this project. Resolve each service cwd to an absolute path.
-Use previewhost to inspect and start the preview.
+Use previewhost to inspect and start this project. Prefer root preview.yml if it exists; otherwise construct a spec from the application.
+Do not create configuration unless I ask you to save it.
 Wait for the returned attempt to become ready, then give me its URL.
 ```
 
 Open the URL in a browser. Verify that it shows **Hello from the backend.**
 After use, ask the agent to stop the preview named `hello`.
 A client disconnect leaves previews active.
-To close the daemon, run `previewhost shutdown` in your terminal.
+For owner teardown, use `previewhost shutdown` or ask the agent to call `preview_shutdown`. This stops every preview on that owner.
 
 ## Embed the library
 
@@ -241,7 +238,7 @@ Save this code as `preview.mjs` in `previewhost-demo`:
 ```js
 import { createPreviewRuntime, loadPreviewSpec } from 'previewhost';
 
-const spec = await loadPreviewSpec('preview.yaml');
+const spec = await loadPreviewSpec('preview.yml');
 const runtime = await createPreviewRuntime({
   allowedRoots: [process.cwd()],
   authorize: ({ operation }) => operation === 'start',
@@ -270,7 +267,8 @@ See the [library reference](docs/api.md#runtime-and-client) for configuration an
 ## Use the agent skill
 
 The optional skill provides instructions and recipe references for agents that use the CLI or MCP.
-It does not install previewhost, start the daemon, or configure MCP.
+The installed package contains `dist/skills/previewhost/SKILL.md` and its references. An agent can read them directly.
+Skill discovery installation is optional; no install hook changes client configuration.
 Use the skill with an installed [CLI](#install) or a configured [MCP client](#use-mcp).
 
 With repository access, run this command from your application directory:
@@ -282,14 +280,14 @@ npx skills add RojhatToptamus/previewhost --skill previewhost --agent codex --ye
 This command installs from the default branch, `main`, into `.agents/skills/previewhost` in the current project.
 Repeat the command to update the skill and its references.
 
-With the [daemon active](#start-the-daemon-for-cli-or-mcp), start a new Codex session in that project.
+Start a Codex session in the intended project. The skill uses the installed CLI or configured MCP connection.
 Ask:
 
 ```text
-$previewhost Start the preview in preview.yaml. Verify the backend message in the page, then stop the preview.
+$previewhost Start the preview in preview.yml. Verify the backend message in the page, then stop the preview.
 ```
 
-If the application has no recipe, ask the agent to create one from the project's commands.
+If the application has no recipe, the agent can supply a spec directly. Ask explicitly to save `preview.yml` when you want reusable configuration.
 See [agent support](docs/integrations.md#agent-skill) for discovery and tested workflows.
 
 ## Preview an application
@@ -307,7 +305,8 @@ The [troubleshooting guide](docs/troubleshooting.md) covers connection and clean
 ## Handle secrets
 
 Recipes can reference selected environment variables and secrets stored in macOS Keychain.
-Enter missing secrets through a private browser form.
+The private browser form first approves access to unselected names for this owner lifetime, then collects missing values.
+The same exact name shares one Keychain value across worktrees that approve it; use a distinct name for a different value.
 Keep their values out of recipes and agent chat.
 previewhost does not automatically load `.env` files.
 See the [secrets guide](docs/api.md#stored-secrets) for setup.

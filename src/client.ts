@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { limits, type ErrorCode, type PreviewApi, type SecretSetupApi } from './contracts.js';
 import { PreviewError } from './errors.js';
+import type { ProjectOwnerInfo } from './project.js';
 
 export interface ClientOptions { endpoint?: string; tokenFile?: string }
 export const defaultEndpoint = 'http://127.0.0.1:9400';
@@ -48,7 +49,7 @@ export async function readToken(path: string): Promise<string> {
 
 /** Connects on demand. Closing this client never stops daemon-owned previews. */
 export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & SecretSetupApi & {
-  close(): Promise<void>; shutdown(): Promise<void>;
+  close(): Promise<void>; shutdown(): Promise<void>; info(): Promise<ProjectOwnerInfo | null>;
 } {
   let endpoint: URL;
   const endpointText = options.endpoint ?? defaultEndpoint;
@@ -137,6 +138,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
   }
 
   return {
+    info: () => call('info', {}),
     inspect: (spec) => call('inspect', { spec }),
     start: (spec) => call('start', { spec }),
     replace: (name, spec) => call('replace', { name, spec }),
@@ -148,7 +150,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
     stop: (name, opts = {}) => call('stop', { name, afterEngineRestart: opts.afterEngineRestart }),
     deleteData: (name) => call('deleteData', { name }),
     secretsSetup: (spec, opts = {}) => call('secrets/setup', { spec, reopen: opts.reopen }, opts.signal),
-    secretsStatus: (id) => call('secrets/status', { id }),
+    secretsStatus: (id, opts = {}) => call('secrets/status', { id, timeoutMs: opts.timeoutMs }, opts.signal),
     secretsEdit: (id, opts = {}) => call('secrets/edit', { id }, opts.signal),
     shutdown: async () => { await call('shutdown', {}); },
     close: async () => {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { request } from 'node:http';
 import { Client } from '@modelcontextprotocol/client';
@@ -91,6 +91,110 @@ test('MCP missing → private save → status → ordinary retry keeps values an
     assert.ok(!wire.join('\n').includes(capability));
     assert.equal(stderr, '');
   } finally { await mcp.close(); await client.close(); await daemon.close(); }
+});
+
+test('MCP requests unselected names, private approval reuses a shared entry, and status resumes ordinary startup', enabled, async (t) => {
+  const fixture = await testKeychain(t);
+  await writeFile(join(fixture.directory, 'app.mjs'), app);
+  await setSecret('shop/dev/shared', 'FAKE_shared_value');
+  const opened: string[] = [];
+  t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
+  const has = keychain.has.bind(keychain);
+  const presence = t.mock.method(keychain, 'has', has);
+  const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
+  const tokenFile = join(fixture.directory, 'control', 'token');
+  const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
+  const client = connectPreviewDaemon({ endpoint: daemon.endpoint, tokenFile });
+  const mcp = new Client({ name: 'previewhost-private-approval', version: '1.0.0' });
+  const transport = new StdioClientTransport({ command: process.execPath,
+    args: [resolve('dist/cli.js'), 'mcp', '--endpoint', daemon.endpoint, '--token-file', tokenFile], stderr: 'pipe' });
+  const spec: PreviewSpec = { name: 'approved-flow', type: 'command', cwd: fixture.directory, command: [process.execPath, 'app.mjs'],
+    env: { ONE: { secret: 'shop/dev/shared' }, TWO: { secret: 'shop/dev/new' } } };
+  const wire: string[] = [];
+  let stderr = ''; transport.stderr?.on('data', chunk => { stderr += chunk; });
+  try {
+    await mcp.connect(transport);
+    const receive = transport.onmessage!;
+    transport.onmessage = (...args) => { wire.push(JSON.stringify(args[0])); receive(...args); };
+    const started = await client.start(spec);
+    assert.equal((await client.wait(spec.name, started.candidate!.id)).error?.code, 'SECRET_DENIED');
+    const setup = (await mcp.callTool({ name: 'preview_secrets_setup', arguments: { spec } })).structuredContent as { result: SecretSetupStatus };
+    assert.equal(setup.result.state, 'pending');
+    assert.ok(setup.result.requirements.every(item => !item.selected));
+    assert.equal(presence.mock.callCount(), 0);
+    const capability = new URL(opened[0]).hash.slice(1);
+    const token = (await readFile(tokenFile, 'utf8')).trim();
+    assert.equal((await browserCall(daemon.endpoint, token, 'approve')).status, 401);
+    assert.equal((await browserCall(daemon.endpoint, setup.result.id, 'approve')).status, 401);
+    assert.equal((await browserCall(daemon.endpoint, capability, 'approve', { approved: true })).status, 400);
+    assert.equal((await browserCall(daemon.endpoint, capability, 'save', { values: {} })).data.error?.code, 'SECRET_DENIED');
+    assert.equal(presence.mock.callCount(), 0);
+    const approved = await browserCall(daemon.endpoint, capability, 'approve');
+    assert.equal(approved.data.result?.state, 'pending');
+    assert.ok(approved.data.result?.requirements.every(item => item.selected));
+    assert.deepEqual(approved.data.result?.alreadyPresent, ['shop/dev/shared']);
+    assert.deepEqual(approved.data.result?.remaining, ['shop/dev/new']);
+    await assert.rejects(readFile(join(fixture.directory, 'started')), { code: 'ENOENT' });
+    const controller = new AbortController();
+    const canceledWait = assert.rejects(client.secretsStatus(setup.result.id, { timeoutMs: 1000, signal: controller.signal }), { code: 'CLOSED' });
+    controller.abort(); await canceledWait;
+    assert.equal((await client.secretsStatus(setup.result.id, { timeoutMs: 10 })).state, 'pending');
+    const waiting = mcp.callTool({ name: 'preview_secrets_status', arguments: { id: setup.result.id, timeoutMs: 25000 } });
+    const saved = await browserCall(daemon.endpoint, capability, 'save', { values: { 'shop/dev/new': 'FAKE_new_value' } });
+    assert.equal(saved.data.result?.state, 'complete');
+    assert.equal(((await waiting).structuredContent as { result: SecretSetupStatus }).result.state, 'complete');
+    const retry = (await mcp.callTool({ name: 'preview_start', arguments: { spec } })).structuredContent as { result: PreviewStatus };
+    const ready = (await mcp.callTool({ name: 'preview_wait', arguments: { name: spec.name, attemptId: retry.result.candidate!.id } })).structuredContent as { result: AttemptResult };
+    assert.equal(ready.result.state, 'ready');
+    assert.equal(await (await fetch(ready.result.url!)).text(), 'FAKE_shared_value|FAKE_new_value');
+    assert.equal((await client.secretsSetup(spec)).state, 'complete');
+    assert.equal(opened.length, 1);
+    await mcp.callTool({ name: 'preview_logs', arguments: { name: spec.name } });
+    assert.ok(!wire.join('\n').includes('FAKE_'));
+    assert.ok(!wire.join('\n').includes(capability));
+    assert.equal(stderr, '');
+  } finally { await mcp.close(); await client.close(); await daemon.close(); }
+});
+
+test('private approval revalidates sources, unions concurrent names within the limit, and keeps grants after form cancellation', enabled, async (t) => {
+  const fixture = await testKeychain(t);
+  const source = join(fixture.directory, 'worktree'); await mkdir(source);
+  const opened: string[] = [];
+  t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
+  let now = 0; t.mock.method(performance, 'now', () => now);
+  const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: Array.from({ length: 126 }, (_, i) => `selected-${i}`), authorize: () => true });
+  const setup = new SecretSetup(runtime, 'http://127.0.0.1:9999');
+  const signal = new AbortController().signal;
+  const spec = (id: string): PreviewSpec => ({ name: id, type: 'command', cwd: source, command: ['false'], env: { VALUE: { secret: id } } });
+  const prepare = async (id: string) => {
+    now += 1001;
+    const request = await setup.setup(spec(id), signal);
+    return { request, authorization: `Bearer ${new URL(opened.at(-1)!).hash.slice(1)}` };
+  };
+  try {
+    const stale = await prepare('stale');
+    await rename(source, `${source}-moved`);
+    const denied = await setup.approve(stale.authorization);
+    assert.equal(denied.state, 'partial');
+    assert.equal(denied.error?.code, 'INVALID_INPUT');
+    await rename(`${source}-moved`, source);
+    assert.equal((await runtime.inspect(spec('stale'))).secrets?.[0].selected, false);
+    const one = await prepare('one'); const two = await prepare('two');
+    const approved = await Promise.all([setup.approve(one.authorization), setup.approve(two.authorization)]);
+    assert.ok(approved.every(result => result.requirements[0].selected));
+    assert.equal((await setup.setup(spec('one'), signal)).id, one.request.id);
+    const extra = await prepare('overflow');
+    assert.equal((await setup.approve(extra.authorization)).error?.code, 'INVALID_INPUT');
+    assert.equal((await runtime.inspect(spec('overflow'))).secrets?.[0].selected, false);
+    setup.cancel(one.authorization);
+    assert.equal((await runtime.inspect(spec('one'))).secrets?.[0].selected, true);
+    await setup.close();
+    assert.equal((await setup.wait(two.request.id, { timeoutMs: 1 })).state, 'canceled');
+    assert.throws(() => setup.form(two.authorization), { code: 'UNAUTHORIZED' });
+    const restarted = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
+    try { assert.equal((await restarted.inspect(spec('one'))).secrets?.[0].selected, false); }
+    finally { await restarted.close(); }
+  } finally { await setup.close(); await runtime.close(); }
 });
 
 test('setup rechecks CLI input, edit never recreates a deleted entry, and partial writes retain accurate results', enabled, async (t) => {

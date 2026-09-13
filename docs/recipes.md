@@ -1,14 +1,16 @@
 # Create or update a preview recipe
 
-A recipe is one JSON or YAML file in the existing `PreviewSpec` format.
+A recipe uses the existing `PreviewSpec` format. Root `preview.yml` is the optional default.
+MCP spec objects and CLI JSON stdin work without a configuration file.
 Use the [API reference](api.md#specs) for fields and limits.
 This guide covers the decisions needed to adapt that format to a project.
 
 ## Inspect the project
 
 Read project instructions before choosing commands or changing files.
-Search for existing recipes and previewhost calls in scripts and documentation.
-Reuse a suitable recipe. Preserve its name when continuing a preview with retained data.
+Prefer root `preview.yml` if present. Treat invalid content as an error; do not silently use another file.
+Explicit alternate files or specs override the default. Do not merge recipes.
+Reuse the selected recipe. Preserve its name when continuing a preview with retained data.
 
 Inspect package scripts, lockfiles, framework configuration, server entrypoints, and source directories.
 For each service, identify the working directory, start command, required dependencies, listener settings, and readiness route.
@@ -64,17 +66,13 @@ Save this recipe as `preview.json` in that directory:
 }
 ```
 
-After any previous demo daemon stops, start this daemon in a terminal:
-
-```sh
-previewhost serve --root "$PWD"
-```
-
-In a second terminal in the same directory, start the preview:
+Start the preview from that directory:
 
 ```sh
 previewhost start --file preview.json
 ```
+
+The command starts a project owner automatically. No execution permission is needed for static files.
 
 Open the returned `url`. The page shows **Hello from previewhost.**
 After use, stop the preview and daemon:
@@ -120,18 +118,22 @@ Ask for missing product choices that affect the result: target application, data
 Ask the owner to resolve missing permissions, selected inputs, and secret IDs.
 Do not ask for secret values in chat.
 
-Save the recipe beside the project's relevant configuration.
+Keep the prepared spec in the task until the user requests a save. MCP `preview_save_config({spec})` creates root `preview.yml` explicitly.
+It validates source scope and declarative structure, preserves reference bindings, and never resolves values or starts code.
+Existing files produce `ALREADY_EXISTS`; use the host editor for requested updates, then validate them.
+Do not serialize inspection output, which omits literal environment bindings. Report external source paths as nonportable.
 File-based source paths resolve relative to that recipe, not the terminal directory.
 For MCP or direct library calls, resolve source paths to absolute paths first.
 Do not maintain a second schema or change working application configuration to fit an unverified recipe.
 
-Inspect the recipe through the selected daemon before startup.
+Inspect before startup. Inspection works offline when no owner exists.
+For trusted native code, cold CLI startup needs `--allow-exec`, or the same flag in the MCP registration.
 Then start it within the task's authorization and wait for the exact attempt.
 Fetch the resulting URL and verify expected application content or behavior.
 For connected services, verify a representative request across the required services.
 Use logs to diagnose failure, then correct the underlying command, binding, or prerequisite.
 After a timeout or disconnection, inspect current status before retrying a mutation.
 
-Report the recipe path, URL check, and any missing prerequisites or unverified behavior.
+Report any saved recipe path, the URL check, and any missing prerequisites or unverified behavior.
 When cleanup is requested, stop the preview and verify cleanup completes.
 Preserve retained data and externally owned services.

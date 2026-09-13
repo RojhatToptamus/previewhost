@@ -14,13 +14,14 @@ Linux and Windows remain unverified, including static and attached previews.
 | Interface | Verified behavior | Requirement or limit |
 | --- | --- | --- |
 | ESM library | Static, command, attach, replacement, cancellation, and cleanup | The application owns the runtime lifetime |
-| CLI and daemon | JSON/YAML environments, selected inputs, authentication, and shutdown | Clients require a separate foreground daemon |
+| CLI and daemon | JSON/YAML environments, selected inputs, authentication, and shutdown | Automatic project owner, or explicit foreground connection |
 | MCP SDK | Environment lifecycle, secret setup/status, discovery, and tool errors | Client approval behavior requires a separate host check |
 | Coding-task worktrees | Live edits, replacement, data retention, and source preservation | The host prepares and removes source directories |
 | Task Monki | HTTP attachment, approval, readiness, replacement, and independent stop | Embedded runtime and browser UI integration remain unverified |
 
 The MCP client, framework, browser, and Task Monki sections below record checks under the former package name, `previewd`.
-Full preview workflows with the renamed package remain untested in those MCP hosts.
+The September 13 checks below cover the renamed package's automatic-owner flow in Codex, Claude Code and Cursor.
+Older host results do not establish that flow.
 Agent skill checks identify their tested package separately.
 The configuration examples use the public `previewhost` executable from PATH.
 The earlier host checks used an absolute Node executable and installed CLI path.
@@ -36,8 +37,8 @@ Preview stop left those containers and their data under their original owner.
 ## Agent skill
 
 Use the [README installation and usage steps](../README.md#use-the-agent-skill).
-The repository is private. Remote skill installation requires existing authenticated GitHub access.
-A public npm installation does not grant that access.
+The npm package includes `dist/skills/previewhost/SKILL.md` and materialized references. An agent can read them directly without installing a skill or accessing the repository.
+Repository-based discovery installation remains optional.
 The repository contains one `skills/previewhost/SKILL.md` entrypoint for preview operation and recipe creation.
 Its references link to the maintained documentation and examples. Agents read these documents only when the task needs them.
 
@@ -83,7 +84,7 @@ Skill installation does not install previewhost, start its daemon, configure MCP
 
 ## Connect an MCP client
 
-Follow the [README MCP quick start](../README.md#use-mcp) to install previewhost, create the frontend and backend, and start the daemon.
+Follow the [README MCP quick start](../README.md#use-mcp) to install previewhost and select the project. The registration supplies authority for automatic owner startup.
 Use the client configuration below for your host.
 Each example starts the adapter with `previewhost` from PATH.
 previewhost 0.1.0-alpha.0 passed static and README frontend/backend workflows through the CLI and MCP protocol.
@@ -96,8 +97,9 @@ Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.
 
-Discovery exposes twelve `preview_*` tools without a daemon. Tool operations
-require the daemon. A client disconnect leaves daemon previews active.
+Discovery exposes 14 `preview_*` tools without an owner. Inspection works offline.
+Start/replace and secret setup can start the project owner; read/status/cleanup tools never do.
+A client disconnect leaves owner previews active.
 Development servers require daemon execution permission through `--allow-exec`.
 Client approval does not grant that permission.
 
@@ -108,8 +110,21 @@ Add this server to your [Codex MCP configuration](https://developers.openai.com/
 ```toml
 [mcp_servers.previewhost]
 command = "previewhost"
-args = ["mcp"]
+args = ["mcp", "--project", "/absolute/project", "--allow-exec"]
 ```
+
+### September 13 automatic-owner check
+
+Codex CLI 0.146.0 passed a live model workflow against this branch's built CLI, using temporary invocation overrides and no saved configuration changes.
+The project had no YAML or installed Previewhost skill. The agent read the application, prepared a spec, requested private setup, waited for public completion, started the application and verified `/health`.
+The test harness performed the owner-only approval and entry with a disposable Keychain and fake value. No value or private capability appeared in the agent transcript, and no configuration file was created.
+The first name failed the existing lowercase-name rule; the agent corrected it. A pre-start `get` returned `NOT_FOUND` and the agent continued normally.
+This was not a zero-error transcript or a manual human approval usability study.
+
+Separate Chrome checks exercised the private approval, entry, completion, cancellation and unavailable-link screens at desktop and mobile sizes.
+Separate SDK/CLI checks exercised automatic owner sharing, concurrency, worktree roots, disconnection and restart.
+The live check preapproved this disposable server's tools. It did not retest every host approval policy below or the desktop registration UI.
+Use an explicit project path until the selected host's launch context has been verified.
 
 ### MCP approvals
 
@@ -141,7 +156,7 @@ features.guardian_approval = true
 features.tool_call_mcp_elicitation = true
 [mcp_servers.previewhost]
 command = "previewhost"
-args = ["mcp"]
+args = ["mcp", "--project", "/absolute/project", "--allow-exec"]
 
 [mcp_servers.previewhost.tools.preview_start]
 approval_mode = "prompt"
@@ -184,7 +199,7 @@ In Cursor, add this server to the project's `.cursor/mcp.json`:
   "mcpServers": {
     "previewhost": {
       "command": "previewhost",
-      "args": ["mcp"]
+      "args": ["mcp", "--project", "${workspaceFolder}", "--allow-exec"]
     }
   }
 }
@@ -195,6 +210,26 @@ Other stdio MCP hosts can use these executable arguments.
 Unlisted clients and models remain unverified.
 
 ### Cursor IDE
+
+Cursor IDE 3.20.7 passed the automatic-owner workflow on September 13 against this branch's built CLI.
+Its actual agent used an isolated project with a frontend, backend, local fake API and managed PostgreSQL.
+The project MCP server was enabled through **Customize > MCPs** and exposed 14 tools.
+Its existing **Allow all** read/write settings produced no per-call prompts. The configured model was left unchanged.
+
+The agent inspected a direct spec, requested private setup and paused.
+Computer operated the browser's name approval and missing-value form with a fake credential in a disposable Keychain.
+After a continuation message, the agent checked public completion and started all four services.
+Browser requests authenticated with the fake API and wrote PostgreSQL records.
+Explicit configuration saving, restart from `file: preview.yml`, and a complete owner restart retained those records.
+After owner restart, fresh name approval reused the stored value without an entry field.
+Startup with both `file` and `spec` omitted then loaded root `preview.yml` successfully.
+
+The Keychain-only fixture redirected native storage to the disposable test store.
+It did not intercept MCP calls, browser actions or application startup.
+These checks do not establish every Cursor model or approval policy.
+Final local regression verification also passed all 111 tests with Docker Engine 29.6.1, PostgreSQL and Redis, with zero skips.
+
+Earlier check:
 
 Cursor IDE 3.19.14 with Composer 2.5 Fast passed standalone-command and API/web
 workflows through model-driven inspect, start, wait, and stop calls.
@@ -227,6 +262,27 @@ From the project directory, start Claude Code with that file:
 claude --mcp-config ./previewhost.mcp.json --strict-mcp-config --model sonnet --effort low --permission-mode manual
 ```
 
+Claude Code 2.1.270 passed the automatic-owner workflow on September 13 against this branch's built CLI.
+The actual terminal client ran inside Cursor's integrated terminal because Computer blocked Terminal.app access.
+It displayed Sonnet 5 and used manual per-call approval with project-only settings and an explicit MCP configuration.
+Discovery exposed 14 tools. The isolated project used the same four-service fixture described in the Cursor check above.
+
+Private name approval, fake-value entry, public completion and a continuation message led to successful startup.
+Browser checks authenticated with the local fake API and wrote PostgreSQL data.
+The agent explicitly saved the original spec and restarted from `preview.yml`; the browser verified retained data and another write.
+No YAML existed before the explicit save request.
+
+The disposable Keychain relocked during testing. Private setup reported a terminal partial result, and startup later reported locked storage.
+Unlocking only that test Keychain allowed recovery through fresh setup or ordinary startup retry, respectively.
+Claude initially suggested reusing the partial form. The MCP status description now explicitly requires a fresh request after the error is resolved.
+The existing Claude adapter had loaded the earlier description; this wording change was not retested in a fresh Claude session.
+
+An additional owner restart reached fresh setup, but repeated Chrome control timeouts blocked its second approval.
+That extra Claude reapproval check is incomplete. Cursor completed the corresponding owner-restart check.
+Values and private capabilities were absent from the captured client and browser screenshots.
+
+Earlier check:
+
 Claude Code 2.1.239 passed both standalone-command and API/web workflows in its
 interactive terminal. Sonnet with low effort was available.
 The client displayed **Sonnet 5 with low effort** and recorded `claude-sonnet-5`.
@@ -238,7 +294,7 @@ the URLs passed to the applications. Stop and client exit released the applicati
 process, and listeners. The separate daemon also shut down.
 
 These checks used Node.js 22.23.1 and installed `previewd@0.1.0`.
-Other models, permission modes, databases, and secret workflows remain unverified.
+Other models and permission modes remain unverified. Database and secret checks for 2.1.270 are recorded above.
 See [Claude Code model configuration](https://code.claude.com/docs/en/model-config).
 
 ## OpenCode

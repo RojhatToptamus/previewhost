@@ -58,13 +58,16 @@ Embedded applications can use an approval UI through `authorize`.
 MCP host approvals apply separately.
 
 `RuntimeOptions.inputs` supplies the values available to `{fromEnv: NAME}`.
-`serve --env NAME` selects them once at startup.
+`serve --env NAME`, or the same project-owner launch flag, selects them once at startup.
 A spec cannot select arbitrary host environment values.
 Only the service with the binding receives the selected value.
 PostgreSQL probes ignore ambient PG credentials and `.pgpass`.
 
 `RuntimeOptions.secretIds` and repeated `--secret ID` select exact user Keychain
 entries. Any execution-authorized client can bind a selected ID to its supplied code.
+Private setup can add names only after the owner approves them through its browser capability.
+Approval revalidates source scope and preserves the 128-name bound. It lasts until owner shutdown.
+The exact name identifies one shared Keychain value across owners; no worktree prefix is added.
 These selections provide no isolation between clients.
 The binding limits which service receives a value. It does not establish trust
 in the receiving code.
@@ -73,6 +76,29 @@ Static previews reject traversal, hidden paths, escaping symlinks, special files
 and directory listings. They exclude the private data directory and its resolved aliases.
 Attachments connect only to IPv4 loopback.
 These checks do not isolate hostile filesystem changes by another same-user process.
+
+MCP configuration reads use regular files inside the selected project or explicitly configured roots.
+The loader checks resolved targets to reject symlink escapes. Direct CLI/library file input retains the caller's filesystem authority.
+
+## Automatic project owners
+
+Automatic owners use the existing runtime, bearer-token client and daemon.
+The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewd/projects`.
+A SHA-256 digest of that path gives it a fixed-length filesystem address. It is not a configuration signature or permission grant.
+A permanent Darwin kernel lock prevents concurrent owners for one project. It is held through runtime cleanup.
+The connection file contains only endpoint, PID and project path, and is published after the listener is ready.
+Clients authenticate with the existing private token, then verify the responding project and requested launch options.
+The file cannot authorize a new owner or restore browser-added name grants.
+
+Cold startup uses current CLI arguments or MCP registration options. `--allow-exec` retains its broad trusted-owner authority.
+Omitted options can reuse a living owner; incompatible explicit options are rejected without changing it.
+Explicit endpoint/token mode never automatically starts or adopts an owner.
+An idle owner remains alive so approvals and applications survive agent pauses and adapter disconnection.
+
+Clean shutdown removes the connection record after runtime cleanup. It retains stored credentials and managed data.
+A crash or failed cleanup keeps the connection record. An unreachable listener does not prove application cleanup.
+Before removing that record, verify the old owner's resources and any externally prepared processes have stopped.
+Never kill a process based only on the recorded PID; it can have been reused. See [recovery](troubleshooting.md#the-client-cannot-find-the-daemon).
 
 ## Retained storage identifiers
 
@@ -239,7 +265,9 @@ Timeout or cancellation terminates the helper but cannot prove that a dispatched
 Keychain write failed. The result reports that the write outcome is unknown.
 
 Private setup uses a public request ID and a separate, unpredictable write grant
-in daemon memory. Owner authorization fixes the mode, names, sources, and recipients.
+in daemon memory. Owner authorization fixes the mode, requested names, sources, and declared recipients.
+For unselected names, a private approval step adds access to the existing owner selection.
+Unselected entries receive no Keychain presence check before approval. Canceling later does not undo an earlier grant.
 Missing-value setup only adds absent entries. Edit updates one existing entry.
 Neither operation authorizes execution or starts an application.
 
