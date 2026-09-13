@@ -276,4 +276,7 @@ MCP stdout must contain only protocol messages.
 Remove shell wrappers that print banners to stdout.
 Check the tool list for 14 `preview_*` tools, including secret setup/status, configuration saving and owner shutdown.
 Read the tool's error envelope before a retry.
+After changing a registration's command or environment, reload the client workspace and reconnect the server.
+In Cursor 3.20.7, an edited registration showed connected tools while agent calls timed out; a new server name after reload restored calls.
+Verify an actual tool result before treating the connection indicator as proof. See the fresh [client check](integrations.md#cursor-ide).
 See [MCP client configuration](integrations.md#connect-an-mcp-client).

@@ -150,14 +150,22 @@ Only the Keychain binding was redirected to a disposable native store; MCP and b
 Claude used manual per-call approval. Cursor's project server was enabled through its UI with the existing read/write allowance.
 Screenshots contain no values or private capabilities. See the exact versions, outcomes and restrictions in [integrations](integrations.md).
 
+A fresh September 13 repeat used new local tarball installations and MCP registrations in Claude Code 2.1.270 and Cursor 3.20.7.
+Both actual clients ran the `previewhost-test-frontend`/backend/PostgreSQL lab through MCP, with private fake-secret setup and Brave verification.
+Both passed direct input, explicit YAML saving/reuse, malformed YAML rejection, owner reapproval, data retention and client reconnection.
+Cursor additionally ran two real worktrees with shared/distinct references, canceled entry recovery and a failed replacement followed by recovery.
+The final hostname and numeric URLs for all four environments were opened in Brave. The fresh automated run passed 111 tests, plus four real frontend HTTP contract checks.
+The test fixture also selected Brave in the native opener; it did not change MCP or application handlers.
+An initial Cursor registration became stale after edits; a fresh server name restored tool calls.
+The [integration record](integrations.md#cursor-ide) separates these actual-client results from automated checks and explains the fixture limits.
+
 Still deferred or unverified:
 
 - The future dashboard and an MCP overwrite/editor operation.
 - Guaranteed automatic agent wakeup after a completed turn; the continuation message remains necessary for that case.
 - Universal active-worktree discovery in every GUI host. Use an explicit project path until the host's launch context is verified.
 - Codex Desktop, VS Code, Intel execution and non-macOS automatic owners.
-- Claude's additional owner-reapproval check: shutdown and fresh setup succeeded, but Chrome control timeouts blocked the second approval. Its earlier private-entry/YAML restart passed. Cursor completed owner reapproval and restart.
-- The revised partial-result wording in a fresh Claude session. Its tested adapter had loaded the earlier description.
+- A fresh Claude partial-write recovery scenario. The new build loaded the revised wording, but the fresh client run did not reproduce a partial write.
 - A universal guarantee against credentials embedded in arbitrary argv, literals or application output.
 
 No push, merge, deployment or publication is part of this work.

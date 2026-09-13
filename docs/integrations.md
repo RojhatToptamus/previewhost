@@ -211,23 +211,40 @@ Unlisted clients and models remain unverified.
 
 ### Cursor IDE
 
-Cursor IDE 3.20.7 passed the automatic-owner workflow on September 13 against this branch's built CLI.
-Its actual agent used an isolated project with a frontend, backend, local fake API and managed PostgreSQL.
-The project MCP server was enabled through **Customize > MCPs** and exposed 14 tools.
-Its existing **Allow all** read/write settings produced no per-call prompts. The configured model was left unchanged.
+Cursor IDE 3.20.7 (Auto) passed a fresh full-stack check on September 13.
+The project was an isolated copy of `previewhost-test-frontend` in `previewhost-test-lab`, with its sibling backend and managed PostgreSQL.
+The agent read all three repositories, installed application dependencies, and prepared service bindings and source paths.
+The project server exposed 14 tools through **Customize > MCPs**. Existing **Allow all** settings produced no per-call prompts.
 
-The agent inspected a direct spec, requested private setup and paused.
-Computer operated the browser's name approval and missing-value form with a fake credential in a disposable Keychain.
-After a continuation message, the agent checked public completion and started all four services.
-Browser requests authenticated with the fake API and wrote PostgreSQL records.
-Explicit configuration saving, restart from `file: preview.yml`, and a complete owner restart retained those records.
-After owner restart, fresh name approval reused the stored value without an entry field.
-Startup with both `file` and `spec` omitted then loaded root `preview.yml` successfully.
+The check installed a newly packed local `previewhost@0.1.0-alpha.1` tarball in a clean directory.
+Every installed JavaScript and declaration file matched the current build byte for byte.
+The registration used absolute Node and installed CLI paths, so the same version number on npm was not used as evidence of build identity.
 
-The Keychain-only fixture redirected native storage to the disposable test store.
-It did not intercept MCP calls, browser actions or application startup.
-These checks do not establish every Cursor model or approval policy.
-Final local regression verification also passed all 111 tests with Docker Engine 29.6.1, PostgreSQL and Redis, with zero skips.
+| Actual IDE scenario | Result |
+| --- | --- |
+| No YAML | Direct spec started PostgreSQL, backend and frontend; no YAML was created. |
+| Private setup | Missing fake value, delayed entry, public completion and continuation after the agent ended its turn passed. |
+| Configuration | Explicit save, default root-file reuse, malformed-file errors, restoration and create-only save collision passed. Invalid input preserved the active preview. |
+| Owner lifecycle | Stop/restart and owner shutdown/restart retained notes. Cold list did not launch an owner. New approval reused the existing value without entry. |
+| Client reconnection | Workspace reload preserved the owner, URL and exact ready attempt. |
+| Real Git worktrees | Two new worktrees ran full environments with separate data directories. One reused the exact shared secret; the other used a distinct privately entered value. Neither created YAML. |
+| Cancellation | Cancel after name approval left the value missing. A fresh request completed, then the agent started the distinct worktree. |
+| Failed replacement | A missing frontend entrypoint failed with `START_FAILED`. Bounded logs diagnosed it. The active attempt survived, and a valid replacement kept the URL. |
+
+Brave 153.1.95.101 opened the returned hostname and numeric URLs for all three environments.
+Browser checks wrote separate PostgreSQL notes and verified persistence after restart and replacement.
+Separate HTTP contract tests exercised create, read, update, delete and repeated-delete behavior against each running full stack.
+
+Changing an initial registration exposed a Cursor connection problem: the UI showed connected tools while agent calls timed out.
+A new server name after workspace reload restored actual tool calls. Later worktree registrations and ordinary reconnection succeeded.
+This is an observed client workaround, not a Previewhost transport fix or a guarantee for every Cursor version.
+
+Both client checks used a disposable native Keychain fixture and fake values.
+A test-only preload redirected Keychain calls to that store and selected Brave for the native browser opener.
+The preload reached detached owners through `NODE_OPTIONS`; passing only Node `--import` arguments did not reach them because owners clear `execArgv`.
+MCP handlers, authorization, private HTTP routes and application startup were unchanged.
+No values or private capabilities were captured in screenshots.
+The fresh automated run passed 111 tests with zero skips; focused tests, TypeScript checks and a clean tarball consumer also passed.
 
 Earlier check:
 
@@ -262,24 +279,28 @@ From the project directory, start Claude Code with that file:
 claude --mcp-config ./previewhost.mcp.json --strict-mcp-config --model sonnet --effort low --permission-mode manual
 ```
 
-Claude Code 2.1.270 passed the automatic-owner workflow on September 13 against this branch's built CLI.
+Claude Code 2.1.270 passed a fresh full-stack check on September 13, using a separate installation of the same local tarball described above.
 The actual terminal client ran inside Cursor's integrated terminal because Computer blocked Terminal.app access.
-It displayed Sonnet 5 and used manual per-call approval with project-only settings and an explicit MCP configuration.
-Discovery exposed 14 tools. The isolated project used the same four-service fixture described in the Cursor check above.
+It displayed Sonnet 5 and used manual per-call approval, project-only settings and an explicit fresh MCP registration with 14 tools.
 
-Private name approval, fake-value entry, public completion and a continuation message led to successful startup.
-Browser checks authenticated with the local fake API and wrote PostgreSQL data.
-The agent explicitly saved the original spec and restarted from `preview.yml`; the browser verified retained data and another write.
-No YAML existed before the explicit save request.
+The agent inspected the frontend, backend and database repositories, installed dependencies, and prepared a direct three-service spec without YAML.
+An initial unapproved secret reference failed with `SECRET_DENIED` before startup.
+Private cancellation, a fresh request, delayed fake-value entry and continuation after the agent ended its turn passed.
+The agent observed public completion and started the complete PostgreSQL/backend/frontend environment.
 
-The disposable Keychain relocked during testing. Private setup reported a terminal partial result, and startup later reported locked storage.
-Unlocking only that test Keychain allowed recovery through fresh setup or ordinary startup retry, respectively.
-Claude initially suggested reusing the partial form. The MCP status description now explicitly requires a fresh request after the error is resolved.
-The existing Claude adapter had loaded the earlier description; this wording change was not retested in a fresh Claude session.
+Explicit YAML saving and default-file restart passed. Both inspect and start rejected malformed root YAML without an inline fallback.
+Restoring the exact valid file made inspection succeed; the parse failures preserved the running attempt.
+Stop/restart and owner shutdown/restart retained the database note.
+Cold list did not start an owner. Fresh private approval reused the stored value without another entry field.
 
-An additional owner restart reached fresh setup, but repeated Chrome control timeouts blocked its second approval.
-That extra Claude reapproval check is incomplete. Cursor completed the corresponding owner-restart check.
-Values and private capabilities were absent from the captured client and browser screenshots.
+Brave opened both returned URL forms and created and edited a database note.
+The application stayed reachable after a real Claude exit. After resume, the agent confirmed the exact same ready attempt and URLs through MCP.
+A separate HTTP contract test passed against this running full stack.
+The additional shared/distinct worktree and failed-replacement scenarios were driven by Cursor, not repeated in Claude.
+
+The earlier locked-store check motivated the current instruction that partial setup results require a fresh request.
+The fresh build includes that wording, but this fresh Claude run did not reproduce a partial write.
+Automated native-store tests covered locked, partial and unknown outcomes separately.
 
 Earlier check:
 
