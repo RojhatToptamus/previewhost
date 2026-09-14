@@ -150,7 +150,8 @@ For a local CLI installation, use `./node_modules/.bin/previewhost` in place of 
 
 ### Project owners
 
-CLI and MCP automatically find or start one persistent owner for the current Git worktree root.
+CLI automatically selects the current Git worktree root. MCP tools select the project supplied with each call.
+Both interfaces find or start the same persistent project owner.
 Outside Git, the current directory is the project. Use `--project /absolute/project` to choose it explicitly.
 An owner survives client disconnection and ordinary inactivity. Explicit shutdown stops all its previews.
 
@@ -196,22 +197,27 @@ previewhost shutdown
 ## Use MCP
 
 The MCP client starts the stdio adapter, which finds or starts the persistent project owner.
-Use an explicit project path when the client's launch directory is uncertain.
+A connection can serve multiple chats. Each agent supplies its actual worktree as `project` on every tool call.
 
-For Cursor, add this server to the project's `.cursor/mcp.json`:
+For Cursor, add one server to `~/.cursor/mcp.json`.
+Replace `/absolute/repository` with an authorized repository root. Its registered Git worktrees need no additional registration:
 
 ```json
 {
   "mcpServers": {
     "previewhost": {
       "command": "previewhost",
-      "args": ["mcp", "--project", "${workspaceFolder}", "--allow-exec"]
+      "args": ["mcp", "--root", "/absolute/repository", "--allow-exec"]
     }
   }
 }
 ```
 
 Keep any existing server entries. Enable the server in your MCP client.
+Repeat `--root` for other authorized repositories or source roots.
+For managed databases, add `--docker-socket /absolute/docker.sock`. Each project gets separate private data storage.
+Do not supply one shared `--data-dir` for independent project owners.
+See [Cursor worktrees and global registration](docs/integrations.md#global-registration-and-cursor-worktrees) for host limits.
 For other clients, see [client configurations](docs/integrations.md#codex).
 If the client cannot find `previewhost`, use the [PATH troubleshooting steps](docs/troubleshooting.md#the-client-cannot-find-previewhost).
 

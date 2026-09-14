@@ -323,7 +323,8 @@ previewhost shutdown
 `shop` represents a stopped environment with managed data.
 `delete-data` permanently removes that data. `shutdown` closes the daemon and its previews.
 
-Client commands default to the current canonical Git worktree root, or cwd outside Git.
+CLI commands default to the current canonical Git worktree root, or cwd outside Git.
+Automatic MCP tools select the `project` supplied with each call.
 `--project DIR` selects another project. Each project has one persistent owner with a dynamic loopback port.
 Start, replace, and secret setup/edit can start it. Read/status/cleanup commands never create an owner.
 Inspection validates offline before an owner exists. It does not open managed storage or resolve Keychain values.
@@ -345,8 +346,10 @@ port, which the startup JSON reports.
 
 `--env NAME` selects the current value once at owner startup. Missing selected
 keys are errors. Startup JSON reports selected key names without their values.
-`--data-dir` enables owned database storage explicitly. `--docker-socket` requires
-that directory. Without `--data-dir`, the daemon cannot create managed databases.
+`--data-dir` selects an exact private directory for managed databases.
+Automatic owners with `--docker-socket` default to `data` inside their private project-owner directory.
+Explicit data directories retain their existing behavior. A shared directory permits only one owner at a time.
+Foreground `serve` still requires `--data-dir` for managed databases.
 
 `--allow-exec` grants native execution, managed database operations, and explicit
 data deletion/recovery and private secret setup through the trusted daemon. `stop --after-engine-restart`
@@ -423,7 +426,7 @@ A fresh setup rechecks availability after CLI entry and invalidates an obsolete 
 
 Save starts no application. Check status and current preview state before another start/replace with the current spec.
 Re-read file-based specs after private entry. Do not run an obsolete file or implicitly approve newly edited names.
-If the agent turn ends, send “Secrets saved—continue”. Retain the original project connection and request ID together.
+If the agent turn ends, send “Secrets saved—continue”. Retain the original project path and request ID together.
 Form close or expiry also starts no application.
 Owner restart loses access approvals and setup history, but stored values remain.
 Cancellation stops setup preparation; it does not undo earlier name approvals or saved values.
@@ -459,6 +462,11 @@ MCP tools use the names `preview_inspect`, `preview_start`, `preview_replace`,
 `preview_list`, `preview_get`, `preview_wait`, `preview_logs`, `preview_cancel`,
 `preview_stop`, `preview_delete_data`, `preview_secrets_setup`, `preview_secrets_status`,
 `preview_save_config`, and `preview_shutdown` (14 tools).
+Automatic MCP tools require an absolute `project` on every call unless the registration supplies `--project` as a default.
+This includes reads, waits, secret status, stopping, and owner shutdown. The field selects the owner, file base, and default source root.
+Selection permits configured roots and registered Git worktrees of those repositories. It does not grant execution or select secret names.
+A shared connection retains no current-chat or last-project state. Equal preview names in different projects remain independent.
+Explicit endpoint/token mode keeps one fixed owner and rejects `project` tool arguments.
 MCP inspect/start/replace/setup accepts either `spec` or `file`, never both.
 If both are omitted, it reads project-root `preview.yml`. Invalid or unreadable files are errors.
 Explicit file paths resolve from the MCP project; source paths resolve relative to that file.
@@ -466,7 +474,7 @@ MCP files must resolve inside that project or an explicitly configured `--root`;
 The HTTP/runtime API continues to accept spec objects only. `reopen` remains owner-only.
 There is no public name-approval, secret edit, set, remove, value-read, or export tool.
 
-`preview_save_config({spec})` creates root `preview.yml` only on an explicit user request.
+`preview_save_config({project, spec})` creates root `preview.yml` only on an explicit user request.
 It uses the original prepared spec, validates schema, dependencies, attachments and source scope, then round-trips through the strict YAML loader.
 It preserves non-secret literals and references without resolving inputs, credentials, service URLs or ports.
 Project-local source paths become relative. The result contains `file` and `externalSources` (nonportable paths).

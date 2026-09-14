@@ -52,8 +52,10 @@ launch permissions. Serve remains a supported foreground owner.
 --allow-exec grants native execution, managed database operations, private secret
 setup, and explicit data deletion/recovery. It is not a sandbox.
 --env NAME selects that host environment value once at startup. Values stay out
-of status. Managed PostgreSQL/Redis require --data-dir and local Docker images.
---docker-socket selects a local Engine socket and requires --data-dir.
+of status. Managed PostgreSQL/Redis require private storage and local Docker images.
+--docker-socket selects a local Engine socket. Automatic project owners default
+to private per-project data storage; --data-dir overrides that location.
+Foreground serve still requires --data-dir for managed databases.
 --secret ID selects an exact macOS Keychain entry for {secret: ID} bindings.
 --allow-exec selects no secrets by itself. Private browser setup/edit needs owner
 authorization. The private form approves unselected names for this owner lifetime,
@@ -101,7 +103,7 @@ async function readSpec(file: string | undefined, signal: AbortSignal, project: 
 }
 
 const launchFlags = ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket'];
-function projectOptions(values: ReturnType<typeof parseCliArgs>['values'], project: string): ProjectOptions {
+function projectOptions(values: ReturnType<typeof parseCliArgs>['values'], project?: string): ProjectOptions {
   return { projectDirectory: project, endpoint: values.endpoint, tokenFile: values['token-file'],
     allowedRoots: values.root?.map(root => resolve(root)), allowExec: values['allow-exec'], inputKeys: values.env,
     secretIds: values.secret, dataDirectory: values['data-dir'], dockerSocket: values['docker-socket'],
@@ -173,7 +175,7 @@ async function main(): Promise<void> {
   }
   if (command === 'mcp') {
     const { runMcp } = await import('./mcp.js');
-    runMcp(projectOptions(values, await projectDirectory(values.project)));
+    runMcp(projectOptions(values, values.project));
     return;
   }
 

@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { checkTokenDirectory, connectPreviewDaemon, type ClientOptions } from './client.js';
 import { limits, secretIdSchema, type Failure } from './contracts.js';
 import { PreviewError } from './errors.js';
-import { canonicalDirectory } from './spec.js';
+import { canonicalDirectory, isWithin } from './spec.js';
 
 export interface ProjectOptions extends ClientOptions {
   projectDirectory?: string;
@@ -45,6 +45,31 @@ export async function projectDirectory(explicit?: string): Promise<string> {
   return canonicalDirectory(directory);
 }
 
+/** MCP connections can serve several chats. Select each call within owner-approved roots. */
+export async function selectMcpProject(requested: string | undefined, options: ProjectOptions): Promise<ProjectOptions> {
+  const base = await projectDirectory(options.projectDirectory);
+  if (requested === undefined) return { ...options, projectDirectory: base };
+  const project = await canonicalDirectory(requested);
+  const roots = await Promise.all((options.allowedRoots ?? [base]).map(root => canonicalDirectory(resolve(root))));
+  let permitted = roots.some(root => isWithin(root, project));
+  if (!permitted) {
+    // A registered linked checkout belongs to the authorized repository even outside its directory.
+    for (const root of roots) {
+      try {
+        const { stdout } = await promisify(execFile)('git', ['-C', root, 'worktree', 'list', '--porcelain', '-z'], { timeout: 2000, maxBuffer: 65_536 });
+        const paths = stdout.split('\0').filter(line => line.startsWith('worktree ')).map(line => line.slice(9));
+        const checkouts = await Promise.all(paths.map(path => canonicalDirectory(path).catch(() => undefined)));
+        if (checkouts.includes(project)) {
+          permitted = true;
+          break;
+        }
+      } catch { /* Non-Git or inaccessible roots cannot authorize another checkout. */ }
+    }
+  }
+  if (!permitted) throw new PreviewError('SOURCE_DENIED', 'The project must be within a configured root or be a registered Git worktree of that repository.');
+  return { ...options, projectDirectory: project, allowedRoots: options.allowedRoots ? [...new Set([project, ...roots])] : [project] };
+}
+
 export function projectOwnerDirectory(project: string): string {
   // Fixed-length filesystem address for an arbitrary absolute path, not a permission/configuration hash.
   return join(homedir(), '.local', 'share', 'previewd', 'projects', createHash('sha256').update(project).digest('hex'));
@@ -71,14 +96,15 @@ async function readConnection(directory: string): Promise<{ endpoint: string; pi
 
 async function launchOptions(options: ProjectOptions, project: string): Promise<ProjectLaunch> {
   const inputKeys = [...new Set(options.inputKeys ?? [])].sort();
+  const dataDirectory = options.dataDirectory ?? (options.dockerSocket ? join(projectOwnerDirectory(project), 'data') : undefined);
   const info = { projectDirectory: project, pid: process.pid,
     allowedRoots: [...new Set(await Promise.all((options.allowedRoots ?? [project]).map(root => canonicalDirectory(resolve(root)))))].sort(),
     allowExec: options.allowExec ?? false, inputKeys, secretIds: [...new Set(options.secretIds ?? [])].sort(),
-    ...(options.dataDirectory ? { dataDirectory: resolve(options.dataDirectory) } : {}),
+    ...(dataDirectory ? { dataDirectory: resolve(dataDirectory) } : {}),
     ...(options.dockerSocket ? { dockerSocket: resolve(options.dockerSocket) } : {}),
   };
-  if (!ownerInfoSchema.safeParse(info).success || info.dockerSocket && !info.dataDirectory) {
-    throw new PreviewError('INVALID_INPUT', 'Invalid project launch options. Supply valid roots, input keys and secret names; a Docker socket requires a data directory.');
+  if (!ownerInfoSchema.safeParse(info).success) {
+    throw new PreviewError('INVALID_INPUT', 'Invalid project launch options. Supply valid roots, input keys and secret names.');
   }
   const inputs: Record<string, string> = {};
   for (const key of inputKeys) {

@@ -51,6 +51,7 @@ test('MCP discovers with no daemon in both protocol eras and returns actionable 
       assert.match(bindings, /Primary HTTP service only/);
       assert.match(bindings, /native DNS resolution and candidate readiness are not guaranteed/);
       const instructions = client.getInstructions()!;
+      assert.match(instructions, /fixed owner; do not supply project/);
       assert.match(instructions.slice(0, 512), /project-root preview\.yml/);
       assert.match(instructions.slice(0, 512), /Save preview\.yml only on an explicit user request/);
       assert.match(instructions.slice(0, 512), /request private setup/);
@@ -60,6 +61,8 @@ test('MCP discovers with no daemon in both protocol eras and returns actionable 
       assert.equal(result.isError, true);
       assert.equal((result.structuredContent as { error: { code: string } }).error.code, 'DAEMON_UNAVAILABLE');
       assert.match(JSON.stringify(result.content), /previewhost serve/);
+      const redirected = await client.callTool({ name: 'preview_list', arguments: { project: directory } });
+      assert.equal(redirected.isError, true); // A fixed endpoint cannot select another project owner.
       assert.equal(stderr, '');
     } finally { await client.close(); }
   }

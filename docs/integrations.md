@@ -192,24 +192,69 @@ This test access restriction does not establish a previewhost defect.
 
 ## Cursor and other MCP hosts
 
-In Cursor, add this server to the project's `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "previewhost": {
-      "command": "previewhost",
-      "args": ["mcp", "--project", "${workspaceFolder}", "--allow-exec"]
-    }
-  }
-}
-```
+In Cursor, use the [global registration in the README](../README.md#use-mcp).
+It authorizes repository roots once. Each chat supplies its worktree through the tool's `project` field.
+A fixed `--project` remains a default for clients that serve one project.
 
 Use the host's approval controls to enable the server and its tools.
 Other stdio MCP hosts can use these executable arguments.
 Unlisted clients and models remain unverified.
 
 ### Cursor IDE
+
+#### Global registration and Cursor worktrees
+
+Cursor 3.20.21 passed the shared-connection routing check on September 14.
+Two actual chats in one Agents window used Cursor-managed Git worktrees of the same disposable repository.
+The visible model was Grok Bot, with High effort for Amber and Low for Violet.
+One global MCP registration authorized the repository through `--root`; neither worktree had a manual MCP registration.
+
+Cursor documents [global registration and workspace interpolation](https://cursor.com/docs/mcp), plus [managed worktrees](https://cursor.com/docs/configuration/worktrees).
+These features do not establish that each chat gets a separate MCP process.
+In this check, both chats sent tool calls to one process launched from the user's home directory.
+The old connection-wide project selection therefore read the wrong root YAML and routed equal preview names to the same owner.
+An absolute source path in a spec did not change that owner selection.
+
+Using `--project ${workspaceFolder}` did not reliably repair the global Agents path in this client.
+Some launches resolved the placeholder, while others passed it literally.
+The supported setup uses one authorized repository root and the tool's required `project` argument on every call.
+Both agents supplied their own checkout paths, including on later turns, through the same MCP process.
+A first call without the newly required field failed; the agent corrected it without configuration coaching.
+
+Each chat received an ordinary heading/color prompt, followed by a distinct subtitle prompt.
+Both full applications ran simultaneously with separate frontend, backend, PostgreSQL, source paths, and private data directories.
+Brave 153.1.95.101 showed only the corresponding worktree's edits and database note at each returned URL.
+Both worktrees explicitly referenced one fake Keychain entry. Each owner required private approval; only the first needed value entry.
+The agents diagnosed missing dependencies from startup failures and installed them in their own worktrees.
+Stopping either preview closed its URL while the other remained usable with the same ready attempt.
+Both restarted with their own saved notes and new public ports.
+Amber's first restart failed because the disposable Keychain was locked. Unlocking that store and an ordinary retry restored it.
+
+Reloading the Agents window retained the same MCP process.
+After a deliberate, graceful MCP process stop, Cursor offered an **Authenticate** action for the existing server.
+That action launched a new process from the refreshed local installation; both chats then used it successfully without registration changes.
+Both preview owners and their exact ready attempts survived. This client recovery required a click; it was not automatic reconnection.
+
+The check used a fresh local `previewhost@0.1.0-alpha.1` package with Node 22.23.1.
+Installed JavaScript and declaration files were compared with the local build; the unchanged package version alone was not treated as proof.
+A test-only preload selected Brave and a disposable native Keychain. Personal secrets were not used.
+A metadata-only trace recorded MCP process IDs and submitted paths, excluding values, results, and private form capabilities.
+An initial trace-wrapper bug was corrected before interpreting successful tool calls; early connection errors were not counted as product evidence.
+
+Separate automated tests exercised two Git worktrees over one real stdio connection with managed PostgreSQL.
+They covered concurrent startup, equal names, independent owners/data, cross-project attempt IDs, stale Git entries, denied roots, and stop/restart isolation.
+These are automated runtime checks, not additional Cursor model turns.
+The broad suite passed 112 tests with zero skips. The final focused run passed nine tests.
+A clean tarball consumer passed, and HTTP contract tests passed against both running full stacks, including database create/read/update/delete operations.
+Final review corrected the instructions for fixed-endpoint connections; focused automated checks passed afterward.
+The last Cursor refresh was blocked by a locked Mac. The earlier real-client checks exercised the same automatic-routing behavior.
+
+The agent must know its checkout path. Previewhost cannot infer chat identity from a shared connection.
+Authorization is configured once per repository or source root; new unrelated repositories still require explicit authorization.
+Linked worktrees inherit repository source authority, but execution permission and owner-specific secret approval remain separate.
+No chat registry, Cursor-specific runtime, or dashboard was added.
+
+#### Earlier Cursor IDE checks
 
 Cursor IDE 3.20.7 (Auto) passed a fresh full-stack check on September 13.
 The project was an isolated copy of `previewhost-test-frontend` in `previewhost-test-lab`, with its sibling backend and managed PostgreSQL.

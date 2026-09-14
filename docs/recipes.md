@@ -118,7 +118,7 @@ Ask for missing product choices that affect the result: target application, data
 Ask the owner to resolve missing permissions, selected inputs, and secret IDs.
 Do not ask for secret values in chat.
 
-Keep the prepared spec in the task until the user requests a save. MCP `preview_save_config({spec})` creates root `preview.yml` explicitly.
+Keep the prepared spec in the task until the user requests a save. MCP `preview_save_config({project, spec})` creates root `preview.yml` explicitly.
 It validates source scope and declarative structure, preserves reference bindings, and never resolves values or starts code.
 Existing files produce `ALREADY_EXISTS`; use the host editor for requested updates, then validate them.
 Do not serialize inspection output, which omits literal environment bindings. Report external source paths as nonportable.

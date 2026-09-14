@@ -46,7 +46,8 @@ For a local package, use its absolute `node_modules/previewhost/dist/cli.js` pat
 
 ## The client cannot find the daemon
 
-Without an explicit connection, CLI/MCP uses the canonical project root. Check `--project` and the host's launch cwd.
+Without an explicit connection, CLI uses the canonical project root. MCP uses the tool call's `project` or registration's `--project` default.
+Check that the selected path is this chat's actual worktree.
 Read/status/cleanup operations never start a missing owner; inspect works offline.
 Start or secret setup can create the owner with the required current launch flags, such as `--allow-exec`.
 A living owner with incompatible settings is left unchanged. Shut it down explicitly before changing its launch configuration.
@@ -153,7 +154,8 @@ Only selected values reach `{fromEnv: NAME}` bindings.
 previewhost does not load `.env` files.
 YAML files require one document without aliases, tags, or merge keys.
 
-Managed databases require an explicit private `--data-dir` and cached local Docker images.
+Managed databases require private data storage and cached local Docker images.
+Automatic owners with `--docker-socket` default to separate private storage per project. Foreground `serve` requires `--data-dir`.
 See the [database example](../examples/multi-repo/README.md).
 External database URLs require `127.0.0.1`, an explicit port, and a valid database path.
 A reachable TCP port does not prove successful authentication.
@@ -184,7 +186,7 @@ For `SECRET_REQUIRED` or unselected names, use `previewhost secrets setup --allo
 The private owner form first approves access to unselected names, then collects missing values. Existing values are reused.
 Save does not start an application.
 Check `previewhost secrets status REQUEST_ID --timeout-ms 25000` before a startup retry.
-Use the original project connection and re-read the current spec. If the agent turn ended, send “Secrets saved—continue”.
+Use the original project path and re-read the current spec. If the agent turn ended, send “Secrets saved—continue”.
 
 If the browser cannot open, `setup --reopen` retries a pending form.
 For already selected names, use `previewhost secrets set ID` in a terminal, then request setup again.

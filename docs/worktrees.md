@@ -6,11 +6,18 @@ The daemon owns the preview's application processes, routes, and managed databas
 
 ## Select the task and its source
 
-1. Use the task's existing frontend and backend paths.
-2. Choose one preview name from the host's stable task identity.
-3. Retain the submitted service paths and preview name in the host's task context.
-4. Read the project commands and the selected environment file.
-5. Check each service path and its command entrypoint.
+1. Supply the task's actual checkout root as `project` on every automatic MCP call.
+2. Use the task's existing frontend and backend paths.
+3. Choose one preview name from the host's stable task identity.
+4. Retain the submitted service paths and preview name in the host's task context.
+5. Read the project commands and the selected environment file.
+6. Check each service path and its command entrypoint.
+
+One global MCP registration can authorize a repository and its registered Git worktrees through `--root`.
+The agent supplies `project`; the user does not register each worktree or change the registration between chats.
+A new chat does not imply a new MCP connection. No operation relies on the previously selected project.
+With `--docker-socket` and no `--data-dir`, each automatic owner uses separate private data storage.
+See the [actual Cursor check](integrations.md#global-registration-and-cursor-worktrees).
 
 Branches do not need matching names. One repository can supply several services.
 Paths in a configuration file resolve relative to that file.

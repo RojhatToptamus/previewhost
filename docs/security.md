@@ -78,6 +78,10 @@ Attachments connect only to IPv4 loopback.
 These checks do not isolate hostile filesystem changes by another same-user process.
 
 MCP configuration reads use regular files inside the selected project or explicitly configured roots.
+Each automatic MCP call selects its project within the registration's roots or their registered Git worktrees.
+The adapter resolves canonical paths before selection. An unrelated repository outside those roots is denied.
+Git worktree membership extends the registered repository's source authority to its linked checkouts.
+This selection creates no execution permission or secret approval. Native commands still run with the user's permissions, without a sandbox.
 The loader checks resolved targets to reject symlink escapes. Direct CLI/library file input retains the caller's filesystem authority.
 
 ## Automatic project owners

@@ -249,3 +249,62 @@ test('Git worktree roots are distinct and command wait timeout preserves continu
   const ready = await client.wait('slow', starting.id);
   assert.equal(ready.state, 'ready'); assert.equal(await (await fetch(ready.url!)).text(), 'ready');
 });
+
+test('one shared MCP connection routes Git worktrees to separate owners and managed data', {
+  ...enabled, skip: process.platform !== 'darwin' || !process.env.PREVIEWD_TEST_DOCKER_SOCKET,
+}, async t => {
+  const { directory, projects } = await fixture(t);
+  await writeFile(join(directory, 'preview.yml'), 'name: notes\ntype: environment\nprimary: web\nservices:\n  web: {type: static, directory: .}\n  db: {type: postgres}\n');
+  await execute('git', ['init', directory]);
+  await execute('git', ['-C', directory, 'add', '.']);
+  await execute('git', ['-C', directory, '-c', 'user.name=Previewhost Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture']);
+  const worktree = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-mcp-worktree-')));
+  projects.push(worktree);
+  await execute('git', ['-C', directory, 'worktree', 'add', '--detach', worktree]);
+  await writeFile(join(worktree, 'index.html'), 'other worktree');
+  const removed = join(directory, 'removed-worktree');
+  await execute('git', ['-C', directory, 'worktree', 'add', '--detach', removed]);
+  await rm(removed, { recursive: true }); // An unrelated stale Git entry must not deny the living checkout.
+  const client = new Client({ name: 'worktree-launch', version: '1' });
+  t.after(() => client.close());
+  await client.connect(new StdioClientTransport({ command: process.execPath,
+    args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWD_TEST_DOCKER_SOCKET!], stderr: 'pipe' }));
+  const tools = (await client.listTools()).tools;
+  assert.ok(tools.every(tool => tool.inputSchema.required?.includes('project')));
+  assert.equal((await client.callTool({ name: 'preview_list', arguments: {} })).isError, true);
+  function adapter(project: string) {
+    return async <T>(name: string, args: Record<string, unknown> = {}): Promise<T> => {
+      const response = await client.callTool({ name, arguments: { ...args, project } });
+      assert.equal(response.isError, undefined, JSON.stringify(response.structuredContent));
+      return (response.structuredContent as { result: T }).result;
+    };
+  }
+  const first = adapter(directory); const second = adapter(worktree);
+  const ready = await Promise.all([first, second].map(async call => {
+    const started = await call<PreviewStatus>('preview_start');
+    return call<AttemptResult>('preview_wait', { name: 'notes', attemptId: started.candidate!.id });
+  }));
+  for (const [i, project] of projects.entries()) {
+    assert.equal(ready[i].state, 'ready');
+    assert.equal(ready[i].services?.db.state, 'ready');
+    assert.deepEqual(ready[i].sources, [project]);
+    const owner = connectProject({ projectDirectory: project });
+    try { assert.equal((await owner.info())?.dataDirectory, join(projectOwnerDirectory(project), 'data')); }
+    finally { await owner.close(); }
+  }
+  assert.notEqual(ready[0].url, ready[1].url);
+  const wrongAttempt = await client.callTool({ name: 'preview_wait', arguments: { project: worktree, name: 'notes', attemptId: ready[0].id } });
+  assert.equal((wrongAttempt.structuredContent as { error: { code: string } }).error.code, 'ATTEMPT_EXPIRED');
+  assert.equal(await (await fetch(ready[0].url!)).text(), 'project preview');
+  assert.equal(await (await fetch(ready[1].url!)).text(), 'other worktree');
+  const denied = await client.callTool({ name: 'preview_inspect', arguments: { project: worktree, spec: { name: 'escape', type: 'static', directory: resolve('src') } } });
+  assert.equal((denied.structuredContent as { error: { code: string } }).error.code, 'SOURCE_DENIED');
+  const unrelated = await client.callTool({ name: 'preview_list', arguments: { project: resolve('.') } });
+  assert.equal((unrelated.structuredContent as { error: { code: string } }).error.code, 'SOURCE_DENIED');
+  await first('preview_stop', { name: 'notes' });
+  await assert.rejects(fetch(ready[0].url!));
+  assert.equal((await second<PreviewStatus>('preview_get', { name: 'notes' })).active!.id, ready[1].id);
+  assert.equal(await (await fetch(ready[1].url!)).text(), 'other worktree');
+  const restarted = await first<PreviewStatus>('preview_start');
+  assert.equal((await first<AttemptResult>('preview_wait', { name: 'notes', attemptId: restarted.candidate!.id })).state, 'ready');
+});

@@ -1,12 +1,12 @@
 # Developer experience redesign
 
-Implementation status: September 13, 2026. Branch: `codex/dx-workflow`, based on `origin/main` at `ec36175`.
+Implementation status: September 14, 2026. Branch: `codex/dx-workflow`, based on `origin/main` at `ec36175`.
 
 This report now describes the implemented design and its verified limits. The September 12 proposal was treated as guidance. Existing runtime, configuration, authorization, Keychain and cleanup mechanisms remain the basis of the system.
 
 ## User workflow
 
-1. Select the project explicitly, or use its canonical Git worktree root. Outside Git, the default is the current directory.
+1. Supply the current worktree as `project` on each MCP call. CLI defaults to its canonical Git root, or cwd outside Git.
 2. Prefer root `preview.yml` when it exists. Invalid or unreadable content is an error. An explicit file or direct spec overrides this default.
 3. Inspect the spec and prepare the application through its existing project commands. Inspection works without starting an owner.
 4. Start with authority from the current CLI invocation or MCP registration. The adapter finds or starts one persistent project owner.
@@ -46,9 +46,9 @@ JSON
 | Private secret workflow | One existing private channel handles name approval and missing-value entry. No public approval tool or `approved: true` field exists. |
 | Shared values | An exact ID uses the existing `dev.previewd.user` Keychain entry across projects/worktrees that approve it. A distinct ID expresses a different value. |
 | Status continuation | Immediate reads or waits up to 25,000 ms use the existing bounded request map. Canceling a wait leaves setup open. |
-| Automatic owners | CLI and MCP share a persistent owner per canonical project. A lifetime kernel lock serializes startup. Explicit connection mode remains supported. |
+| Automatic owners | CLI and MCP share a persistent owner per canonical project. MCP routes each call independently, even over a shared connection. A lifetime kernel lock serializes startup. Explicit connection mode remains supported. |
 | Configuration input | CLI supports file or JSON stdin. MCP inspect/start/replace/setup supports exclusive `file` or `spec`, with root `preview.yml` as the default. |
-| Configuration saving | `preview_save_config({spec})` and the library helper create root YAML from validated declarative input, without overwriting existing content. |
+| Configuration saving | `preview_save_config({project, spec})` and the library helper create root YAML from validated declarative input, without overwriting existing content. |
 | Discoverability | The first 512 MCP instruction characters cover the normal workflow. The catalog has 14 tools, including save and owner shutdown. |
 | CLI guidance | The package includes the maintained skill and materialized references. `--help` describes project mode; `--version` reports the installed version. |
 | Continuing startup | CLI start/replace reads current state after a wait timeout and can return `starting`. It does not misreport a continuing attempt as a failed start. |
@@ -122,6 +122,11 @@ The initial save operation is deliberately create-only. Requested updates use th
 - The npm build materializes the existing skill references because npm omits repository symlinks. Generated copies live in `dist`; maintained documents still have one source.
 - A live Claude check misread a terminal partial secret result as a reusable form. MCP guidance now explicitly requires fresh setup after repair.
 
+The September 14 Cursor investigation found shared MCP connections with a launch directory unrelated to the active worktree.
+MCP now selects the project for each call within configured roots and their registered Git worktrees.
+Automatic owners with an explicit Docker socket use separate private data directories by default.
+The change reuses project owners, source validation, data locks, and private secret approval. It adds no chat registry or second lifecycle.
+
 ## Verification and limits
 
 All credentials used for this work were fake values in disposable Keychains. Test projects, Git repositories, worktrees, connection directories and application processes were disposable. No production systems or personal secret entries were used.
@@ -159,11 +164,15 @@ The test fixture also selected Brave in the native opener; it did not change MCP
 An initial Cursor registration became stale after edits; a fresh server name restored tool calls.
 The [integration record](integrations.md#cursor-ide) separates these actual-client results from automated checks and explains the fixture limits.
 
+The September 14 [global Cursor worktree check](integrations.md#global-registration-and-cursor-worktrees) used two actual chats in one Agents window.
+Both full stacks passed source, update, database, shared-secret, stop/restart, and MCP process-reconnection checks.
+Reconnection required Cursor's offered authentication click. The broad suite passed 112 tests; the final focused run passed nine.
+
 Still deferred or unverified:
 
 - The future dashboard and an MCP overwrite/editor operation.
 - Guaranteed automatic agent wakeup after a completed turn; the continuation message remains necessary for that case.
-- Universal active-worktree discovery in every GUI host. Use an explicit project path until the host's launch context is verified.
+- Universal active-worktree discovery in every GUI host. MCP requires the agent to supply its actual worktree; it does not infer chat identity.
 - Codex Desktop, VS Code, Intel execution and non-macOS automatic owners.
 - A fresh Claude partial-write recovery scenario. The new build loaded the revised wording, but the fresh client run did not reproduce a partial write.
 - A universal guarantee against credentials embedded in arbitrary argv, literals or application output.
