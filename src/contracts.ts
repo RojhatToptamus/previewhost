@@ -195,6 +195,7 @@ export type SecretSetupSummary = Pick<SecretSetupStatus, 'id' | 'name' | 'mode' 
 export interface PreviewManagementApi {
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
+  saveConfiguration(name: string, attemptId: string): Promise<{ file: string; externalSources: string[] }>;
   secretsList(): Promise<SecretSetupSummary[]>;
   secretsOpen(id: string, options?: { signal?: AbortSignal }): Promise<SecretSetupStatus>;
 }
@@ -243,5 +244,6 @@ export const requestSchemas = {
   }).optional() }),
   describe: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   startAgain: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
+  saveConfiguration: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   deleteData: z.strictObject({ name: nameSchema }),
 };

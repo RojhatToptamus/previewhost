@@ -1,7 +1,7 @@
 # Previewhost local dashboard: research and proposal
 
 Research date: 14 September 2026. Baseline: `main` at `cf5326a`, after PR #7.
-Status: initial dashboard implemented; later configuration features remain deferred.
+Status: dashboard and explicit recipe saving implemented; configuration editing remains deferred.
 Branch: `codex/dashboard-research`.
 
 ## Implementation outcome
@@ -12,7 +12,7 @@ that discovers existing automatic owners. It preserves their lifecycle and autho
 
 Implemented: project/worktree identity, application/service links, active versus update
 status, bounded logs, guarded Stop, exact cancellation, ordinary cleanup retry,
-stopped-only Start again, redacted requested configuration, and pending private-form
+Start again and explicit failed-start retry, redacted requested configuration, exact-attempt recipe saving, and pending private-form
 handoff. Full specs remain unexpanded in bounded owner memory, never exported to the
 browser. Stop retains the application actually stopped when an update had failed.
 
@@ -20,8 +20,15 @@ Material changes from the proposal:
 
 - Data deletion stays in the CLI. Existing public names/types cannot guard a stale
   delete-and-recreate confirmation. No speculative resource identity API was added.
-- Direct-spec saving, a live Restart button, and configuration editing remain deferred.
-  Existing CLI/MCP saving and host editors continue to work; the dashboard has no store.
+- **Save as preview.yml** creates a file from the exact selected attempt in its owner's
+  project root. It reuses the existing saver without overwriting files or changing the
+  running application. Live Restart and configuration editing remain deferred.
+- **Retry start** reuses the normal startup path after a failure is repaired. It targets
+  the current failed attempt only when no application, startup, or cleanup remains.
+  It does not retry canceled attempts or open private secret setup.
+- Dashboard tab storage retains its separate capability across reload. Browser restore
+  may preserve it; stopping the dashboard process ends its authority. Secret forms
+  remain memory-only. No persistent project or configuration store was added.
 - Older owners retain read/Open/log access, but guarded Stop falls back to an exact CLI
   command when the owner cannot enforce the new guard. No unguarded browser fallback.
 - One hung owner has a three-second read budget. Its unavailable row does not block others.
@@ -92,11 +99,12 @@ The first usable release should include:
 - Known project owners, worktree paths, previews, returned application URLs, and owner connection status.
 - Active application, startup/update outcome, service readiness, cleanup problems, and retained-data summary.
 - A detail panel with source paths, a bounded log tail, and errors with the supported next action.
-- Open/copy URL, Stop, exact startup/update cancellation, normal cleanup retry, and **Start again** for a stopped preview with a retained declaration.
+- Open/copy URL, Stop, exact startup/update cancellation, normal cleanup retry, **Start again** for a stopped preview, and explicit **Retry start** after repairing a startup failure.
+- Explicit **Save as preview.yml** from an exact attempt's configuration, without overwrite or changes to the running application.
 - Retained-data visibility and a clear explanation that explicit deletion remains in the CLI.
 - Pending private setup, including requests that exist before any preview starts, and an explicit handoff to the existing private form.
 
-Start again and read-only configuration details require a small owner contract addition described below. Start again reruns the selected declaration against current source; it does not reload YAML. New-environment creation, live restart, direct-spec saving, and configuration editing are subsequent work. If the declaration is unavailable, show an explicit agent/CLI handoff with the exact project and preview name. Never reconstruct input from status.
+Start again, read-only configuration details, and explicit saving use the retained declaration described below. Start again reruns it against current source; it does not reload YAML. Save creates root `preview.yml` without applying changes to the running preview. New-environment creation, live restart, and configuration editing remain subsequent work. If the declaration is unavailable, show an explicit agent/CLI handoff with the exact project and preview name. Never reconstruct input from status.
 
 Prefer a compact list with an expandable detail panel. A full-width detail view serves small screens without becoming a separate application section. Deep links are deferred.
 
@@ -159,29 +167,33 @@ Derive presentation from existing status fields; do not persist another status m
 
 **Start again** is available only for a stopped preview whose selected declaration is still retained by the same owner. It revalidates source and authority, uses the existing start path, and refreshes returned URLs. It does not launch a missing owner.
 
+**Retry start** uses the same operation for the current failed attempt after the user repairs its cause. It is unavailable while an active application, candidate, busy operation, or cleanup remains. A failed update with a serving application is not a failed startup. Canceled attempts remain excluded. Retrying does not open private setup or bypass secret approval.
+
 **Stop** stops the selected environment's owned processes and managed containers while retaining managed data. It does not own an attached external service. **Cancel update** targets the exact candidate. **Retry cleanup** invokes the existing supported stop path. An engine-restart recovery assertion stays explicit; the interface must not guess it or restart Docker. **Delete retained data** remains an explicit CLI operation. No dashboard deletion control is implemented. Owner shutdown is broader than Stop and ends dynamic secret grants; keep it in CLI initially. [Runtime:204–265](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/runtime.ts#L204-L265), [security and recovery](../docs/security.md)
 
 ## Configuration and secrets
 
 ### Configuration authority
 
-The current runtime keeps attempt summaries, not the complete declaration. Inspection also removes literal environment values and external database URLs. It cannot be used to recreate a spec faithfully. [Runtime:17–39](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/runtime.ts#L17-L39), [description contract:172–186](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/contracts.ts#L172-L186)
+The research baseline kept attempt summaries, not the complete declaration. Inspection also removes literal environment values and external database URLs. It cannot recreate a spec faithfully. [Baseline runtime:17–39](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/runtime.ts#L17-L39), [description contract:172–186](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/contracts.ts#L172-L186)
 
-For the configuration slice, retain **one normalized, unexpanded declaration with each relevant bounded runtime attempt**. It describes what that attempt was asked to run, not a second mutable project configuration. Keep symbolic secret/input bindings; never retain the resolved runtime environment for this purpose. Expose a redacted description, not raw declarations, through general management responses. Let an owner operation reuse the retained declaration when needed. [Normalization:43–74](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/spec.ts#L43-L74)
+The implementation retains **one normalized, unexpanded declaration with each relevant bounded runtime attempt**. It describes what that attempt was asked to run, not a second mutable project configuration. Symbolic secret/input bindings stay unexpanded; resolved environments are not retained for this purpose. General management responses expose only a redacted description. Owner operations reuse the declaration for Start again and explicit saving. [Normalization:43–74](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/spec.ts#L43-L74)
 
-| Input condition | Proposed behavior |
+| Input condition | Current behavior and limits |
 |---|---|
 | No YAML; preview started with a direct spec | Show a redacted description of its retained declaration when supported. Do not create a file automatically |
-| Valid root YAML | Load through the existing loader; preserve supported relative paths |
-| Broken root YAML | Show a bounded parse/validation error and file location. Never silently bypass it |
-| YAML exists beside an active direct spec | Label “Project file” and “Started configuration” separately. Do not claim they are equal or infer origin |
-| User explicitly saves a direct declaration | Reuse the validated, create-only saver. If a file already exists, report conflict rather than overwrite |
+| Valid root YAML | CLI/MCP load through the existing loader and preserve relative paths. Dashboard Start again does not reload it |
+| Broken root YAML | File-based CLI/MCP input reports an error. The dashboard neither loads the file nor claims it is valid |
+| YAML exists beside an active direct spec | Show the attempt's “Requested configuration.” Do not claim it matches the file or infer its origin; there is no project-file viewer |
+| User explicitly saves a declaration | Save the exact selected attempt through the validated, create-only saver. An existing file produces an error, never an overwrite |
 | User edits an existing YAML file | Initially use their editor or agent. Save changes future input; it does not silently apply to a running application |
 | Owner exited and only database data remains | Configuration may be unavailable. A directory or database name cannot recover a lost direct spec |
 
 The retained declaration also enables a later restart, but its target must be explicit: the serving attempt or a selected stopped attempt, **not the latest attempt**, which may be a failed update. For the first release, Stop followed by Start again is sufficient. A later one-click Restart stops then starts and may change the public listener URL; refresh displayed URLs and explain downtime. Applying via replacement preserves routes but overlaps processes. Do not substitute one for the other silently. Missing secret approval returns to the existing private flow. File-based startup must validate the file before stopping a working application.
 
-A future dashboard Save button needs a bounded owner operation that invokes the existing saver; retaining the declaration alone is insufficient. Full editing needs safe overwrite/conflict handling that create-only saving does not provide. Defer a general editor and file/runtime transactions. There is no need for hashes, revisions, or a configuration database. [Config loader/saver:11–119](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/config.ts#L11-L119)
+**Save as preview.yml** calls `saveConfiguration(name, attemptId)`. The automatic owner fixes the project destination; the browser supplies neither a filesystem path nor a spec. Saving validates source scope, makes local sources relative, and reports external absolute paths. It reads no Keychain values, changes no application state, and never overwrites an existing file or symlink. The saved file lets CLI/MCP recover the recipe after owner exit. Literal values supplied in the original declaration remain; the saver cannot certify arbitrary strings are secret-free.
+
+This small addition closes the gap between a successful in-memory preview and a reusable recipe. Full editing still needs overwrite/conflict handling that create-only saving does not provide. A general editor and file/runtime transactions remain deferred. No hashes, revisions, or configuration database are needed. [Config loader/saver:11–119](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/config.ts#L11-L119)
 
 ### Private setup
 
@@ -201,6 +213,7 @@ Do not add a general secret manager or rotation screen initially. Updating a sha
 4. **Canceled or delayed entry.** Pending, expired, browser-launch failure, and canceled remain distinct. Delayed entry keeps the request pending until its existing expiry. Cancel invalidates the request capability; no polling loop reopens it. The agent should stop the flow and await explicit user intent. This last behavior is model guidance, not an indefinite server prohibition on new requests.
 5. **Failed update.** A backend candidate fails readiness while the old application serves. The user keeps Open, examines that candidate's logs, and asks the agent to fix the problem. Retry is not offered without identified valid input. Incomplete cleanup shows the existing recovery action rather than a generic “try again.”
 6. **Human and agent act together.** A user looking at attempt A presses Stop after an agent has replaced it with B. The owner rejects the stale action; the page refreshes and explains that the preview changed. It does not automatically repeat the action against B. After a successful Stop, a later authorized Start is still possible: Stop means stop now, not permanently pause all agents.
+7. **Keep a working recipe.** The agent starts a direct spec without YAML. The user opens that attempt's Configuration and selects **Save as preview.yml**. Saving preserves symbolic bindings and reports any external source paths. The running preview stays unchanged. After owner exit, the agent or CLI loads the saved file and requests any required access again. Saving does not make the dashboard an owner launcher.
 
 Exact candidate cancellation already has an attempt-ID guard. At the research baseline, Stop and replacement targeted the current preview by name. Dashboard Stop now uses a small owner-side expected-target check using existing attempt identities, checked before mutation. A browser refresh alone cannot close the race. Data deletion remains in the CLI because public status only contains resource names/types, which cannot distinguish delete-and-recreate. No additional resource identity contract was added for a deferred feature. [Runtime:204–255](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/runtime.ts#L204-L255)
 
@@ -225,7 +238,9 @@ Discovery enumerates the existing private automatic-owner directory, validates r
 
 Detached owners can still run older code after a package upgrade. Preserve status/Open/log access when a new operation is unsupported. Give the existing CLI Stop command when the owner cannot enforce guarded browser Stop; explain which action requires an owner upgrade. Never automatically shut down that owner or migrate its grants. Handle unsupported operations directly rather than introduce a version-negotiation framework.
 
-The existing control listener deliberately rejects browser Origin headers. Do not loosen it. The new browser bridge authenticates locally and keeps owner tokens server-side. Reuse the private-page security pattern: native-launch bootstrap, a separate memory-only browser capability, immediate fragment removal, exact numeric Host/Origin checks, restrictive CSP, no CORS, no external assets, and bounded requests. The dashboard capability is not a secret-write grant. Neither capability belongs in MCP output, ordinary logs, screenshots, or copied URLs. Only fixed management operations and validated owner identities are accepted; this is not an arbitrary endpoint or filesystem proxy. [Daemon boundary:181–203](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/daemon.ts#L181-L203)
+The existing control listener deliberately rejects browser Origin headers. The browser bridge preserves that boundary and keeps owner tokens server-side. It uses native-launch bootstrap, a separate browser capability, immediate fragment removal, exact numeric Host/Origin checks, restrictive CSP, no CORS, fixed local assets, and bounded requests. Only validated owner identities and fixed management operations are accepted. [Daemon boundary:181–203](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/daemon.ts#L181-L203)
+
+The dashboard stores its capability in per-tab `sessionStorage` so ordinary reload works. Browser session restore may retain that storage; closing a tab is not a guaranteed revocation boundary. Stopping the dashboard process ends its authority. If storage is unavailable, the fresh launch still works in page memory and reload needs a new launch. Private secret forms remain memory-only; their capabilities never enter dashboard storage. The dashboard capability is not a secret-write grant. Neither capability belongs in MCP output, logs, screenshots, or copied URLs.
 
 Logs are trusted-local diagnostics with existing best-effort redaction, not guaranteed secret-free content. Fetch them on demand, render plain text, and do not automatically attach them to copied reports or screenshots. An authenticated local dashboard still cannot isolate a hostile same-user process or an agent controlling the browser. [Log/privacy limits](../docs/security.md#logs-and-secrets)
 
@@ -239,8 +254,9 @@ Logs are trusted-local diagnostics with existing best-effort redaction, not guar
 | Stop/cancel/cleanup | Runtime operations and existing authorization | Expected-target guard for Stop; data deletion remains CLI-only |
 | Private setup attention | Existing request entries/status and native opener | Bounded public request listing with project/recipient context, including pre-preview requests; explicit pending-form reopen |
 | Read-only requested configuration | Existing normalization and redacted description | Retain unexpanded declaration per relevant attempt; bounded description operation |
-| Start again | Existing start, source validation, authorization | Targeted owner operation using the selected retained declaration; stopped previews only |
-| Later live restart and direct-spec save | Existing start/stop/replace, authorization, config saver | Additional targeted operations; not possible from status alone |
+| Start again / Retry start | Existing start, source validation, authorization | Exact current stopped/failed declaration; no active/candidate/busy/cleanup; canceled attempts excluded |
+| Save as preview.yml | Existing validated create-only saver | Exact retained attempt; fixed automatic-owner project root; no runtime mutation |
+| Later live restart | Existing start/stop/replace and authorization | Targeted operation and explicit input semantics remain deferred |
 | Edit existing YAML | Current loader and user's editor | Dashboard overwrite/editor deferred; create-only save is not edit support |
 
 Public request listing exposes metadata only; it does not become another request store. Requests may precede slots, which is why adding an attention badge to preview status alone is insufficient. [Secret requests:19–103](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/secrets-setup.ts#L19-L103)
@@ -253,11 +269,11 @@ Implement discovery, the authenticated browser bridge, and a read-only list/deta
 
 ### 2. Complete the first management release
 
-Add guarded Stop, exact cancellation, supported cleanup retry, retained-data visibility, and private-request attention/handoff. Retain the bounded unexpanded declarations needed for Start again and a redacted configuration description. Add stopped-only Start again through the existing start path, with owner-side target validation. Test owner enforcement before relying on UI behavior. Gate: a person can complete private setup, stop and start one full stack again with retained data, while another stays usable.
+Add guarded Stop, exact cancellation, supported cleanup retry, retained-data visibility, and private-request attention/handoff. Retain bounded unexpanded declarations for Start again and redacted configuration. Reuse normal startup for exact stopped attempts and explicit retries after failed startup. Test owner enforcement before relying on UI behavior. Gate: a person can complete private setup, stop and start one full stack again, and recover from a repaired startup failure while another stays usable.
 
 ### 3. Add explicit saving where it earns its cost
 
-Use the retained declaration for an explicit create-only YAML save operation. Keep raw input owner-side and current YAML distinct from the executed declaration. A one-click live restart can follow if Stop and Start again prove cumbersome; validate before disrupting the application. Defer a full editor until observed tasks identify specific fields people need to change themselves. This slice follows the first management release.
+This slice now uses the retained declaration for explicit create-only YAML saving. It keeps raw input owner-side and treats the saved file as future input. Verify existing-file conflicts, relative paths, external sources, concurrent saves, and reuse after owner exit. A one-click live restart can follow if Stop and Start again prove cumbersome; validate before disrupting the application. Defer a full editor until observed tasks identify specific fields people need to change themselves.
 
 ### 4. Validate the complete experience in real clients
 
@@ -296,7 +312,7 @@ Before broadening scope, run short usability sessions with developers reviewing 
 No product decision blocks this research plan. Two scope choices need confirmation only if the desired first release differs: a permanent all-project catalog after owner shutdown, or a full configuration editor. Both require more than the proposed known-owner management surface. Do not add either implicitly.
 
 
-## Implementation verification — 14 September 2026
+## Initial implementation verification — 14 September 2026
 
 - Focused dashboard/runtime/private-setup tests passed first (23 tests). The final
   `PREVIEWD_TEST_DOCKER_SOCKET=/Users/rojhat/.docker/run/docker.sock npm run verify`
@@ -318,7 +334,8 @@ No product decision blocks this research plan. Two scope choices need confirmati
   The test Keychain was isolated; no personal credentials were read.
 - Startup used a real MCP SDK transport harness against the local build. A subsequent
   harness call after private entry demonstrated continuation without a live waiter.
-  **No fresh Cursor or Claude Code agent UI test was run for this dashboard change.**
+  **This initial pass did not include fresh Cursor or Claude Code agent UI tests.**
+  The follow-up below closes that gap.
   These results do not establish model compliance or replace ordinary-prompt client tests.
 - In Brave, Stop and Start again retained Cedar's database row while Birch stayed live.
   A deliberately failed replacement exposed logs while preserving the serving app;
@@ -328,7 +345,8 @@ No product decision blocks this research plan. Two scope choices need confirmati
   unavailable records. Unrelated owners were inspected read-only. Separate dashboard
   processes reconnected to the same QA owners without starting or stopping them.
   Shutting down the fresh automatic owner removed it from the list; closing a dashboard
-  left its application reachable. Page reload showed the required relaunch instruction.
+  left its application reachable. These initial checks preceded the follow-up change
+  that retains dashboard sessions across reload.
 - Browser checks covered empty/request/canceled states, search with no matches,
   requested configuration, log display, desktop and 390-pixel navigation, keyboard
   focus into details and back to the selected row. The console showed installed-browser
@@ -341,7 +359,99 @@ failure was not deliberately induced in the browser. No customer usability sessi
 conducted. The complete research test matrix above remains a broader release checklist,
 not a claim that every scenario received a new manual client test.
 
-The final complexity review retained one bounded declaration per existing attempt only
-for description and Start again. It added no persistent store, new package dependency,
-chat routing, secret namespace, task scheduler, or second runtime lifecycle. Existing
+The initial complexity review retained one bounded declaration per existing attempt
+for description and Start again. Explicit saving now reuses that same declaration.
+The follow-up adds per-tab dashboard session storage, not a project/configuration store.
+It adds no new package dependency, chat routing, secret namespace, task scheduler, or second runtime lifecycle. Existing
 owner authorization, source validation, Keychain handling, and cleanup remain authoritative.
+
+
+## Follow-up verification — 14 September 2026
+
+The initial implementation was committed as `1c4cac0` before this follow-up.
+Independent product and architecture reviews supported explicit recipe saving: people
+can keep an agent's working direct spec and reuse it after its owner exits. A real
+locked-Keychain failure also justified explicit Retry start. Both reuse existing
+operations and the retained declaration. Full editing, live Restart, data deletion,
+and cold-owner launching remain outside the dashboard; no new configuration store,
+package dependency, authorization grant, or lifecycle was added.
+
+### Actual clients and Brave
+
+Used Cursor **3.20.21** (Grok Bot, Low) and interactive Claude Code **2.1.270**
+(Sonnet 5, Low). Claude ran in Cursor's integrated terminal because native Terminal
+control was unavailable. These were actual client interactions, not SDK prompts.
+Both clients launched the disposable installed `0.1.0-alpha.1` package from this local
+build. All 31 installed JavaScript files matched the build. Process paths confirmed
+both MCP clients and their automatic owners used that installation. The final retry
+change was loaded by explicitly restarting Amber's owner before testing it.
+
+Cursor used one global registration with its existing unrelated configuration preserved.
+Two chats created Cursor-managed worktrees `23or` and `rtp3` of the same disposable
+`fieldbook-cursor` repository. Both owners had the same MCP process parent; a new chat
+was not assumed to mean a new connection. A test-only preload directed native secret
+storage to a disposable Keychain and private launches to Brave. No personal secrets
+or production systems were used. The temporary Cursor registration was restored after
+testing; existing test owners and applications remain running. Ordinary prompts described desired behavior; no
+corrected tool arguments or manual per-worktree registrations were supplied.
+
+| Workflow | Actual-client / Brave result |
+|---|---|
+| Two full Cursor environments | Passed: distinct frontend themes, backends and managed PostgreSQL; both running together |
+| Independent second changes | Passed: Amber/Violet subtitles appeared only in their own applications |
+| Direct specs without YAML | Passed in both Cursor chats and Claude; no automatic file creation |
+| Dashboard Save and reuse | Passed: Amber saved relative `frontend`/`backend` paths and a symbolic secret reference; a second Save refused overwrite; Cursor reused the file for an update and after owner shutdown |
+| Missing private values and delayed continuation | Passed: fake values entered privately in Brave; Amber resumed after its turn ended with a short continuation |
+| Cancellation | Passed: Violet and Claude each observed canceled private setup and waited for explicit intent; this is observed model compliance, not a server guarantee against future new requests |
+| Existing values / intentional sharing | Passed: distinct Cursor references; Claude explicitly selected Amber's exact reference and reused it only after separate approval, with no value entry |
+| Owner shutdown / reconnection | Passed: Amber restarted from saved YAML, required fresh approval, reused the stored value and retained notes; Violet stayed running |
+| Dashboard update cancellation | Passed: canceled a deliberately delayed Violet replacement; its prior app and Amber stayed available; the agent removed the test delay and updated successfully |
+| Stop / Start again | Passed for all three real-client-created environments; each retained its own database notes and refreshed its URL |
+| Failed startup / Retry start | Passed: deliberately locked the disposable Keychain, saw Amber fail, unlocked it and explicitly retried in Brave; other environments remained ready |
+| Browser session / bridge shutdown | Passed: same-tab reload retained access; an independently opened tab lacked authorization; closing the dashboard showed disconnected status while apps stayed available |
+| Real application operations | Passed: Brave wrote and read distinct notes through each frontend/backend/PostgreSQL chain, including after restart |
+
+Final verified numeric and hostname URLs (local test processes, not permanent links):
+
+- Amber: `http://127.0.0.1:63645` and `http://amber-fieldbook--web.localhost:63645`.
+- Violet: `http://127.0.0.1:64439` and `http://violet-fieldbook--web.localhost:64439`.
+- Claude: `http://127.0.0.1:49581` and `http://fieldbook--frontend.localhost:49581`.
+
+Each URL was opened in Brave. Screenshots cover both Cursor chats, Claude's terminal
+result, cancellation/retry states, the dashboard and all three applications. No private
+forms, secret values or bootstrap capabilities were captured.
+
+### Automated checks and remaining limits
+
+Focused Save/runtime/configuration/dashboard/daemon tests passed **32/32**. Focused
+MCP/private setup passed **13/13**. The broader compiled suite passed **121/121**, no
+skips, using real disposable Docker databases and Keychains. After the bounded failed
+retry change, focused runtime/secrets/dashboard tests passed **21/21**, including real
+lock/unlock recovery, concurrent admission, stale/active rejection and canceled-attempt
+rejection. Typecheck/build passed. The packed consumer check passed ESM, CLI, MCP,
+automatic owners, cleanup and strict TypeScript declarations. Earlier valid coverage
+of malformed YAML, cleanup failures, stale races, narrow layouts and keyboard access
+was retained; unchanged workflows were not all manually repeated.
+
+First-install friction remains distinct from required setup:
+
+- Claude initially proposed native PostgreSQL despite the complete Previewhost request.
+  A short product clarification to have Previewhost manage PostgreSQL corrected this;
+  no native database was created. This was not an immediate unassisted success.
+- Reloading a private form still loses its memory-only capability. Claude claimed a
+  repeated setup request reopened the same pending form; the actual recovery used
+  the dashboard's Open private form action. Dashboard reload now works independently.
+- An initial Keychain error came from an incorrectly created disposable fixture path,
+  repaired with an absolute path. Later deliberate lock/unlock tests exercised the
+  product error and recovery paths. Neither required touching the personal Keychain.
+- Manual client permission prompts required individual approvals. During one terminal
+  interaction auto mode was selected accidentally, then restored to manual before
+  subsequent approvals; this run does not prove every call received a manual prompt.
+- Browser storage-denial fallback, browser session restoration and a real browser-driven
+  Docker cleanup failure were not exercised. Server cleanup/race cases have automated
+  coverage. No customer usability sessions were conducted.
+
+Configuration edits remain in the user's editor/agent. Save is create-only and does
+not apply configuration. Retry never opens a private form or bypasses owner authority.
+Unsaved declarations disappear with owner memory; the dashboard does not launch cold
+owners. These are explicit product limits, not hidden secondary state to be recovered.

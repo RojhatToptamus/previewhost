@@ -232,6 +232,7 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
   return {
     describe: (name, id) => call(false, client => client.describe(name, id)),
     startAgain: (name, id) => call(false, client => client.startAgain(name, id)),
+    saveConfiguration: (name, id) => call(false, client => client.saveConfiguration(name, id)),
     secretsList: () => call(false, client => client.secretsList()),
     secretsOpen: (id, opts) => call(false, client => client.secretsOpen(id, opts)),
     info: () => call(false, client => client.info()),

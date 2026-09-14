@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
@@ -32,7 +32,7 @@ test('dashboard authenticates browser access, discovers isolated owners, and con
     const status = await runtime.start({ name: 'app', type: 'static', directory: projectDirectory });
     const result = await runtime.wait('app', status.candidate!.id);
     assert.equal(result.state, 'ready');
-    fixtures.push({ id, runtime, daemon, tokenFile, url: result.url! });
+    fixtures.push({ id, runtime, daemon, tokenFile, projectDirectory, url: result.url! });
   }
   let launch = '';
   const dashboard = await startDashboard({ discover: () => discoverProjectOwners(records), openBrowser: async url => { launch = url; } });
@@ -61,6 +61,11 @@ test('dashboard authenticates browser access, discovers isolated owners, and con
   const first = fixtures[0];
   const before = await first.runtime.get('app');
   const expected = { active: before.active!.id, candidate: null, latest: before.latest!.id };
+  assert.equal((await api({ action: 'saveConfiguration', owner: first.id, name: 'app', attemptId: before.active!.id, projectDirectory: directory })).body.error?.code, 'INVALID_INPUT');
+  const saved = await api({ action: 'saveConfiguration', owner: first.id, name: 'app', attemptId: before.active!.id });
+  assert.deepEqual(saved.body.result, { file: join(await realpath(first.projectDirectory), 'preview.yml'), externalSources: [] });
+  assert.match(await readFile(saved.body.result.file, 'utf8'), /directory: ./);
+  assert.equal((await api({ action: 'saveConfiguration', owner: first.id, name: 'app', attemptId: before.active!.id })).body.error?.code, 'ALREADY_EXISTS');
   assert.equal((await api({ action: 'stop', owner: first.id, name: 'app', expected: { ...expected, active: 'stale' } })).body.error?.code, 'STALE_ATTEMPT');
   assert.equal(await (await fetch(first.url)).text(), 'worktree-one');
   const stopped = await api({ action: 'stop', owner: first.id, name: 'app', expected });

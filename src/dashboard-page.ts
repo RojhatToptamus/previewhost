@@ -14,8 +14,13 @@ export const dashboardPage = `<!doctype html>
 
 function mountDashboard() {
   type Owner = { id: string; project?: string; previews?: PreviewStatus[]; requests?: SecretSetupSummary[]; legacy?: boolean; error?: { message: string } };
-  const capability = location.hash.slice(1);
+  let capability = location.hash.slice(1);
   history.replaceState(null, '', '/');
+  const sessionKey = 'previewhost-dashboard';
+  try {
+    if (capability) sessionStorage.setItem(sessionKey, capability);
+    else capability = sessionStorage.getItem(sessionKey) ?? '';
+  } catch { /* A fresh launcher session still works when browser storage is unavailable. */ }
   let owners: Owner[] = [];
   let selection: { owner: string; name?: string } | undefined;
   let snapshot = '';
@@ -45,6 +50,9 @@ function mountDashboard() {
   async function call<T>(body: object): Promise<T> {
     const response = await fetch('/api', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + capability }, body: JSON.stringify(body) });
     const data = await response.json();
+    if (data.error?.code === 'NOT_FOUND' && data.error.message === 'Unknown control operation.' && 'action' in body && body.action === 'saveConfiguration') {
+      throw new Error('This owner does not support configuration saving. Ask your agent to save preview.yml, or upgrade the owner when you are ready to stop its previews.');
+    }
     if (data.error) throw new Error(data.error.code === 'STALE_ATTEMPT' ? 'This preview changed. Review its current state and try again.' : data.error.message);
     return data.result;
   }
@@ -116,9 +124,9 @@ function mountDashboard() {
     if (text) node.append(el('p', text, 'muted'));
     parent.append(node); return node;
   }
-  async function mutate(body: object, message: string) {
+  async function mutate<T = unknown>(body: object, message: string | ((result: T) => string)) {
     acting = true; announce('Working…'); render();
-    try { await call(body); announce(message); }
+    try { const result = await call<T>(body); announce(typeof message === 'function' ? message(result) : message); }
     catch (error) { announce(error instanceof Error ? error.message : 'The action failed. Check current status before retrying.'); }
     finally { acting = false; snapshot = ''; await refresh(); render(); }
   }
@@ -172,8 +180,10 @@ function mountDashboard() {
         expected: { active: preview.active?.id ?? null, candidate: preview.candidate?.id ?? null, latest: preview.latest?.id ?? null } }, 'Preview stopped. Managed database data stays.'); }));
       else section('Stop through the CLI', 'This older owner cannot validate a stale dashboard action. Run this command from the project directory shown above.').append(el('pre', 'previewhost stop ' + preview.name));
     }
-    if (!preview.active && !preview.busy && !preview.candidate && preview.latest?.state === 'stopped' && !owner.legacy && !needsCleanup(preview)) {
-      actions.append(button('Start again', () => { void mutate({ action: 'startAgain', owner: owner.id, name: preview.name, attemptId: preview.latest!.id }, 'Starting again with the same configuration and current source.'); }, 'primary'));
+    if (!preview.active && !preview.busy && !preview.candidate && ['stopped', 'failed'].includes(preview.latest?.state ?? '') && !owner.legacy && !needsCleanup(preview)) {
+      const retry = preview.latest?.state === 'failed';
+      actions.append(button(retry ? 'Retry start' : 'Start again', () => { void mutate({ action: 'startAgain', owner: owner.id, name: preview.name, attemptId: preview.latest!.id }, 'Starting again with the same configuration and current source.'); }, 'primary'));
+      if (retry) detail.append(el('p', 'Resolve the startup error before retrying.', 'muted'));
       detail.append(el('p', 'Runs the same configuration against current source. Does not reload preview.yml. The URL may change.', 'muted'));
     } else if (!preview.active && !preview.candidate && !preview.busy && !needsCleanup(preview)) {
       detail.append(el('p', `Ask your agent to start “${preview.name}” again in ${owner.project}.`, 'muted'));
@@ -224,6 +234,12 @@ function mountDashboard() {
           const configuration = el('details');
           configuration.append(el('summary', 'Service configuration'), el('pre', JSON.stringify(description.spec, null, 2), 'configuration'));
           node.append(configuration);
+          node.append(el('p', 'Save this attempt as a new project recipe. Existing files are not overwritten, and the running preview is unchanged.', 'muted'),
+            button('Save as preview.yml', () => {
+              void mutate<{ file: string; externalSources: string[] }>({ action: 'saveConfiguration', owner: owner.id, name: preview.name, attemptId: attempt.id }, result =>
+                `Saved ${result.file}. The running preview is unchanged.` + (result.externalSources.length ?
+                  ' Sources outside this project keep absolute paths: ' + result.externalSources.join(', ') : ''));
+            }, '', key + '-save'));
         }
       }
     }
@@ -261,7 +277,7 @@ function mountDashboard() {
       }
     } catch (error) {
       connection.textContent = 'Disconnected';
-      announce(capability ? 'Dashboard disconnected. Your previews may still be running. Run previewhost dashboard to reopen it.' : 'Run previewhost dashboard to open an authenticated session. Reloading this page cannot restore its private session.', true);
+      announce(capability ? 'Dashboard disconnected. Your previews may still be running. Run previewhost dashboard to reopen it.' : 'Run previewhost dashboard to open an authenticated session. This tab has no usable private session.', true);
       if (!capability) document.body.classList.add('show-detail');
       if (!capability) detail.replaceChildren(el('h2', 'Open from your terminal'), el('pre', 'previewhost dashboard'), el('p', 'The launcher opens a private local session. No account is needed.', 'muted'));
       else if (error instanceof Error && error.message.includes('too large')) announce(error.message);

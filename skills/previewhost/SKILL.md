@@ -35,6 +35,10 @@ An MCP denial remains a denial: do not switch to CLI or another daemon to bypass
 
 ## Operate the preview
 
+For a person comparing or managing local applications, suggest `previewhost dashboard`.
+It shows existing owners and supports diagnostics, Stop, Start again, and explicit create-only configuration saving.
+Keep ordinary startup in the existing CLI/MCP workflow; do not open management automatically for every preview.
+
 The CLI examples use optional root `preview.yml`, a preview named `app`, and the returned `ATTEMPT_ID`.
 Substitute the actual recipe, name, executable, and connection arguments.
 For direct MCP specs, use absolute `cwd` and `directory` paths, even when `project` is supplied.

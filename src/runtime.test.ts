@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createPreviewRuntime, type PreviewRuntime } from './runtime.js';
 import { limits, type PreviewSpec, type PreviewStatus, type RuntimeOptions } from './contracts.js';
 import { PreviewError } from './errors.js';
+import { loadPreviewSpec } from './config.js';
 
 async function fixture(t: test.TestContext, authorize?: RuntimeOptions['authorize']) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewhost runtime '));
@@ -245,6 +246,8 @@ test('guarded Stop and Start again retain the serving declaration after a failed
   const original = await ready(runtime, await runtime.start(spec()));
   const failed = await runtime.replace('page', { name: 'page', type: 'static', directory: path.join(directory, 'missing') });
   await runtime.wait('page', failed.candidate!.id);
+  await assert.rejects(runtime.startAgain('page', failed.candidate!.id), code('ALREADY_EXISTS'));
+  await assert.rejects(runtime.startAgain('page', original.id), code('STALE_ATTEMPT'));
   await assert.rejects(runtime.stop('page', { expected: { active: original.id, candidate: null, latest: original.id } }), code('STALE_ATTEMPT'));
   assert.equal(await (await fetch(original.url!)).text(), '<h1>one</h1>');
   const stopped = await runtime.stop('page');
@@ -275,4 +278,55 @@ test('retained descriptions cannot mutate commands or expose literal environment
   const again = await runtime.describe('script', status.candidate!.id);
   if (again.spec.type !== 'command') throw new Error();
   assert.equal(again.spec.command[0], process.execPath);
+});
+
+test('saving selects an exact retained declaration and concurrent creators preserve the complete file', async t => {
+  const { runtime, directory, spec } = await fixture(t);
+  const serving = await ready(runtime, await runtime.start(spec()));
+  const replacement = await runtime.replace('page', { name: 'page', type: 'command', cwd: path.join(directory, 'two'),
+    command: [process.execPath, '-e', 'process.exit(1)'], env: { TOKEN: { fromEnv: 'UNSELECTED_TEST_INPUT' }, API_SECRET: { secret: 'disposable-project/api' } } });
+  const failed = await runtime.wait('page', replacement.candidate!.id);
+  assert.equal(failed.state, 'failed');
+  const results = await Promise.allSettled([
+    runtime.saveConfiguration('page', serving.id, directory),
+    runtime.saveConfiguration('page', serving.id, directory),
+  ]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  const rejected = results.find(result => result.status === 'rejected');
+  assert.ok(rejected?.status === 'rejected' && code('ALREADY_EXISTS')(rejected.reason));
+  const saved = await loadPreviewSpec(path.join(directory, 'preview.yml'));
+  assert.equal(saved.type, 'static');
+  if (saved.type !== 'static') throw new Error();
+  assert.equal(await fs.realpath(saved.directory), await fs.realpath(path.join(directory, 'one')));
+  const original = await fs.readFile(path.join(directory, 'preview.yml'), 'utf8');
+  assert.match(original, /directory: one/);
+  await assert.rejects(runtime.saveConfiguration('page', failed.id, directory), code('ALREADY_EXISTS'));
+  assert.equal(await fs.readFile(path.join(directory, 'preview.yml'), 'utf8'), original);
+  assert.equal((await runtime.get('page')).active?.id, serving.id);
+  assert.equal(await (await fetch(serving.url!)).text(), '<h1>one</h1>');
+  await assert.rejects(runtime.saveConfiguration('page', 'unknown-attempt', directory), code('ATTEMPT_EXPIRED'));
+});
+
+test('saving preserves unselected symbolic inputs without resolving values and enforces current source roots', async t => {
+  const { runtime, directory } = await fixture(t);
+  const spec: PreviewSpec = { name: 'declaration', type: 'command', cwd: path.join(directory, 'one'),
+    command: [process.execPath, '-e', 'process.exit(1)'], env: { TOKEN: { fromEnv: 'UNSELECTED_TEST_INPUT' }, API_SECRET: { secret: 'disposable-project/api' } } };
+  const started = await runtime.start(spec);
+  const attempt = await runtime.wait('declaration', started.candidate!.id);
+  assert.equal(attempt.state, 'failed');
+  const result = await runtime.saveConfiguration('declaration', attempt.id, directory);
+  assert.deepEqual(result.externalSources, []);
+  const saved = await loadPreviewSpec(result.file);
+  if (saved.type !== 'command') throw new Error();
+  assert.deepEqual(saved.env, spec.env);
+
+  const other = await fs.mkdtemp(path.join(os.tmpdir(), 'previewhost-save-outside-'));
+  t.after(() => fs.rm(other, { recursive: true, force: true }));
+  const denied = await runtime.start({ name: 'outside', type: 'static', directory: other });
+  const failed = await runtime.wait('outside', denied.candidate!.id);
+  assert.equal(failed.error?.code, 'SOURCE_DENIED');
+  await assert.rejects(runtime.saveConfiguration('outside', failed.id, directory), code('SOURCE_DENIED'));
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(runtime.saveConfiguration('declaration', attempt.id, other, controller.signal), code('CLOSED'));
+  await assert.rejects(fs.stat(path.join(other, 'preview.yml')), { code: 'ENOENT' });
 });

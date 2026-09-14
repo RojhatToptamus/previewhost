@@ -13,6 +13,7 @@ import type { Resource } from './resources.js';
 import { startEnvironment } from './environment.js';
 import { createDataOwner, type DataOwner } from './data.js';
 import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
+import { savePreviewSpec } from './config.js';
 
 interface Attempt {
   summary: AttemptSummary;
@@ -42,6 +43,8 @@ interface Slot {
 export interface PreviewRuntime extends PreviewApi {
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
+  /** The serving owner supplies the destination; control callers cannot choose a path. */
+  saveConfiguration(name: string, attemptId: string, projectDirectory: string, signal?: AbortSignal): Promise<{ file: string; externalSources: string[] }>;
   /** Excludes an owner's private directory from current and future static previews. */
   protectDirectory(directory: string): Promise<void>;
   /** Validates and authorizes a private form without reading values or starting code. */
@@ -190,11 +193,17 @@ class Runtime implements PreviewRuntime {
   async startAgain(name: string, attemptId: string): Promise<PreviewStatus> {
     const slot = this.slot(name);
     const attempt = this.attempt(slot, attemptId);
-    if (slot.latest !== attempt || attempt.summary.state !== 'stopped') {
-      throw new PreviewError('STALE_ATTEMPT', 'Select the current stopped attempt before starting again.');
+    if (slot.latest !== attempt || !['stopped', 'failed'].includes(attempt.summary.state)) {
+      throw new PreviewError('STALE_ATTEMPT', 'Select the current stopped or failed attempt before starting again.');
     }
     // start admits synchronously; its normal startup path revalidates sources and authority.
     return this.start(attempt.declaration);
+  }
+
+  async saveConfiguration(name: string, attemptId: string, projectDirectory: string, signal?: AbortSignal) {
+    this.assertOpen();
+    const spec = this.attempt(this.slot(name), attemptId).declaration;
+    return savePreviewSpec(spec, { projectDirectory, allowedRoots: this.roots, signal });
   }
 
   async wait(name: string, attemptId: string, options: WaitOptions = {}): Promise<AttemptResult> {

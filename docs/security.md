@@ -298,8 +298,12 @@ Masked fields reduce incidental display. They do not isolate hostile agents.
 ## Local dashboard
 
 The optional dashboard serves fixed assets on numeric loopback. Its browser uses a
-separate memory-only capability, delivered through the native launcher. Owner bearer
-tokens stay in the local dashboard process and are never sent to browser JavaScript.
+separate capability, delivered through the native launcher and removed from the URL
+immediately. The dashboard keeps it in per-tab `sessionStorage` to support reload.
+Browser session restore may preserve this storage; tab closure is not a guaranteed
+revocation boundary. Stopping the dashboard process ends the capability's authority.
+If browser storage is unavailable, the fresh launch works only in page memory.
+Owner bearer tokens stay in the local dashboard process and never reach browser JavaScript.
 The dashboard requires exact Host/Origin headers and authenticated JSON POST actions;
 the existing owner control listener still rejects browser Origin headers.
 
@@ -309,5 +313,17 @@ endpoint. One unresponsive owner has a bounded read deadline and does not hide o
 
 The dashboard can request native reopening of an existing pending secret form. It
 cannot approve or write secrets through its management session. The owner-private
-form remains the only browser channel for those actions. Logs retain existing
-best-effort redaction limits and are shown on request, never treated as HTML.
+form remains the only browser channel for those actions. Its capability stays in memory
+and is never placed in dashboard session storage.
+
+Explicit configuration saving selects an exact retained attempt and writes only the
+automatic owner's root `preview.yml`. It reuses source validation and exclusive file
+creation; an existing file or symlink is never overwritten. Secret/input references
+remain unexpanded. No resolved environment or raw declaration is returned to the browser,
+and saving changes no running application. Literal strings originally supplied in a
+spec remain literal strings; the saver is not a secret scanner.
+
+Retry start reuses normal source, execution, and secret-access checks for the exact
+current failed attempt. It neither retries canceled attempts nor opens private setup.
+
+Logs retain existing best-effort redaction limits and are shown on request, never treated as HTML.

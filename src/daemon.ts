@@ -146,6 +146,11 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
     switch (method) {
       case 'describe': { const p = parse(requestSchemas.describe, value); return runtime.describe(p.name, p.attemptId); }
       case 'startAgain': { const p = parse(requestSchemas.startAgain, value); return runtime.startAgain(p.name, p.attemptId); }
+      case 'saveConfiguration': {
+        const p = parse(requestSchemas.saveConfiguration, value);
+        if (!options.owner) throw new PreviewError('INVALID_INPUT', 'This owner has no project directory. Save the original spec through the CLI, MCP, or library.');
+        return runtime.saveConfiguration(p.name, p.attemptId, options.owner.projectDirectory, signal);
+      }
       case 'secrets/list': parse(requestSchemas.list, value); return secrets.list();
       case 'secrets/open': return secrets.reopen(parse(secretRequestSchemas.status.pick({ id: true }), value).id, signal);
       case 'inspect': return runtime.inspect(parse(requestSchemas.inspect, value).spec);
