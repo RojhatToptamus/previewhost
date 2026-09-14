@@ -12,7 +12,7 @@ that discovers existing automatic owners. It preserves their lifecycle and autho
 
 Implemented: project/worktree identity, application/service links, active versus update
 status, bounded logs, guarded Stop, exact cancellation, ordinary cleanup retry,
-Start again and explicit failed-start retry, redacted requested configuration, exact-attempt recipe saving, and pending private-form
+Start preview (the Start again operation), explicit failed-start retry, redacted requested configuration, exact-attempt recipe saving, and pending private-form
 handoff. Full specs remain unexpanded in bounded owner memory, never exported to the
 browser. Stop retains the application actually stopped when an update had failed.
 
@@ -32,7 +32,7 @@ Material changes from the proposal:
 - Older owners retain read/Open/log access, but guarded Stop falls back to an exact CLI
   command when the owner cannot enforce the new guard. No unguarded browser fallback.
 - One hung owner has a three-second read budget. Its unavailable row does not block others.
-- Completed/canceled private setup is folded under history so it does not displace the
+- Completed/canceled private setup appears under Activity so it does not displace the
   application controls. Pending requests remain visible before startup.
 
 Independent architecture and usability reviews found and corrected MCP guard forwarding,

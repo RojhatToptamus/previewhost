@@ -17,13 +17,12 @@ Only a maintainer's explicit promotion leaves that channel.
    verified tarball to npm, and creates a GitHub prerelease with changelog notes.
 
 Use patch for fixes, minor for features, and major for breaking changes.
-Prerelease numbering follows Changesets. A new patch changeset after the initial
-alpha produces `0.1.0-alpha.1`. Alpha releases use `npm install previewhost@alpha`.
+Prerelease numbering follows Changesets. Review the generated version in the release PR.
+Alpha releases use `npm install previewhost@alpha`.
 Do not change the package version or npm tag by hand for normal releases.
 
 Documentation and tooling changes that do not affect the package need no changeset.
-The initial alpha has already been versioned; its consumed changeset is under
-`.changeset/pre/`. Changesets retains these entries for the eventual regular changelog.
+Consumed alpha changesets are retained under `.changeset/pre/` for the eventual regular changelog.
 
 ## What runs
 
@@ -57,9 +56,10 @@ Publishing and `contents: write` for tags and GitHub releases. The prepare job u
 `contents: read`. Release runs are serialized and are not canceled during publication.
 
 The npm allowlist includes compiled JavaScript and declarations, the native helper,
-four files used by README examples, README, LICENSE, NOTICE, and package metadata.
-It excludes `docs/`, CONTRIBUTING, changelogs, changesets, workflows, source,
-tests, fixtures, and local data. Repository documentation remains on GitHub.
+bundled dashboard fonts and their license, README examples, README, LICENSE, NOTICE, and package metadata.
+It also includes the agent skill and its materialized documentation, example, and asset references.
+`scripts/prepare-bin.mjs` selects those references; research reports are excluded.
+Top-level docs, CONTRIBUTING, changelogs, changesets, workflows, source, tests, and local data are excluded.
 Do not put credentials or private material in README or source that compiles into `dist/`.
 
 ## One-time setup
@@ -153,9 +153,9 @@ Under **Publishing access**, select
 continues to work with this setting. Do not add `NPM_TOKEN` or `NODE_AUTH_TOKEN` secrets.
 OIDC is available only on supported hosted runners, which this workflow uses.
 
-The repository is currently private. npm supports Trusted Publishing for private
-repositories, but automatic provenance is unavailable. If the repository becomes
-public, npm generates provenance automatically for OIDC publications.
+The repository is public. npm can generate provenance for public-package OIDC publications
+from GitHub Actions. Verify it on the published package; see the
+[provenance requirements](https://docs.npmjs.com/trusted-publishers/#automatic-provenance-generation).
 Changing repository visibility is a separate decision.
 
 ## Promote to a regular release

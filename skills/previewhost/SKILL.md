@@ -19,12 +19,17 @@ If no suitable recipe exists, use [Create or update a recipe](references/docs/re
 For CLI use, use `previewhost` from PATH or the project's `./node_modules/.bin/previewhost`.
 Use `--help` to verify its syntax.
 For MCP use, verify that the `preview_*` tools are available.
-CLI and MCP automatically find or start one owner for the Git worktree root, or cwd outside Git.
-Use `--project DIR` to select an explicit project. Configure MCP with that path when its launch cwd is uncertain.
+CLI automatically finds or starts one owner for the Git worktree root, or cwd outside Git.
+Use CLI `--project DIR` to select an explicit project.
+For MCP, supply this chat's absolute worktree path as `project` on every tool call.
+Keep that project with its attempt and secret-request IDs. A shared MCP connection does not identify the current chat.
+Use one global registration with `--root /absolute/repository` for its authorized checkout and registered Git worktrees.
+A fixed `--project` is a default for a single-project client, not a replacement for worktree selection.
 On a cold start, trusted commands need `--allow-exec`; selected inputs and names use `--env` and `--secret`.
-For example, register `previewhost mcp --project /absolute/project --allow-exec`.
+For example, register `previewhost mcp --root /absolute/repository --allow-exec`.
 An explicit `--endpoint` or `--token-file` selects connection-only mode for an existing manual daemon.
-Never print token contents. Explicit connection mode cannot change owner launch permissions.
+Never print token contents. In explicit connection mode, omit the MCP `project` argument.
+That connection cannot change owner launch permissions.
 
 Use `list` or `preview_list` to check existing preview names. A missing owner is normal before first startup.
 If installation or connection is missing, read the relevant [installation](references/README.md#install) or [MCP setup](references/docs/integrations.md#connect-an-mcp-client) section.
@@ -36,7 +41,9 @@ An MCP denial remains a denial: do not switch to CLI or another daemon to bypass
 ## Operate the preview
 
 For a person comparing or managing local applications, suggest `previewhost dashboard`.
-It shows existing owners and supports diagnostics, Stop, Start again, and explicit create-only configuration saving.
+It lists automatic project owners and supports diagnostics, Stop, Start preview, Retry start, and explicit create-only configuration saving.
+Start preview reuses the retained configuration and current source without reloading YAML.
+The dashboard does not start owners or replace the private secret form.
 Keep ordinary startup in the existing CLI/MCP workflow; do not open management automatically for every preview.
 
 The CLI examples use optional root `preview.yml`, a preview named `app`, and the returned `ATTEMPT_ID`.

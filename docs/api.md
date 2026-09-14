@@ -560,7 +560,8 @@ The authenticated owner client also supports:
 - `startAgain(name, attemptId)`: rerun the current stopped or failed attempt's declaration
   through ordinary startup, source validation, and authorization. Existing active,
   busy, and cleanup checks still apply. No YAML is reloaded. The dashboard labels a
-  failed attempt **Retry start**; canceled attempts cannot use this operation.
+  stopped attempt **Start preview** and a failed attempt **Retry start**.
+  Canceled attempts cannot use this operation.
 - `saveConfiguration(name, attemptId)`: create root `preview.yml` from that exact
   retained attempt through the existing validated saver. The automatic owner's project
   fixes the destination; callers cannot supply a path or a replacement spec. Returns

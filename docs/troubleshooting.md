@@ -198,7 +198,8 @@ Terminal entry stores a value but does not approve runtime access. Unselected na
 
 `--stdin` accepts a pipe. Hidden terminal entry is the default.
 Keep values out of arguments.
-A page refresh or close loses its grant from browser memory.
+Refreshing or closing the private secret form loses its grant from browser memory.
+The dashboard is separate: its session can survive a same-tab reload.
 
 For `SECRET_DENIED`, request private setup for the exact current references, or check the owner's explicit `--secret ID` launch selections.
 Do not bypass owner denial through another interface.

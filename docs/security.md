@@ -297,9 +297,11 @@ Masked fields reduce incidental display. They do not isolate hostile agents.
 
 ## Local dashboard
 
-The optional dashboard serves fixed assets on numeric loopback. Its browser uses a
-separate capability, delivered through the native launcher and removed from the URL
-immediately. The dashboard keeps it in per-tab `sessionStorage` to support reload.
+The optional dashboard serves fixed assets on numeric loopback. Geist fonts are bundled
+locally and restricted by `font-src 'self'`; no font CDN is contacted.
+Only the theme preference uses `localStorage` (`previewhost.theme`).
+The browser receives a separate capability through the native launcher and removes it
+from the URL immediately. The dashboard keeps it in per-tab `sessionStorage` to support reload.
 Browser session restore may preserve this storage; tab closure is not a guaranteed
 revocation boundary. Stopping the dashboard process ends the capability's authority.
 If browser storage is unavailable, the fresh launch works only in page memory.
