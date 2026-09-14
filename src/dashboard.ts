@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { connectPreviewDaemon } from './client.js';
@@ -27,6 +28,7 @@ export async function startDashboard(options: {
   openBrowser?: typeof openLocalBrowser;
 } = {}) {
   const discover = options.discover ?? discoverProjectOwners;
+  const [geist, geistMono] = await Promise.all(['geist.woff2', 'geist-mono.woff2'].map(file => readFile(new URL(`./fonts/${file}`, import.meta.url))));
   const capability = randomBytes(32).toString('hex');
   const clients = new Set<ReturnType<typeof connectPreviewDaemon>>();
   const controller = new AbortController();
@@ -115,13 +117,15 @@ export async function startDashboard(options: {
     void (async () => {
       const count = (name: string) => req.rawHeaders.filter((value, i) => i % 2 === 0 && value.toLowerCase() === name).length;
       if (req.headers.host !== new URL(origin).host || count('host') !== 1) throw new PreviewError('UNAUTHORIZED', 'Use the numeric dashboard address.');
-      const asset = req.url === '/' ? [dashboardPage, 'text/html'] : req.url === '/dashboard.js' ? [dashboardScript, 'text/javascript'] :
-        req.url === '/dashboard.css' ? [dashboardStyle, 'text/css'] : undefined;
+      const asset: [string | Buffer, string] | undefined = req.url === '/' ? [dashboardPage, 'text/html; charset=utf-8'] :
+        req.url === '/dashboard.js' ? [dashboardScript, 'text/javascript; charset=utf-8'] :
+        req.url === '/dashboard.css' ? [dashboardStyle, 'text/css; charset=utf-8'] :
+        req.url === '/fonts/geist.woff2' ? [geist, 'font/woff2'] : req.url === '/fonts/geist-mono.woff2' ? [geistMono, 'font/woff2'] : undefined;
       if (asset && req.method === 'GET') {
         if (req.headers.origin !== undefined && (req.headers.origin !== origin || count('origin') !== 1)) throw new PreviewError('UNAUTHORIZED', 'Use the dashboard origin.');
-        res.writeHead(200, { 'content-type': `${asset[1]}; charset=utf-8`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
+        res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
           'x-content-type-options': 'nosniff', 'cross-origin-resource-policy': 'same-origin',
-          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
+          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
         res.end(asset[0]); return;
       }
       const supplied = req.headers.authorization ?? '';

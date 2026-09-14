@@ -455,3 +455,89 @@ Configuration edits remain in the user's editor/agent. Save is create-only and d
 not apply configuration. Retry never opens a private form or bypasses owner authority.
 Unsaved declarations disappear with owner memory; the dashboard does not launch cold
 owners. These are explicit product limits, not hidden secondary state to be recovered.
+
+
+## Designer redesign: implemented adaptation
+
+The supplied Design Language and Dashboard HTML prototypes guided the visual redesign.
+Their runtime, fixture data and rejected earlier design were not ported. The dashboard
+still uses the existing DOM renderer, owner discovery and narrow management API.
+
+The page now has an overview, searchable worktree navigation, a fixed detail hierarchy,
+plain status words, and Activity, Logs and Configuration tabs. Both token sets are CSS
+custom properties. Geist and Geist Mono ship locally with their OFL license; no font
+CDN or new JavaScript dependency is required. Theme choice uses `previewhost.theme`
+in local storage. It stores no runtime state or authority there.
+
+### Product choices where the prototype differs
+
+- The normal states retain Ready, Starting, Update failed, Needs secrets and Stopped.
+  Startup failed, Cleanup incomplete, Not started and Unavailable describe real cases
+  that those five labels cannot represent accurately.
+- Serving and latest are runtime attempts, not Git builds or source snapshots. The
+  split uses actual attempt IDs. Open app targets the serving application; source
+  files remain live. No branch, originating client, progress percentage or build
+  metadata is invented.
+- Save as preview.yml already ships, so it remains a working secondary action without
+  a Proposed label. It creates a file for the selected attempt and refuses overwrite.
+- Start preview uses the existing Start again operation. Retry start, Cancel update,
+  Cancel startup and Retry cleanup preserve their existing guards. No new restart,
+  retry-update, secret approval or data-deletion operation was introduced.
+- Pending setup remains independent of a preview. The dashboard opens the existing
+  private form; it neither approves references nor receives private-form capabilities.
+- Narrow screens use compact navigation instead of retaining a 236px sidebar. Paths
+  preserve the final two segments; parent directories can truncate without RTL text.
+- Configuration presents declared service connections and every secret binding,
+  including external database URLs. Literal and stored credential values stay omitted
+  by the existing description contract. Commands remain trusted-local diagnostics.
+
+Independent architecture and usability reviews caught lost retained-data rows after
+owner restart, omitted external-database secret metadata, misleading startup/setup
+labels, and an error-log action that did not reveal its target. These were corrected
+without changing runtime ownership or authorization. The final diff keeps one DOM
+renderer and one transient tab selection; it adds no project store, lifecycle or API.
+
+### Redesign verification
+
+Brave was driven with Playwright against the compiled local package and real daemon
+owners. These are browser/runtime tests, not new Cursor or Claude Code agent tests.
+The earlier actual-client evidence above remains separate; the redesign changes no
+MCP schemas, runtime lifecycle, owner registration or private approval protocol.
+
+The browser run used two disposable frontend/backend/PostgreSQL environments and a
+separate disposable macOS Keychain. It verified:
+
+- All nine requested views in light and dark themes: overview, ready, starting, failed
+  update with a serving attempt, needs secrets, stopped, logs, configuration and empty.
+- Real browser writes through frontend and backend into isolated PostgreSQL databases.
+  Both numeric and hostname URLs were opened. Data remained after dashboard Stop/Start.
+- Deliberate private cancellation, terminal canceled-request UI, private approval/value
+  entry, and second-owner approval reusing an explicitly shared fake reference.
+- A failed replacement retained the serving URL. Logs selected the failed attempt.
+  Cancel update and Stop affected only the selected environment.
+- Explicit configuration saving used relative project paths and refused a second save.
+- Theme persistence after reload, keyboard tab navigation, 390px layout without
+  horizontal page overflow, and no dashboard JavaScript page errors.
+
+The first automation run attempted a new private form inside the existing one-second
+rate limit. The server correctly rejected it. The runner respected that limit on the
+subsequent completed runs. Screenshots never include private forms, values or bootstrap
+capabilities. Local test URLs are ephemeral and change after Stop/Start.
+
+Additional browser checks reproduced an owner restart with retained PostgreSQL data,
+external-database reference metadata, an initial startup failure, delayed diagnostics
+followed by navigation, an unavailable owner, an unauthenticated tab, and dashboard
+shutdown. Each passed. Browser checks reported no dashboard page errors.
+
+Validation totals for this redesign: typecheck and build passed; focused dashboard,
+runtime and private-setup tests passed 12/12; the broad suite passed 113 with 9 opt-in
+integration cases skipped and no failures. The skipped cases were not claimed as
+rerun; the separate browser test exercised real PostgreSQL. A freshly packed consumer
+passed local font/license loading, configuration save/load, ESM, native CLI startup,
+MCP discovery/start/stop, resource cleanup and strict TypeScript declarations.
+
+No new actual-agent prompt testing was performed for this visual change. Existing
+Cursor and Claude Code verification above does not prove how those models behave on
+future prompts. The dashboard still cannot launch a cold owner, edit configuration,
+delete data, or guarantee continuous application health. Those boundaries remain as
+documented; no prototype-only controls were added to imply otherwise.

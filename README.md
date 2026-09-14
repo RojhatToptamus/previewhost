@@ -171,7 +171,10 @@ terminal running. Closing the dashboard leaves previews running.
 
 Find previews by project/worktree path, open application links, inspect errors and
 logs, cancel a startup or update, and stop a preview while keeping its database data.
-**Start again** reruns a stopped preview's retained configuration against current
+The overview separates worktrees. Details distinguish the serving attempt from a
+failed or pending update. Logs and Configuration select an exact retained attempt.
+Light and dark themes use bundled fonts and remember your choice in this browser.
+**Start preview** reruns a stopped preview's retained configuration against current
 source. It does not reload `preview.yml`; its URL may change. Read-only configuration
 shows variable names and secret references without their values.
 After fixing a startup failure, **Retry start** reruns that failed attempt. It is

@@ -47,7 +47,17 @@ test('dashboard authenticates browser access, discovers isolated owners, and con
   };
   const shell = await fetch(dashboard.endpoint);
   assert.match(shell.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
+  assert.match(shell.headers.get('content-security-policy')!, /font-src 'self';/);
   assert.ok(!(await shell.text()).includes(capability));
+  for (const file of ['geist.woff2', 'geist-mono.woff2']) {
+    const font = await fetch(`${dashboard.endpoint}/fonts/${file}`);
+    assert.equal(font.status, 200);
+    assert.equal(font.headers.get('content-type'), 'font/woff2');
+    assert.equal(font.headers.get('cross-origin-resource-policy'), 'same-origin');
+    assert.deepEqual(Buffer.from(await font.arrayBuffer()), await readFile(new URL(`./fonts/${file}`, import.meta.url)));
+    assert.equal((await fetch(`${dashboard.endpoint}/fonts/${file}`, { headers: { origin: 'http://evil.example' } })).status, 401);
+  }
+  assert.equal((await fetch(`${dashboard.endpoint}/fonts/LICENSE.txt`)).status, 401);
   assert.equal((await api({ action: 'list' }, { origin: 'http://evil.example' })).status, 401);
   assert.equal((await api({ action: 'list' }, { authorization: 'Bearer invalid' })).status, 401);
   assert.equal(await new Promise<number>(resolve => {

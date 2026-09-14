@@ -50,7 +50,7 @@ try {
   const inventory = (await readdir(root, { recursive: true, withFileTypes: true }))
     .filter((entry) => !entry.isDirectory())
     .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1));
-  const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|dist\/skills\/previewhost\/(?:SKILL\.md|references\/.+)|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
+  const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|dist\/fonts\/(?:geist(?:-mono)?\.woff2|LICENSE\.txt)|dist\/skills\/previewhost\/(?:SKILL\.md|references\/.+)|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
   for (const file of inventory) {
     assert(allowed.test(file) && !file.includes('.test.'), `Unexpected packaged file: ${file}`);
   }
@@ -59,6 +59,20 @@ try {
   assert.deepEqual(execFileSync('/usr/bin/lipo', ['-archs', keychain], { encoding: 'utf8' }).trim().split(/\s+/).sort(), ['arm64', 'x86_64']);
   execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--all-architectures', keychain]);
   for (const file of ['dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/supervisor.js', 'examples/static.json', 'examples/command.json', 'examples/server.mjs', 'examples/site/index.html', 'LICENSE', 'NOTICE']) assert(inventory.includes(file), `Missing packaged file: ${file}`);
+  assert.match(await readFile(join(root, 'dist/fonts/LICENSE.txt'), 'utf8'), /SIL OPEN FONT LICENSE Version 1.1/);
+  const { startDashboard } = await import(pathToFileURL(join(root, 'dist/dashboard.js')).href);
+  const dashboard = await startDashboard({ discover: async () => [] });
+  try {
+    for (const file of ['geist.woff2', 'geist-mono.woff2']) {
+      const response = await fetch(`${dashboard.endpoint}/fonts/${file}`, { signal: AbortSignal.timeout(2000) });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'font/woff2');
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.equal(bytes.subarray(0, 4).toString(), 'wOF2');
+      assert.deepEqual(bytes, await readFile(join(root, 'dist/fonts', file)));
+    }
+  } finally { await dashboard.close(); }
+  record('installed-dashboard-fonts-and-license');
   const skill = await readFile(join(root, 'dist/skills/previewhost/SKILL.md'), 'utf8');
   for (const [, reference] of skill.matchAll(/\]\((references\/[^)#]+)(?:#[^)]*)?\)/g)) {
     assert((await stat(join(root, 'dist/skills/previewhost', reference))).isFile(), `Missing skill reference: ${reference}`);

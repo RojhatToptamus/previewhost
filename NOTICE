@@ -4,3 +4,9 @@ Copyright (c) 2026 Rojhat Toptamus, licensed under the MIT License in LICENSE.
 
 Portless was inspected and exercised as an implementation reference.
 Portless code, branding, certificate tools and route storage are not bundled.
+
+The dashboard bundles unmodified Geist and Geist Mono variable WOFF2 fonts.
+Source: https://github.com/vercel/geist-font (fonts/Geist and fonts/GeistMono).
+Copyright (c) 2023 Vercel, in collaboration with basement.studio.
+Licensed under the SIL Open Font License 1.1, included in dist/fonts/LICENSE.txt
+(src/fonts/LICENSE.txt in the source repository).

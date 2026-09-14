@@ -1,51 +1,80 @@
-import type { LogResult, PreviewDescription, PreviewStatus, SecretSetupSummary } from './contracts.js';
+import type { AttemptSummary, LogResult, PreviewDescription, PreviewStatus, SecretSetupSummary } from './contracts.js';
 
 export const dashboardPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Previews · Previewhost</title><link rel="stylesheet" href="/dashboard.css"></head>
-<body><header><span class="brand">previewhost<span class="local">LOCAL</span></span><span id="connection">Connecting…</span></header>
+<body><header><button id="home" class="brand">previewhost</button><span class="slash">/</span><span id="crumb">All previews</span>
+<span id="connection">Connecting…</span><button id="theme" aria-label="Switch to dark theme">Dark</button><button id="refresh">Refresh</button></header>
 <div id="notice" role="status" hidden></div>
-<main><aside><div class="list-heading"><h1>Previews</h1><button id="refresh" aria-label="Refresh previews">↻</button></div>
-<label class="search"><span class="sr-only">Search projects and previews</span><input id="search" placeholder="Find a project or preview" type="search"></label>
-<nav id="projects" aria-label="Projects and previews"></nav>
-<p class="scope">Known local owners only. Closing this page leaves previews running.</p></aside>
-<article id="detail" aria-label="Preview details"><p class="muted">Connecting to local previews…</p></article></main>
+<div class="workspace"><aside><label class="search"><span class="sr-only">Search projects and previews</span><input id="search" placeholder="Search" type="search"></label>
+<button id="overview" class="nav-overview">All previews<span id="attention-count"></span></button>
+<nav id="projects" aria-label="Projects and previews"></nav><p class="scope">Closing this window leaves previews running.</p></aside>
+<main id="main"><article id="detail" aria-label="Preview details"><p class="muted">Connecting to local previews…</p></article></main></div>
 <script src="/dashboard.js"></script></body></html>`;
 
 function mountDashboard() {
   type Owner = { id: string; project?: string; previews?: PreviewStatus[]; requests?: SecretSetupSummary[]; legacy?: boolean; error?: { message: string } };
+  type Entry = { owner: Owner; name?: string; preview?: PreviewStatus };
+  type Action = { label: string; run: () => void; danger?: boolean };
+  type Tab = 'activity' | 'logs' | 'configuration';
   let capability = location.hash.slice(1);
   history.replaceState(null, '', '/');
-  const sessionKey = 'previewhost-dashboard';
   try {
-    if (capability) sessionStorage.setItem(sessionKey, capability);
-    else capability = sessionStorage.getItem(sessionKey) ?? '';
-  } catch { /* A fresh launcher session still works when browser storage is unavailable. */ }
+    if (capability) sessionStorage.setItem('previewhost-dashboard', capability);
+    else capability = sessionStorage.getItem('previewhost-dashboard') ?? '';
+  } catch { /* Initial launch still works when browser storage is unavailable. */ }
   let owners: Owner[] = [];
   let selection: { owner: string; name?: string } | undefined;
   let snapshot = '';
   let loading = false;
   let acting = false;
   let connectionNotice = false;
-  let expanded: { key: string; logs?: LogResult; description?: PreviewDescription } | undefined;
+  let panel: { tab: Tab; attemptId?: string; loading?: boolean; error?: string; logs?: LogResult; description?: PreviewDescription } = { tab: 'activity' };
   const projects = document.querySelector<HTMLElement>('#projects')!;
   const detail = document.querySelector<HTMLElement>('#detail')!;
   const search = document.querySelector<HTMLInputElement>('#search')!;
   const notice = document.querySelector<HTMLElement>('#notice')!;
   const connection = document.querySelector<HTMLElement>('#connection')!;
-
+  const theme = document.querySelector<HTMLButtonElement>('#theme')!;
+  try { document.body.classList.toggle('ph-dark', localStorage.getItem('previewhost.theme') === 'dark'); } catch { /* Use light when storage is unavailable. */ }
+  function updateTheme() {
+    const dark = document.body.classList.contains('ph-dark');
+    theme.textContent = dark ? 'Light' : 'Dark';
+    theme.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+  }
+  updateTheme();
+  theme.addEventListener('click', () => {
+    const dark = document.body.classList.toggle('ph-dark');
+    try { localStorage.setItem('previewhost.theme', dark ? 'dark' : 'light'); } catch { /* Theme remains usable for this page. */ }
+    updateTheme();
+  });
   function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') {
-    const node = document.createElement(tag);
-    node.textContent = text;
-    node.className = className;
-    return node;
+    const node = document.createElement(tag); node.textContent = text; node.className = className; return node;
   }
   function announce(message: string, disconnected = false) { notice.textContent = message; notice.hidden = !message; connectionNotice = disconnected; }
   function button(label: string, action: () => void, className = '', key = label) {
     const node = el('button', label, className);
-    node.type = 'button'; node.dataset.focus = key; node.disabled = acting;
-    node.addEventListener('click', action);
+    node.type = 'button'; node.dataset.focus = key; node.disabled = acting; node.addEventListener('click', action); return node;
+  }
+  function navButton(label: string, action: () => void, className = '', key = label) {
+    const node = button(label, action, className, key); node.disabled = false; return node;
+  }
+  function copy(value: string, label = 'Copy') {
+    const node = button(label, () => {
+      void navigator.clipboard.writeText(value).then(() => {
+        node.textContent = 'Copied'; setTimeout(() => { node.textContent = label; }, 1400);
+      }, () => announce('Copy was unavailable. Select and copy the text instead.'));
+    }, 'small', 'copy-' + value);
     return node;
+  }
+  function pathText(path: string) {
+    const node = el('span', '', 'path'); node.title = path;
+    const parts = path.split('/'); const tail = parts.splice(-2).join('/');
+    node.append(el('span', parts.length ? parts.join('/') + '/' : '', 'path-parent'), el('span', tail, 'path-tail'));
+    return node;
+  }
+  function pathBar(path: string) {
+    const node = el('div', '', 'path-bar'); node.append(pathText(path), copy(path)); return node;
   }
   async function call<T>(body: object): Promise<T> {
     const response = await fetch('/api', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + capability }, body: JSON.stringify(body) });
@@ -56,62 +85,42 @@ function mountDashboard() {
     if (data.error) throw new Error(data.error.code === 'STALE_ATTEMPT' ? 'This preview changed. Review its current state and try again.' : data.error.message);
     return data.result;
   }
-  function needsCleanup(preview: PreviewStatus) {
-    return !!(preview.cleanup?.length || preview.data?.cleanup ||
-      [preview.active, preview.candidate, preview.latest].some(attempt => attempt?.state === 'cleanup-incomplete'));
+  function needsCleanup(preview?: PreviewStatus) {
+    return !!(preview?.cleanup?.length || preview?.data?.cleanup ||
+      [preview?.active, preview?.candidate, preview?.latest].some(attempt => attempt?.state === 'cleanup-incomplete'));
   }
-  function state(preview: PreviewStatus): { label: string; tone: string } {
-    if (needsCleanup(preview)) return { label: 'Cleanup needs attention', tone: 'warning' };
-    if (preview.active) {
-      if (preview.candidate) return { label: 'Preview available · updating', tone: 'working' };
-      if (preview.busy) return { label: 'Operation in progress', tone: 'working' };
-      if (preview.latest && preview.latest.id !== preview.active.id && ['failed', 'canceled'].includes(preview.latest.state)) return { label: 'Preview available · update ' + preview.latest.state, tone: preview.latest.state === 'failed' ? 'warning' : 'muted' };
-      return { label: 'Ready', tone: 'ready' };
-    }
-    if (preview.candidate) return { label: 'Starting', tone: 'working' };
-    if (preview.busy) return { label: 'Operation in progress', tone: 'working' };
-    if (preview.latest?.state === 'failed') return { label: 'Startup failed', tone: 'warning' };
-    if (preview.latest?.state === 'canceled') return { label: 'Startup canceled', tone: 'muted' };
-    return { label: preview.data ? 'Stopped · data retained' : 'Stopped', tone: 'muted' };
+  function requests(entry: Entry) { return entry.owner.requests?.filter(r => r.name === entry.name) ?? []; }
+  function pending(entry: Entry) { return requests(entry).filter(r => r.state === 'pending' || r.state === 'saving'); }
+  function state(entry: Entry) {
+    const p = entry.preview;
+    if (needsCleanup(p)) return { label: 'Cleanup incomplete', tone: 'error', note: 'Cleanup needs attention' };
+    if (pending(entry).length) return { label: 'Needs secrets', tone: 'warning', note: p?.active ? 'App still serving' : 'Private setup requested' };
+    if (p?.candidate || p?.busy) return { label: 'Starting', tone: 'neutral', note: p.active ? 'Previous attempt serving' : p.busy ? 'Operation in progress' : 'Startup checks in progress' };
+    if (p?.latest?.state === 'failed') return { label: p.active ? 'Update failed' : 'Startup failed', tone: 'error', note: p.active ? 'Previous attempt serving' : 'Startup failed · not serving' };
+    if (!p) return { label: 'Not started', tone: 'muted', note: requests(entry).some(r => r.state === 'canceled') ? 'Private setup canceled' : 'No preview started' };
+    if (p?.active) return { label: 'Ready', tone: 'ready', note: p.latest?.state === 'canceled' ? 'Update canceled · app serving' : 'Startup checks passed' };
+    return { label: 'Stopped', tone: 'muted', note: p?.latest?.state === 'canceled' ? 'Startup canceled' : p?.data ? 'Data retained' : 'Not running' };
   }
   function shortProject(owner: Owner) { return owner.project?.split('/').filter(Boolean).at(-1) ?? 'Unavailable owner'; }
-  function select(owner: Owner, name?: string) {
-    announce(''); selection = { owner: owner.id, name }; expanded = undefined;
-    document.body.classList.add('show-detail'); render();
-    const heading = detail.querySelector('h2');
-    if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+  function entries(owner: Owner): Entry[] {
+    const names = [...new Set([...(owner.previews?.map(p => p.name) ?? []), ...(owner.requests?.map(r => r.name) ?? [])])];
+    return names.length ? names.map(name => ({ owner, name, preview: owner.previews?.find(p => p.name === name) })) : [{ owner }];
   }
-  function renderList() {
-    projects.replaceChildren();
-    const query = search.value.toLowerCase();
-    let count = 0;
-    for (const owner of owners) {
-      const previews = owner.previews?.filter(p => `${owner.project} ${p.name}`.toLowerCase().includes(query)) ?? [];
-      if (!previews.length && query && !`${owner.project}`.toLowerCase().includes(query)) continue;
-      count++;
-      const group = el('section', '', 'project');
-      const projectButton = button(shortProject(owner), () => select(owner), 'project-title', owner.id);
-      projectButton.disabled = false;
-      group.append(projectButton, el('p', owner.project ?? 'Record could not be verified', 'path'));
-      const pending = owner.requests?.filter(r => r.state === 'pending' || r.state === 'saving').length ?? 0;
-      if (pending) group.append(button(`${pending} private setup ${pending === 1 ? 'request' : 'requests'}`, () => select(owner), 'private-link', owner.id + '-private'));
-      if (owner.error) group.append(el('p', 'Status unavailable', 'warning'));
-      for (const preview of previews) {
-        const status = state(preview);
-        const row = button('', () => select(owner, preview.name), 'preview-row', owner.id + preview.name);
-        row.disabled = false;
-        const chosen = selection?.owner === owner.id && selection.name === preview.name;
-        row.setAttribute('aria-current', chosen ? 'true' : 'false');
-        row.append(el('strong', preview.name), el('span', status.label, 'status ' + status.tone));
-        group.append(row);
-      }
-      if (!owner.error && !owner.previews?.length && !pending) group.append(el('p', 'No previews in this project', 'muted'));
-      projects.append(group);
-    }
-    if (!count) projects.append(el('p', query ? 'No matching previews.' : 'No previews found.', 'empty-list'));
+  function visibleEntries(owner: Owner) {
+    const q = search.value.trim().toLowerCase();
+    return entries(owner).filter(e => `${owner.project ?? ''} ${e.name ?? ''}`.toLowerCase().includes(q));
   }
-  function urlLink(url: string, label: string, primary = false) {
-    const link = el('a', label, primary ? 'button primary' : 'endpoint');
+  function attempts(p?: PreviewStatus) {
+    return [p?.candidate, p?.latest, p?.active].filter((a, i, all): a is AttemptSummary => !!a && all.findIndex(other => other?.id === a.id) === i);
+  }
+  function select(entry?: Entry) {
+    announce(''); selection = entry ? { owner: entry.owner.id, name: entry.name } : undefined; panel = { tab: 'activity' };
+    document.body.classList.toggle('show-detail', !!entry); render();
+    document.querySelector('#main')!.scrollTop = 0;
+    const heading = detail.querySelector('h1'); if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+  }
+  function urlLink(url: string, label: string, className = 'endpoint') {
+    const link = el('a', label, className);
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== 'http:' || !(parsed.hostname === '127.0.0.1' || parsed.hostname.endsWith('.localhost'))) throw new Error();
@@ -119,551 +128,551 @@ function mountDashboard() {
     } catch { link.removeAttribute('href'); }
     return link;
   }
-  function section(title: string, text?: string, parent = detail) {
-    const node = el('section', '', 'section'); node.append(el('h3', title));
-    if (text) node.append(el('p', text, 'muted'));
-    parent.append(node); return node;
+  function section(title: string, parent = detail) {
+    const node = el('section', '', 'section'); node.append(el('h2', title, 'section-label')); parent.append(node); return node;
   }
-  async function mutate<T = unknown>(body: object, message: string | ((result: T) => string)) {
+  function message(title: string, body: string, tone = '', parent = detail) {
+    const node = el('section', '', 'notice ' + tone); node.append(el('h2', title), el('p', body)); parent.append(node); return node;
+  }
+  async function mutate<T = unknown>(body: object, success: string | ((result: T) => string)) {
     acting = true; announce('Working…'); render();
-    try { const result = await call<T>(body); announce(typeof message === 'function' ? message(result) : message); }
+    try { const result = await call<T>(body); announce(typeof success === 'function' ? success(result) : success); }
     catch (error) { announce(error instanceof Error ? error.message : 'The action failed. Check current status before retrying.'); }
     finally { acting = false; snapshot = ''; await refresh(); render(); }
   }
-  function renderRequests(owner: Owner, parent = detail) {
-    if (!owner.requests?.length) return;
-    const node = section('Private setup', 'Approval and values stay in the private form. Saving does not start the application.', parent);
-    for (const request of owner.requests) {
-      const row = el('div', '', 'request');
-      const labels = { pending: 'Needs your attention', saving: 'Saving…', complete: 'Complete', partial: 'Partly saved', canceled: 'Canceled', expired: 'Expired' };
-      row.append(el('strong', request.name ?? 'Secret edit'), el('span', labels[request.state], 'status'));
-      if (request.state === 'pending') {
-        row.append(button('Open private form', () => { void mutate({ action: 'secretsOpen', owner: owner.id, id: request.id }, 'Private form requested in your system browser.'); }, '', request.id));
-        if (request.browser === 'failed') row.append(el('p', 'The browser did not open. Try opening the private form again.', 'warning'));
-      } else if (request.state === 'complete') row.append(el('p', 'If your agent ended its turn, send “Secrets saved—continue” in that chat.', 'muted'));
-      else if (request.state === 'canceled') row.append(el('p', 'Setup stopped. Ask your agent for a new request only when you want to continue.', 'muted'));
-      else if (request.state === 'expired' || request.state === 'partial') row.append(el('p', 'Ask your agent to check setup and request any remaining values.', 'muted'));
+  function actions(entry: Entry): Action[] {
+    const { owner, preview: p, name } = entry; const result: Action[] = [];
+    for (const request of pending(entry)) if (request.state === 'pending') result.push({ label: 'Open private form', run: () => {
+      void mutate({ action: 'secretsOpen', owner: owner.id, id: request.id }, 'Private form requested in your system browser.');
+    } });
+    if (!p) return result;
+    if (p.candidate) result.push({ label: p.active ? 'Cancel update' : 'Cancel startup', danger: true, run: () => {
+      void mutate({ action: 'cancel', owner: owner.id, name, attemptId: p.candidate!.id }, 'The selected attempt was canceled.');
+    } });
+    if ((p.active || needsCleanup(p) || p.url) && !p.busy && !owner.legacy) result.push({ label: needsCleanup(p) ? 'Retry cleanup' : 'Stop', danger: !needsCleanup(p), run: () => {
+      void mutate({ action: 'stop', owner: owner.id, name, expected: { active: p.active?.id ?? null, candidate: p.candidate?.id ?? null, latest: p.latest?.id ?? null } }, 'Preview stopped. Your database data is retained.');
+    } });
+    if (!p.active && !p.busy && !p.candidate && ['stopped', 'failed'].includes(p.latest?.state ?? '') && !owner.legacy && !needsCleanup(p)) result.push({ label: p.latest?.state === 'failed' ? 'Retry start' : 'Start preview', run: () => {
+      void mutate({ action: 'startAgain', owner: owner.id, name, attemptId: p.latest!.id }, 'Startup requested with the same configuration and current source.');
+    } });
+    // Several pending requests may use the same label. The detail's private section retains each exact request.
+    return result.filter((action, i) => result.findIndex(other => other.label === action.label) === i);
+  }
+  function renderList() {
+    projects.replaceChildren();
+    document.querySelector('#overview')!.setAttribute('aria-current', String(!selection));
+    const attention = owners.flatMap(entries).filter(e => e.owner.error || ['error', 'warning'].includes(state(e).tone)).length;
+    document.querySelector('#attention-count')!.textContent = attention ? String(attention) : '';
+    for (const owner of owners) {
+      const list = visibleEntries(owner); if (!list.length) continue;
+      const group = el('section', '', 'project'); group.append(el('h2', shortProject(owner), 'section-label'));
+      for (const entry of list) {
+        const row = navButton('', () => select(entry), 'preview-row', owner.id + (entry.name ?? ''));
+        row.setAttribute('aria-current', String(selection?.owner === owner.id && selection.name === entry.name));
+        const text = el('span', '', 'nav-identity'); text.append(el('strong', entry.name ?? 'Project'), pathText(owner.project ?? 'Unverified record'));
+        row.append(text, el('span', owner.error ? 'Unavailable' : state(entry).label, 'status ' + (owner.error ? 'error' : state(entry).tone)));
+        group.append(row);
+      }
+      projects.append(group);
+    }
+    if (!projects.children.length) projects.append(el('p', search.value ? 'No matching previews.' : 'No previews found.', 'empty-list'));
+  }
+  function renderOverview() {
+    detail.classList.add('overview');
+    const all = owners.flatMap(entries); const list = owners.flatMap(visibleEntries);
+    detail.append(el('h1', 'Previews'));
+    if (!all.length) {
+      const empty = el('div', '', 'empty'); empty.append(el('h2', 'No previews running'), el('p', 'Ask your coding agent to start one. It inspects the project, submits a configuration, and the URL appears here.'), el('pre', 'start a previewhost preview for this worktree'));
+      detail.append(empty); return;
+    }
+    const running = all.filter(e => e.preview?.active).length;
+    const starting = all.filter(e => e.preview?.candidate).length;
+    const attention = list.filter(e => e.owner.error || ['error', 'warning'].includes(state(e).tone));
+    detail.append(el('p', `${running} running · ${starting} starting · ${all.filter(e => e.owner.error || ['error', 'warning'].includes(state(e).tone)).length} need attention`, 'summary'));
+    if (!list.length) { detail.append(el('p', 'No matching previews.', 'empty')); return; }
+    if (attention.length) {
+      const region = el('div', '', 'attention-list');
+      attention.forEach((entry, i) => {
+        const row = el('div', '', 'notice attention-row');
+        const text = el('div'); text.append(el('h2', `${shortProject(entry.owner)} — ${entry.owner.error ? 'status unavailable' : state(entry).note.toLowerCase()}`), el('p', entry.owner.error ? 'Other projects remain available.' : entry.preview?.active ? 'Keep using the running app, or review what needs attention.' : 'Review this worktree before continuing.'));
+        row.append(text, navButton('Review', () => select(entry), i === 0 ? 'primary' : '')); region.append(row);
+      }); detail.append(region);
+    }
+    for (const owner of owners) {
+      const rows = visibleEntries(owner); if (!rows.length) continue;
+      const group = section(shortProject(owner)); const table = el('div', '', 'row-list');
+      for (const entry of rows) {
+        const row = el('div', '', 'overview-row'); const identity = el('div', '', 'row-identity');
+        identity.append(el('strong', entry.name ?? shortProject(owner)), pathText(owner.project ?? 'Unverified record'));
+        const status = el('div', '', 'overview-state');
+        status.append(el('span', owner.error ? 'Unavailable' : state(entry).label, 'status ' + (owner.error ? 'error' : state(entry).tone)), el('small', owner.error ? 'Owner did not respond' : state(entry).note));
+        const controls = el('div', '', 'row-actions');
+        if (entry.preview?.active && entry.preview.url) controls.append(urlLink(entry.preview.url, 'Open app', 'button'));
+        controls.append(navButton('Details', () => select(entry), '', owner.id + (entry.name ?? '') + '-details'));
+        row.append(identity, status, controls); table.append(row);
+      }
+      group.append(table);
+    }
+  }
+  function hint(entry: Entry) {
+    const p = entry.preview;
+    if (needsCleanup(p)) return 'Cleanup is incomplete; keep the source directories and retry cleanup before starting again.';
+    if (pending(entry).length) return 'Values go to the macOS Keychain. Saving them does not start the app on its own.';
+    if (p?.candidate) return p.active ? 'Your app is still available; canceling affects only the pending update in this worktree.' : 'The URL appears once startup checks pass. Cancelling affects only this worktree.';
+    if (p?.busy) return 'An operation is in progress; wait for it to finish before changing this preview.';
+    if (p?.active && p.latest?.state === 'failed') return 'This opens the serving attempt; the failed update is not serving.';
+    if (p?.active) return p.data ? 'Every startup check passed. Stopping keeps your database data.' : 'Every startup check passed. Stopping affects only this preview.';
+    if (p?.latest?.state === 'failed') return 'Your app is not serving; resolve the startup error before retrying.';
+    if (p?.latest?.state === 'canceled') return 'Startup was canceled; ask your agent to start again only when you want to continue.';
+    if (!p) return 'Ask your agent to continue when setup is complete and you want to start this worktree.';
+    return p?.data ? 'Start again uses the same configuration, current source and retained database; it does not reload YAML.' : 'Start again uses the same configuration and current source without reloading YAML; the URL may change.';
+  }
+  function renderRequests(entry: Entry, parent: HTMLElement, shownActions: Set<string>) {
+    const list = requests(entry); if (!list.length) return;
+    const node = section('Private setup', parent);
+    node.append(el('p', 'Approval and values stay in the private form. Saving does not start the application.', 'muted'));
+    const labels = { pending: 'Awaiting approval or entry', saving: 'Saving', complete: 'Complete', partial: 'Partly saved', canceled: 'Canceled', expired: 'Expired' };
+    for (const request of list) {
+      const row = el('div', '', 'request'); row.append(el('strong', labels[request.state]), el('span', `Expires ${new Date(request.expiresAt).toLocaleTimeString()}`, 'machine muted'));
+      if (request.state === 'pending' && (!shownActions.has('Open private form') || pending(entry).length > 1)) row.append(button(pending(entry).length > 1 ? 'Open request ' + request.id.slice(0, 8) : 'Open private form', () => {
+        void mutate({ action: 'secretsOpen', owner: entry.owner.id, id: request.id }, 'Private form requested in your system browser.');
+      }, '', request.id));
+      if (request.browser === 'failed' && request.state === 'pending') row.append(el('p', 'The browser did not open. Try opening the private form again.', 'error'));
+      if (request.state === 'complete') row.append(el('p', 'If your agent ended its turn, send “Secrets saved—continue” in that chat.', 'muted'));
+      if (request.state === 'canceled') row.append(el('p', 'Setup stopped. Ask your agent for a new request only when you want to continue.', 'muted'));
+      if (request.state === 'expired' || request.state === 'partial') row.append(el('p', 'Ask your agent to check setup and request any remaining values.', 'muted'));
       node.append(row);
     }
   }
+  function renderAttempts(p: PreviewStatus) {
+    const latest = p.candidate ?? p.latest;
+    if (!latest && !p.active) return;
+    if (p.active && latest && p.active.id !== latest.id) {
+      const node = section('Attempts'); const split = el('div', '', 'attempt-split');
+      for (const [label, attempt, note] of [
+        ['Serving now', p.active, 'This is what “Open app” gives you.'],
+        ['Latest update', latest, 'Not serving. Source files remain live; these are runtime attempts, not build snapshots.'],
+      ] as const) {
+        const column = el('div'); column.append(el('p', label, 'muted'), el('code', attempt.id, 'attempt-id'), el('span', attempt.state, 'status ' + (attempt.state === 'failed' ? 'error' : 'muted')), el('p', note)); split.append(column);
+      }
+      node.append(split);
+    } else {
+      const attempt = p.active ?? latest!; const row = el('div', '', 'attempt-line');
+      row.append(el('span', p.active ? 'Serving / latest' : 'Latest attempt', 'section-label'), el('code', attempt.id, 'attempt-id'), el('span', attempt.state, 'muted')); detail.append(row);
+    }
+  }
+  function renderServices(p: PreviewStatus) {
+    const attempt = p.active ?? p.candidate ?? p.latest;
+    if (!attempt && !p.data) return;
+    const node = section('Services');
+    if (p.active && p.candidate) node.append(el('p', 'Serving services are shown below; the update is still starting.', 'muted'));
+    const table = el('div', '', 'row-list');
+    const managed = new Set(p.data?.resources.map(r => r.name) ?? []);
+    const services = Object.entries(attempt?.services ?? {}).sort(([a], [b]) => Number(managed.has(a)) - Number(managed.has(b)));
+    if (!services.length && attempt && attempt.type !== 'environment') services.push([p.name, { type: attempt.type, state: attempt.state === 'ready' ? 'ready' : attempt.state === 'starting' ? 'starting' : attempt.state === 'failed' ? 'failed' : 'stopped' }]);
+    for (const [name, service] of services) {
+      const row = el('div', '', 'service-row' + (managed.has(name) ? ' managed' : ''));
+      const url = attempt?.id === p.active?.id ? service.browserUrl : undefined;
+      row.append(el('strong', name), el('span', service.type, 'machine muted'), el('span', service.state, 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
+      const meta = el('span', managed.has(name) ? 'Data retained on stop' : '', 'service-meta muted');
+      if (url) { try { meta.textContent = ':' + new URL(url).port; meta.classList.add('machine'); } catch { /* Invalid links are omitted below. */ } }
+      row.append(meta, url ? urlLink(url, 'Open', 'button small') : el('span', '', 'service-action'));
+      if (service.error) row.append(el('p', service.error.message, 'error service-error'));
+      table.append(row);
+    }
+    for (const resource of p.data?.resources ?? []) {
+      if (services.some(([name]) => name === resource.name)) continue;
+      const row = el('div', '', 'service-row managed');
+      row.append(el('strong', resource.name), el('span', resource.type, 'machine muted'), el('span', 'Retained', 'muted'), el('span', 'Data retained on stop', 'service-meta muted'), el('span'));
+      table.append(row);
+    }
+    if (!table.children.length) table.append(el('p', 'Service status is not available yet.', 'muted'));
+    node.append(table);
+    if (p.candidate) { const elapsed = el('p', '', 'machine muted'); elapsed.dataset.elapsed = p.candidate.startedAt; node.append(elapsed); }
+    if (p.data) node.append(el('p', 'Stopping keeps your database data. Deletion is a separate explicit CLI operation.', 'muted'));
+    for (const source of attempt?.sources ?? []) node.append(pathText(source));
+  }
+  async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary) {
+    const current = panel = { tab, attemptId: attempt?.id, loading: tab !== 'activity' };
+    render(); if (tab === 'activity' || !attempt) return;
+    try {
+      const result = await call<LogResult | PreviewDescription>({ action: tab === 'logs' ? 'logs' : 'describe', owner: entry.owner.id, name: entry.name, attemptId: attempt.id });
+      if (panel !== current) return;
+      if (tab === 'logs') panel.logs = result as LogResult; else panel.description = result as PreviewDescription;
+    } catch (error) { if (panel === current) panel.error = error instanceof Error ? error.message : 'Details unavailable.'; }
+    finally { if (panel === current) { panel.loading = false; render(); } }
+  }
+  function renderConfiguration(entry: Entry, attempt: AttemptSummary, parent: HTMLElement, description: PreviewDescription) {
+    parent.append(el('p', 'Requested configuration. Read-only — stored secret values are not included.', 'muted'));
+    const env = section('Environment variables', parent); const rows = el('div', '', 'row-list');
+    const bindingKeys = new Set([...description.envKeys, ...(description.secrets ?? []).flatMap(secret => secret.bindings.map(binding => (binding.service ? binding.service + '.' : '') + binding.key))]);
+    for (const key of bindingKeys) {
+      const secret = description.secrets?.find(s => s.bindings.some(b => (b.service ? b.service + '.' : '') + b.key === key));
+      const [service, envKey] = key.split('.');
+      const binding = description.spec.type === 'environment' ? description.spec.services[service]?.bindings?.[envKey] : undefined;
+      const kind = secret ? 'secret ref' : binding ? Object.keys(binding)[0] : 'value omitted';
+      const value = secret ? secret.id + (secret.selected ? ' · approved for this owner' : ' · approval required') : binding ? String(Object.values(binding)[0]) : 'Literal value is not included.';
+      const row = el('div', '', 'env-row'); row.append(el('code', key), el('span', kind, 'muted'), el('span', value, 'machine muted')); rows.append(row);
+    }
+    if (!rows.children.length) rows.append(el('p', 'No environment variables declared.', 'empty-list')); env.append(rows);
+    const definitions = section('Service definitions', parent); const spec = description.spec;
+    if (spec.type === 'environment') {
+      const list = el('div', '', 'row-list');
+      for (const [name, service] of Object.entries(spec.services)) {
+        const row = el('div', '', 'definition-row'); row.append(el('strong', name), el('span', service.type, 'machine muted'));
+        if (service.command) row.append(el('pre', JSON.stringify(service.command)));
+        if (service.cwd || service.directory) row.append(pathText(service.cwd ?? service.directory!));
+        list.append(row);
+      }
+      definitions.append(list);
+    }
+    const raw = el('details'); raw.append(el('summary', 'Full requested configuration'), el('pre', JSON.stringify(spec, null, 2), 'configuration')); definitions.append(raw);
+    const save = el('div', '', 'save-row'); save.append(el('p', 'Save this configuration as preview.yml so the next agent starts from it. Existing files are never overwritten.'), button('Save as preview.yml', () => {
+      void mutate<{ file: string; externalSources: string[] }>({ action: 'saveConfiguration', owner: entry.owner.id, name: entry.name, attemptId: attempt.id }, result => `Saved ${result.file}. The running preview is unchanged.` + (result.externalSources.length ? ' Sources outside this project keep absolute paths: ' + result.externalSources.join(', ') : ''));
+    })); parent.append(save);
+  }
+  function renderTabs(entry: Entry) {
+    const p = entry.preview; const retained = attempts(p); const node = el('section', '', 'tabs-section');
+    const tabs = el('div', '', 'tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Preview diagnostics');
+    const selected = retained.find(a => a.id === panel.attemptId) ?? p?.candidate ?? p?.latest ?? p?.active;
+    for (const [tab, label] of [['activity', 'Activity'], ['logs', 'Logs'], ['configuration', 'Configuration']] as const) {
+      if (tab !== 'activity' && (!selected || (entry.owner.legacy && tab === 'configuration'))) continue;
+      const control = navButton(label, () => { void loadPanel(entry, tab, selected); }, '', 'tab-' + tab);
+      control.id = 'tab-' + tab; control.setAttribute('role', 'tab'); control.setAttribute('aria-selected', String(panel.tab === tab)); control.setAttribute('aria-controls', 'tab-content');
+      control.tabIndex = panel.tab === tab ? 0 : -1;
+      control.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault(); const controls = [...tabs.querySelectorAll<HTMLButtonElement>('button')]; const i = controls.indexOf(control);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? controls.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + controls.length) % controls.length;
+        controls[next].click(); document.getElementById(controls[next].id)?.focus();
+      }); tabs.append(control);
+    }
+    const content = el('div', '', 'tab-content'); content.id = 'tab-content'; content.setAttribute('role', 'tabpanel'); content.setAttribute('aria-labelledby', 'tab-' + panel.tab);
+    node.append(tabs, content); detail.append(node);
+    if (panel.tab === 'activity') {
+      content.append(el('p', 'Retained runtime attempts · source files remain live.', 'muted'));
+      for (const attempt of retained) {
+        const row = el('div', '', 'activity-row'); row.append(el('time', new Date(attempt.startedAt).toLocaleTimeString(), 'machine muted'));
+        const text = el('div'); text.append(el('strong', attempt.id === p?.active?.id ? 'Serving now' : 'Attempt ' + attempt.state), el('code', attempt.id, 'attempt-id'), el('p', attempt.error?.message ?? (attempt.readyAt ? 'Startup checks passed at ' + new Date(attempt.readyAt).toLocaleTimeString() : 'Started at the time shown.'), attempt.error ? 'error' : 'muted')); row.append(text); content.append(row);
+      }
+      if (!retained.length) content.append(el('p', 'No retained attempts. Start through your agent or CLI.', 'muted'));
+      if (p?.cleanup?.length || p?.data?.cleanup) {
+        const cleanup = message('Cleanup needs attention', 'Keep these source directories until cleanup succeeds.', 'error', content);
+        for (const item of p.cleanup ?? []) cleanup.append(el('p', item.error.message), ...item.sources.map(pathText));
+        if (p.data?.cleanup) cleanup.append(el('p', p.data.cleanup.message));
+      }
+      renderRequests(entry, content, new Set(actions(entry).map(a => a.label))); return;
+    }
+    if (!selected) { content.append(el('p', 'The retained attempt is no longer available.', 'muted')); return; }
+    const choose = el('label', '', 'attempt-picker'); choose.append(el('span', 'Attempt'));
+    const selectAttempt = el('select'); selectAttempt.setAttribute('aria-label', 'Diagnostic attempt'); selectAttempt.dataset.focus = 'diagnostic-attempt';
+    for (const attempt of retained) {
+      const option = el('option', (attempt.id === p?.active?.id ? 'Serving' : attempt.id === p?.candidate?.id ? 'Starting' : 'Latest') + ' · ' + attempt.id);
+      option.value = attempt.id; option.selected = attempt.id === selected.id; selectAttempt.append(option);
+    }
+    selectAttempt.addEventListener('change', () => { void loadPanel(entry, panel.tab, retained.find(a => a.id === selectAttempt.value)); });
+    choose.append(selectAttempt, button('Refresh', () => { void loadPanel(entry, panel.tab, selected); }, 'small', 'refresh-panel')); content.append(choose);
+    if (panel.loading) { content.append(el('p', 'Loading…', 'muted')); return; }
+    if (panel.error) { message('Details unavailable', panel.error, 'error', content); return; }
+    if (panel.attemptId !== selected.id) { content.append(el('p', 'The selected attempt changed. Refresh to load its details.', 'muted')); return; }
+    if (panel.tab === 'logs' && panel.logs) {
+      content.append(el('p', panel.logs.truncated ? 'Log tail · earlier output omitted' : 'Log tail', 'muted'), el('pre', panel.logs.text || 'No output captured.', 'logs'));
+    } else if (panel.description) renderConfiguration(entry, selected, content, panel.description);
+  }
   function renderDetail() {
-    detail.replaceChildren();
-    const back = button('← Previews', () => {
-      document.body.classList.remove('show-detail');
-      const key = selection ? selection.owner + (selection.name ?? '') : '';
-      projects.querySelector<HTMLElement>('[data-focus="' + CSS.escape(key) + '"]')?.focus();
-    }, 'back');
-    back.disabled = false; detail.append(back);
-    const owner = owners.find(owner => owner.id === selection?.owner);
-    if (!owner) {
-      if (selection) { section('Project no longer listed', 'Its owner may have shut down. Stored database data remains separate; start through your agent or CLI to reconnect.'); return; }
-      detail.append(el('div', 'Your applications, in one place.', 'empty-title'), el('p', 'Start an application with Previewhost through your agent or terminal. Its project will appear here.', 'muted'),
-        el('p', 'This page lists known owners. Projects and retained data from an owner that shut down are not a permanent catalog.', 'muted'));
-      return;
+    detail.replaceChildren(); detail.classList.remove('overview');
+    document.querySelector('#crumb')!.textContent = selection ? 'Preview details' : 'All previews';
+    if (!selection) { renderOverview(); return; }
+    const owner = owners.find(o => o.id === selection!.owner);
+    if (!owner) { message('Project no longer listed', 'Its owner may have shut down. Stored database data remains separate; start through your agent or CLI to reconnect.'); return; }
+    const entry: Entry = { owner, name: selection.name, preview: owner.previews?.find(p => p.name === selection!.name) };
+    const p = entry.preview; const status = state(entry);
+    const crumb = el('div', '', 'breadcrumb'); crumb.append(navButton('All previews', () => select(), 'text-button'), el('span', '/', 'slash'), el('span', shortProject(owner))); detail.append(crumb);
+    const title = el('div', '', 'title-row'); const identity = el('div'); identity.append(el('h1', shortProject(owner)), el('p', entry.name ?? 'Project', 'muted'));
+    title.append(identity); if (!owner.error) title.append(el('span', status.label, 'status ' + status.tone)); detail.append(title);
+    if (owner.project) detail.append(pathBar(owner.project));
+    if (owner.error) { message('Status unavailable', owner.error.message + ' Other projects remain available.', 'error'); return; }
+    const availableActions = actions(entry); const taken = new Set(availableActions.map(a => a.label));
+    const addNotice = (heading: string, body: string, tone = '', extra?: Action) => {
+      const node = message(heading, body, tone);
+      if (extra && !taken.has(extra.label)) { node.append(button(extra.label, extra.run)); taken.add(extra.label); }
+    };
+    if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
+    else if (pending(entry).length) addNotice('Private setup requested', 'Approve access and enter any missing values in the separate private form. Cancellation stays in that form.', 'warning');
+    else if (p?.latest?.state === 'failed') addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
+    else if (p?.latest?.state === 'canceled') addNotice(p.active ? 'The update was canceled. Your previous version is still running.' : 'Startup was canceled.', 'Nothing was started again automatically. Ask your agent to continue only when you are ready.');
+    if (owner.legacy) addNotice('Owner update needed', 'This owner runs an older build. New controls require an explicit owner upgrade; this page will not restart it.');
+    const row = el('div', '', 'actions');
+    const canOpen = !!(p?.active && p.url); let primaryTaken = canOpen;
+    if (canOpen) {
+      row.append(urlLink(p!.url!, 'Open app', 'button primary hero'));
+      const url = el('div', '', 'url-chip'); url.append(el('code', p!.url!), copy(p!.url!)); row.append(url);
     }
-    const preview = owner.previews?.find(p => p.name === selection?.name);
-    detail.append(el('p', shortProject(owner), 'eyebrow'), el('h2', preview?.name ?? 'Project'), el('p', owner.project ?? 'Unverified project record', 'path full-path'));
-    if (owner.error) {
-      section('Status unavailable', 'Your previews may still be running. Keep their sources and verify cleanup through the project CLI.').append(el('p', owner.error.message, 'error-text')); return;
+    const controls = el('div', '', 'secondary-actions');
+    for (const action of availableActions) {
+      const primary = !primaryTaken && !action.danger; if (primary) primaryTaken = true;
+      const control = button(action.label, action.run, primary ? 'primary hero' : action.danger ? 'danger' : '');
+      if (primary) row.append(control); else controls.append(control);
     }
-    if (owner.legacy) section('Owner update needed', 'This owner runs an older build. Private requests and Start again are unavailable. Upgrade it explicitly when you are ready to stop its previews; this page will not restart it.');
-    if (!preview) { renderRequests(owner); if (!owner.requests?.length) section('No previews', 'Ask your agent to start an application in this project.'); return; }
-    const status = state(preview);
-    const actions = el('div', '', 'actions');
-    detail.append(el('p', status.label, 'headline-status ' + status.tone), actions);
-    const primaryService = Object.values(preview.active?.services ?? {}).find(s => s.browserUrl);
-    const primaryUrl = preview.url;
-    if (preview.active && primaryUrl) actions.append(urlLink(primaryUrl, 'Open preview', true));
-    if (preview.candidate) actions.append(button(preview.active ? 'Cancel update' : 'Cancel startup', () => { void mutate({ action: 'cancel', owner: owner.id, name: preview.name, attemptId: preview.candidate!.id }, 'The selected attempt was canceled.'); }));
-    if ((preview.active || needsCleanup(preview) || preview.url) && !preview.busy) {
-      if (!owner.legacy) actions.append(button(needsCleanup(preview) ? 'Retry cleanup' : 'Stop preview', () => { void mutate({ action: 'stop', owner: owner.id, name: preview.name,
-        expected: { active: preview.active?.id ?? null, candidate: preview.candidate?.id ?? null, latest: preview.latest?.id ?? null } }, 'Preview stopped. Managed database data stays.'); }));
-      else section('Stop through the CLI', 'This older owner cannot validate a stale dashboard action. Run this command from the project directory shown above.').append(el('pre', 'previewhost stop ' + preview.name));
-    }
-    if (!preview.active && !preview.busy && !preview.candidate && ['stopped', 'failed'].includes(preview.latest?.state ?? '') && !owner.legacy && !needsCleanup(preview)) {
-      const retry = preview.latest?.state === 'failed';
-      actions.append(button(retry ? 'Retry start' : 'Start again', () => { void mutate({ action: 'startAgain', owner: owner.id, name: preview.name, attemptId: preview.latest!.id }, 'Starting again with the same configuration and current source.'); }, 'primary'));
-      if (retry) detail.append(el('p', 'Resolve the startup error before retrying.', 'muted'));
-      detail.append(el('p', 'Runs the same configuration against current source. Does not reload preview.yml. The URL may change.', 'muted'));
-    } else if (!preview.active && !preview.candidate && !preview.busy && !needsCleanup(preview)) {
-      detail.append(el('p', `Ask your agent to start “${preview.name}” again in ${owner.project}.`, 'muted'));
-    }
-    if (preview.active) detail.append(el('p', 'Ready means startup checks passed. Stop keeps managed database data.', 'muted'));
-    if (owner.requests?.some(r => (r.state === 'pending' || r.state === 'saving') && r.name === preview.name)) renderRequests({ ...owner, requests: owner.requests.filter(r => r.name === preview.name && ['pending', 'saving'].includes(r.state)) });
-    if (primaryUrl) {
-      const routes = section('Application links');
-      routes.append(urlLink(primaryUrl, primaryUrl), button('Copy URL', () => { void navigator.clipboard.writeText(primaryUrl).then(() => announce('URL copied.'), () => announce('Copy the application link above.')); }));
-      if (primaryService?.browserUrl) routes.append(el('p', 'Service hostname links are listed below.', 'muted'));
-    }
-    const attempts = [preview.candidate, preview.latest?.id !== preview.active?.id ? preview.latest : undefined, preview.active, preview.latest].filter((a, i, all) => a && all.findIndex(other => other?.id === a.id) === i);
-    for (const attempt of attempts) {
-      if (!attempt) continue;
-      const title = attempt.id === preview.active?.id ? 'Serving application' : attempt.id === preview.candidate?.id ? (preview.active ? 'Update in progress' : 'Starting attempt') : preview.active ? 'Latest update' : 'Last attempt';
-      const node = section(title);
-      node.append(el('p', attempt.state, 'status'));
-      if (attempt.error) node.append(el('p', attempt.error.message, 'error-text'));
-      for (const [name, service] of Object.entries(attempt.services ?? {})) {
-        const row = el('div', '', 'service'); row.append(el('strong', name), el('span', service.type, 'muted'), el('span', service.state, 'status'));
-        if (attempt.id === preview.active?.id && service.browserUrl) row.append(urlLink(service.browserUrl, 'Open service ↗'));
-        if (service.error) row.append(el('p', service.error.message, 'error-text'));
-        node.append(row);
-      }
-      for (const source of attempt.sources) node.append(el('p', source, 'path'));
-      const key = owner.id + '/' + preview.name + '/' + attempt.id;
-      const load = async (action: 'logs' | 'describe') => {
-        try {
-          const result = await call<LogResult | PreviewDescription>({ action, owner: owner.id, name: preview.name, attemptId: attempt.id });
-          if (selection?.owner !== owner.id || selection?.name !== preview.name) return;
-          expanded = { ...(expanded?.key === key ? expanded : { key }), [action === 'logs' ? 'logs' : 'description']: result };
-          render();
-        } catch (error) { announce(error instanceof Error ? error.message : 'Details unavailable.'); }
-      };
-      const controls = el('div', '', 'actions');
-      controls.append(button('Show logs', () => { void load('logs'); }, '', key + '-logs'));
-      if (!owner.legacy) controls.append(button('Configuration', () => { void load('describe'); }, '', key + '-config'));
-      node.append(controls);
-      if (expanded?.key === key) {
-        if (expanded.logs) node.append(el('p', expanded.logs.truncated ? 'Log tail · earlier output omitted' : 'Log tail', 'muted'), el('pre', expanded.logs.text || 'No output captured.', 'logs'));
-        if (expanded.description) {
-          const description = expanded.description;
-          node.append(el('p', 'Requested configuration · values omitted', 'muted'));
-          if (description.envKeys.length) node.append(el('p', 'Environment variables: ' + description.envKeys.join(', ')));
-          for (const secret of description.secrets ?? []) {
-            node.append(el('p', secret.bindings.map(binding => (binding.service ? binding.service + '.' : '') + binding.key).join(', ') + ' → stored reference ' + secret.id + (secret.selected ? ' · access approved for this owner' : ' · approval required')));
-          }
-          const configuration = el('details');
-          configuration.append(el('summary', 'Service configuration'), el('pre', JSON.stringify(description.spec, null, 2), 'configuration'));
-          node.append(configuration);
-          node.append(el('p', 'Save this attempt as a new project recipe. Existing files are not overwritten, and the running preview is unchanged.', 'muted'),
-            button('Save as preview.yml', () => {
-              void mutate<{ file: string; externalSources: string[] }>({ action: 'saveConfiguration', owner: owner.id, name: preview.name, attemptId: attempt.id }, result =>
-                `Saved ${result.file}. The running preview is unchanged.` + (result.externalSources.length ?
-                  ' Sources outside this project keep absolute paths: ' + result.externalSources.join(', ') : ''));
-            }, '', key + '-save'));
-        }
-      }
-    }
-    if (preview.cleanup?.length) {
-      const cleanup = section('Cleanup needs attention', 'Keep these source directories until cleanup succeeds.');
-      for (const item of preview.cleanup) cleanup.append(el('p', item.error.message, 'error-text'), ...item.sources.map(source => el('p', source, 'path')));
-    }
-    if (owner.requests?.some(r => r.name === preview.name && !['pending', 'saving'].includes(r.state))) {
-      const history = el('details', '', 'section'); history.append(el('summary', 'Private setup history')); detail.append(history);
-      renderRequests({ ...owner, requests: owner.requests.filter(r => r.name === preview.name && !['pending', 'saving'].includes(r.state)) }, history);
-    }
-    if (preview.data) {
-      const node = section('Managed data', 'Stop retains this data. Deletion is a separate explicit CLI operation.');
-      for (const resource of preview.data.resources) node.append(el('p', `${resource.name} · ${resource.type} · ${preview.data.running ? 'running' : 'retained'}`));
-      if (preview.data.cleanup) node.append(el('p', preview.data.cleanup.message, 'error-text'));
-    }
+    if (!canOpen && !primaryTaken && p?.candidate) { const waiting = el('button', 'Waiting for URL', 'hero'); waiting.disabled = true; row.append(waiting); }
+    row.append(controls); detail.append(row, el('p', hint(entry), 'hint'));
+    if (p) { renderAttempts(p); renderServices(p); }
+    if (owner.legacy && p?.active) message('Stop through the CLI', `Run previewhost stop ${p.name} from the project directory shown above; this owner cannot guard a stale dashboard action.`);
+    if (!p?.active && !p?.candidate && !availableActions.length && !pending(entry).length) detail.append(el('p', `Ask your agent to start ${entry.name ?? 'an application'} in this worktree.`, 'muted'));
+    renderTabs(entry);
   }
   function render() {
     const focus = (document.activeElement as HTMLElement)?.dataset.focus;
-    renderList(); renderDetail();
+    renderList(); renderDetail(); updateElapsed();
     if (focus) document.querySelector<HTMLElement>('[data-focus="' + CSS.escape(focus) + '"]')?.focus({ preventScroll: true });
+  }
+  function updateElapsed() {
+    for (const node of document.querySelectorAll<HTMLElement>('[data-elapsed]')) node.textContent = Math.max(0, Math.floor((Date.now() - Date.parse(node.dataset.elapsed!)) / 1000)) + 's elapsed';
   }
   async function refresh() {
     if (loading || document.hidden) return;
     loading = true;
     try {
-      const result = await call<Owner[]>({ action: 'list' });
-      connection.textContent = 'Connected · local only';
+      const result = await call<Owner[]>({ action: 'list' }); connection.textContent = 'Running locally';
       if (connectionNotice) announce('');
-      const next = JSON.stringify(result);
-      if (next !== snapshot) {
-        owners = result; snapshot = next;
-        if (!selection && owners.length) selection = { owner: owners[0].id, name: owners[0].previews?.[0]?.name };
-        render();
-      }
+      const next = JSON.stringify(result); if (next !== snapshot) { owners = result; snapshot = next; render(); }
+      updateElapsed();
     } catch (error) {
       connection.textContent = 'Disconnected';
       announce(capability ? 'Dashboard disconnected. Your previews may still be running. Run previewhost dashboard to reopen it.' : 'Run previewhost dashboard to open an authenticated session. This tab has no usable private session.', true);
-      if (!capability) document.body.classList.add('show-detail');
-      if (!capability) detail.replaceChildren(el('h2', 'Open from your terminal'), el('pre', 'previewhost dashboard'), el('p', 'The launcher opens a private local session. No account is needed.', 'muted'));
+      if (!capability) { document.body.classList.add('show-detail'); detail.replaceChildren(el('h1', 'Open from your terminal'), el('pre', 'previewhost dashboard'), el('p', 'The launcher opens a private local session. No account is needed.', 'muted')); }
       else if (error instanceof Error && error.message.includes('too large')) announce(error.message);
     } finally { loading = false; }
   }
-  search.addEventListener('input', renderList);
+  search.addEventListener('input', render);
+  document.querySelector('#home')!.addEventListener('click', () => select());
+  document.querySelector('#overview')!.addEventListener('click', () => select());
   document.querySelector('#refresh')!.addEventListener('click', () => { snapshot = ''; void refresh(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
-  void refresh();
-  setInterval(() => { if (capability) void refresh(); }, 2500);
+  void refresh(); setInterval(() => { if (capability) void refresh(); }, 2500);
 }
 
 export const dashboardScript = `(${mountDashboard.toString()})();`;
 export const dashboardStyle = `
-:root {
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  color:#243331;
-  background:#fafbf9;
-  font-size:14px;
+@font-face { font-family:Geist; src:url('/fonts/geist.woff2') format('woff2'); font-weight:100 900; font-style:normal; font-display:swap; }
+@font-face { font-family:'Geist Mono'; src:url('/fonts/geist-mono.woff2') format('woff2'); font-weight:100 900; font-style:normal; font-display:swap; }
+body {
+  --bg:#ffffff; --subtle:#fafafa; --surface:#ffffff; --hover:#f5f5f5; --sel:#f0f0f0;
+  --border:#ebebeb; --border-2:#e0e0e0; --divider:#f0f0f0; --divider-2:#f5f5f5;
+  --t1:#000000; --t2:#333333; --t3:#525252; --t4:#666666; --t5:#8f8f8f; --t6:#a1a1a1; --t7:#b4b4b4;
+  --inv-bg:#000000; --inv-fg:#ffffff;
+  --ok:#0f7b55; --err:#c5372c; --warn:#9a6700;
+  --err-border:#eddcda; --warn-border:#ece4d3; --err-soft:#8a3a33;
   color-scheme:light;
 }
-* {
-  box-sizing:border-box;
+body.ph-dark {
+  --bg:#000000; --subtle:#0a0a0a; --surface:#0a0a0a; --hover:#161616; --sel:#1f1f1f;
+  --border:#262626; --border-2:#333333; --divider:#1f1f1f; --divider-2:#1a1a1a;
+  --t1:#ededed; --t2:#d4d4d4; --t3:#b4b4b4; --t4:#a1a1a1; --t5:#8f8f8f; --t6:#6f6f6f; --t7:#5a5a5a;
+  --inv-bg:#ededed; --inv-fg:#000000;
+  --ok:#4cc38a; --err:#f97066; --warn:#d9a441;
+  --err-border:#3a2320; --warn-border:#37301c; --err-soft:#f0a29b;
+  color-scheme:dark;
 }
-body {
-  margin:0;
+* { box-sizing:border-box; }
+body { margin:0; height:100dvh; display:flex; flex-direction:column; font:14px/1.5 Geist,system-ui,sans-serif; -webkit-font-smoothing:antialiased; color:var(--t1); background:var(--bg); }
+button,input,select { font:inherit; }
+button,.button { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:32px; flex:none; padding:0 14px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t2); font-size:13px; font-weight:500; white-space:nowrap; cursor:pointer; text-decoration:none; transition:background-color 120ms,border-color 120ms,color 120ms; }
+button:hover,.button:hover { border-color:var(--t1); color:var(--t1); }
+button:disabled { background:var(--subtle); border-color:var(--border); color:var(--t4); cursor:not-allowed; }
+button.primary,.button.primary { background:var(--inv-bg); border-color:var(--inv-bg); color:var(--inv-fg); }
+button.primary:hover,.button.primary:hover { background:var(--t2); }
+button.danger { color:var(--err); border-color:var(--err-border); }
+.hero { height:36px; padding:0 18px; font-size:13.5px; }
+.small { height:26px; padding:0 10px; font-size:12px; border-radius:5px; }
+:focus-visible { outline:2px solid var(--t2); outline-offset:3px; }
+h1:focus { outline:none; }
+a { color:var(--t1); text-underline-offset:3px; }
+a:not([href]) { pointer-events:none; color:var(--t5); }
+header { display:flex; align-items:center; gap:12px; padding:0 20px; height:52px; min-height:52px; border-bottom:1px solid var(--border); }
+.brand { border:0; padding:0; height:auto; color:var(--t1); font-size:14.5px; font-weight:600; letter-spacing:-.2px; background:none; }
+.brand::before { content:''; width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:12px solid currentColor; margin-right:3px; }
+.slash { color:var(--border-2); }
+#crumb { color:var(--t4); font-size:13.5px; }
+#connection { margin-left:auto; color:var(--t5); font-size:12.5px; }
+header>button:not(.brand) { height:30px; padding:0 11px; }
+#notice { padding:10px 20px; border-bottom:1px solid var(--border); background:var(--subtle); color:var(--t3); font-size:13px; }
+.workspace { display:grid; grid-template-columns:236px minmax(0,1fr); flex:1; min-height:0; }
+aside { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--border); }
+.search { display:block; padding:14px 14px 10px; }
+input { width:100%; height:32px; padding:0 11px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--t1); font-size:13px; }
+input::placeholder { color:var(--t5); }
+.nav-overview { margin:0 10px 8px; justify-content:space-between; border:0; height:34px; padding:0 9px; }
+.nav-overview[aria-current=true] { background:var(--sel); }
+#attention-count { color:var(--t5); font-family:'Geist Mono',monospace; font-size:11.5px; }
+#projects { flex:1; min-height:0; overflow-y:auto; padding:4px 10px 16px; }
+.project { margin-bottom:16px; }
+.project>.section-label { margin:0; padding:6px 8px 5px; }
+.preview-row { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:8px; row-gap:1px; height:auto; width:100%; padding:7px 9px; border:0; margin-top:1px; white-space:normal; text-align:left; }
+.preview-row:hover,.nav-overview:hover { background:var(--hover); }
+.preview-row[aria-current=true] { background:var(--sel); }
+.nav-identity { display:contents; }
+.nav-identity strong { display:block; min-width:0; grid-column:1; grid-row:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13.5px; font-weight:500; }
+.nav-identity .path { grid-column:1/-1; grid-row:2; font-size:11px; margin-top:1px; }
+.nav-identity .path-tail { max-width:100%; white-space:normal; overflow-wrap:anywhere; color:var(--t2); }
+.nav-identity .path-parent { display:none; }
+.preview-row>.status { grid-column:2; grid-row:1; font-size:11.5px; }
+.preview-row>.ready,.preview-row>.muted { color:var(--t5); font-weight:400; }
+.scope { border-top:1px solid var(--border); margin:0; padding:12px 16px; font-size:12px; color:var(--t5); line-height:1.45; }
+#main { min-width:0; min-height:0; overflow-y:auto; }
+#detail { padding:30px 32px 64px; max-width:960px; }
+#detail.overview { max-width:1120px; }
+h1 { margin:0 0 7px; font-size:30px; line-height:1.1; font-weight:600; letter-spacing:-.9px; overflow-wrap:anywhere; }
+.overview>h1 { font-size:26px; letter-spacing:-.6px; }
+h2 { margin:0 0 6px; font-size:15px; font-weight:600; letter-spacing:-.2px; }
+p { margin:0 0 10px; }
+strong { font-weight:500; }
+.muted { color:var(--t5); }
+.machine,code,pre,time { font-family:'Geist Mono',monospace; font-size:12.5px; font-weight:400; }
+.status { font-size:13px; font-weight:500; white-space:nowrap; }
+.ready { color:var(--ok); }
+.error { color:var(--err); }
+.warning { color:var(--warn); }
+.neutral { color:var(--t2); }
+.section-label { font-size:11px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--t5); }
+.breadcrumb { display:flex; align-items:baseline; gap:9px; margin-bottom:10px; font-size:13px; color:var(--t5); }
+.text-button { height:auto; border:0; padding:0; background:none; color:var(--t5); font-weight:400; }
+.title-row { display:flex; align-items:flex-start; gap:20px; margin-bottom:14px; }
+.title-row>div { flex:1; min-width:0; }
+.title-row>.status { font-size:14px; padding-top:6px; }
+.title-row p { margin:0; font-size:13px; }
+.path { display:flex; min-width:0; font-family:'Geist Mono',monospace; font-size:12.5px; white-space:nowrap; }
+.path-parent { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--t5); }
+.path-tail { flex:none; color:var(--t2); }
+.path-bar { display:flex; align-items:center; gap:10px; padding:9px 12px; border:1px solid var(--border); border-radius:7px; background:var(--subtle); margin-bottom:26px; }
+.path-bar>.path { flex:1; }
+.notice { padding:18px 20px; border:1px solid var(--border); border-radius:9px; margin-bottom:26px; background:var(--subtle); color:var(--t1); }
+.notice.error { border-color:var(--err-border); }
+.notice.warning { border-color:var(--warn-border); }
+.notice p { font-size:13.5px; line-height:1.6; color:var(--t3); max-width:640px; overflow-wrap:anywhere; }
+.notice p:last-child { margin:0; }
+.notice button { margin-top:4px; }
+.actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding-bottom:16px; }
+.secondary-actions { display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; }
+.url-chip { display:flex; align-items:center; gap:12px; min-width:0; max-width:100%; height:36px; padding:0 13px; border:1px solid var(--border); border-radius:6px; background:var(--subtle); }
+.url-chip code { color:var(--t2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.url-chip button { border:0; padding:0; background:none; color:var(--t5); }
+.hint { margin:0; padding-bottom:26px; border-bottom:1px solid var(--border); color:var(--t4); font-size:13px; line-height:1.6; }
+.section { padding:26px 0; border-bottom:1px solid var(--border); }
+.section>.section-label { margin-bottom:16px; }
+.section>.path { margin-top:10px; }
+.section>p { font-size:12.5px; }
+.attempt-line { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:18px 0; border-bottom:1px solid var(--border); }
+.attempt-line>.section-label { width:110px; }
+.attempt-id { font-size:12px; overflow-wrap:anywhere; }
+.attempt-split { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.attempt-split>div { padding:16px 18px; min-width:0; }
+.attempt-split>div+div { border-left:1px solid var(--border); }
+.attempt-split .attempt-id { display:block; margin:6px 0; }
+.attempt-split p { font-size:12.5px; color:var(--t4); }
+.attempt-split p:last-child { margin-top:10px; margin-bottom:0; }
+.row-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.row-list>div+div { border-top:1px solid var(--divider); }
+.service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 56px; align-items:center; gap:12px; padding:12px 16px; }
+.service-row>strong { overflow-wrap:anywhere; font-size:13.5px; }
+.service-row .status { font-size:12.5px; }
+.service-row .ready { font-weight:400; }
+.service-row.managed { background:var(--subtle); }
+.service-meta { text-align:right; font-size:12px; }
+.service-error { grid-column:1/-1; margin:0; font-size:12.5px; }
+.overview .section { border-bottom:0; padding:0; margin-bottom:30px; }
+.overview .section-label { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.overview .section-label::after { content:''; flex:1; height:1px; background:var(--divider); }
+.summary { color:var(--t4); margin:6px 0 26px; }
+.attention-list { display:flex; flex-direction:column; gap:10px; margin-bottom:30px; }
+.attention-row { display:flex; align-items:center; gap:16px; padding:14px 16px; margin:0; }
+.attention-row>div { flex:1; min-width:0; }
+.attention-row h2 { font-size:14px; font-weight:500; letter-spacing:0; }
+.attention-row p { font-size:13px; }
+.attention-row button { margin:0; }
+.overview-row { display:grid; grid-template-columns:minmax(0,1fr) 160px 164px; align-items:center; gap:20px; padding:14px 16px; }
+.row-identity { min-width:0; }
+.row-identity>.path { font-size:11.5px; margin-top:2px; }
+.row-identity .path-tail { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+.overview-state { font-size:13px; }
+.overview-state small { display:block; font-size:12px; color:var(--t5); margin-top:2px; }
+.row-actions { display:flex; justify-content:flex-end; gap:8px; }
+.row-actions button,.row-actions .button { height:30px; padding:0 12px; }
+.tabs-section { padding-top:26px; }
+.tabs { display:flex; align-items:center; gap:22px; border-bottom:1px solid var(--border); margin-bottom:20px; }
+.tabs button { border:0; border-radius:0; padding:0 0 12px; height:auto; color:var(--t5); background:none; font-weight:400; }
+.tabs button[aria-selected=true] { border-bottom:1px solid var(--t1); color:var(--t1); font-weight:500; }
+.tab-content .section { padding-top:0; border:0; }
+.activity-row { display:flex; align-items:baseline; gap:16px; padding:12px 0; }
+.activity-row+.activity-row { border-top:1px solid var(--divider-2); }
+.activity-row time { width:90px; flex:none; font-size:12px; }
+.activity-row>div { min-width:0; }
+.activity-row code { display:block; margin:3px 0; }
+.activity-row p { margin:0; font-size:12.5px; }
+.attempt-picker { display:flex; gap:10px; align-items:center; margin-bottom:16px; color:var(--t4); font-size:12.5px; }
+select { min-width:0; max-width:100%; height:32px; padding:0 8px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t2); font-family:'Geist Mono',monospace; font-size:12px; }
+.logs,.configuration { border:1px solid var(--border); border-radius:8px; background:var(--subtle); padding:14px 16px; max-height:360px; overflow:auto; white-space:pre; line-height:1.9; font-size:12px; color:var(--t3); }
+.env-row { display:grid; grid-template-columns:180px 90px minmax(0,1fr); gap:14px; align-items:baseline; padding:11px 16px; }
+.env-row>* { overflow-wrap:anywhere; font-size:12px; }
+.definition-row { padding:13px 16px; }
+.definition-row>strong { margin-right:10px; }
+.definition-row pre { margin:5px 0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--t3); }
+details { margin:16px 0; }
+summary { cursor:pointer; color:var(--t4); font-size:13px; }
+.save-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; border:1px dashed var(--border-2); border-radius:8px; padding:14px 16px; }
+.save-row p { flex:1; min-width:180px; margin:0; font-size:13px; color:var(--t4); }
+.request { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; padding:12px 0; font-size:13px; }
+.request+.request { border-top:1px solid var(--divider); }
+.request p { width:100%; margin:0; }
+.empty { padding:64px 0; max-width:460px; }
+.empty h2 { font-size:20px; letter-spacing:-.3px; }
+.empty p { font-size:14px; color:var(--t4); line-height:1.6; }
+.empty pre { white-space:pre-wrap; padding:12px 14px; border:1px solid var(--border); border-radius:8px; background:var(--subtle); color:var(--t4); }
+.empty-list { padding:12px 16px; color:var(--t5); font-size:13px; }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
+[hidden] { display:none!important; }
+@media (max-width:1100px) {
+  .overview-row { grid-template-columns:minmax(0,1fr) 150px; gap:12px; }
+  .row-actions { grid-column:1/-1; }
+  .service-row { grid-template-columns:80px 76px 64px minmax(0,1fr) 48px; gap:8px; padding:12px; }
 }
-button,input {
-  font:inherit;
+@media (max-width:760px) {
+  header { padding:0 14px; gap:10px; }
+  #crumb,#connection { display:none; }
+  header .brand { margin-right:auto; }
+  .workspace { display:flex; flex-direction:column; }
+  aside { border-right:0; max-height:45%; flex:none; border-bottom:1px solid var(--border); }
+  .scope { display:none; }
+  #projects { display:none; }
+  .show-detail aside .search { display:none; }
+  .show-detail .nav-overview { margin:8px 14px; }
+  #main { flex:1; }
+  #detail { padding:24px 20px 40px; }
+  .title-row { gap:10px; }
+  h1 { font-size:26px; }
+  .title-row>.status { font-size:12px; }
+  .path-bar>.path { flex-wrap:wrap; }
+  .path-bar .path-parent { flex-basis:100%; }
+  .path-bar .path-tail { white-space:normal; overflow-wrap:anywhere; flex:1; }
+  .section>.path,.definition-row>.path { flex-wrap:wrap; }
+  .section>.path .path-tail,.definition-row>.path .path-tail { white-space:normal; overflow-wrap:anywhere; flex-shrink:1; }
+  .attempt-split { grid-template-columns:1fr; }
+  .attempt-split>div+div { border-left:0; border-top:1px solid var(--border); }
+  .overview-row { grid-template-columns:minmax(0,1fr) 130px; gap:10px; padding:12px; }
+  .overview-state .status { font-size:12px; }
+  .overview-state small { font-size:11px; }
+  .service-row { grid-template-columns:72px 66px minmax(0,1fr) 48px; }
+  .service-meta { grid-column:1/4; grid-row:auto; text-align:left; }
+  .service-row>.button,.service-action { grid-column:4; }
+  .service-row>.status { text-align:right; }
+  .env-row { grid-template-columns:minmax(0,1fr) 90px; }
+  .env-row>:last-child { grid-column:1/-1; }
+  .attempt-picker { flex-wrap:wrap; }
+  .attempt-picker select { flex:1; }
+  .secondary-actions { margin-left:0; }
+  .attention-row { align-items:flex-start; padding:14px; }
+  .activity-row { flex-wrap:wrap; gap:4px; }
+  .activity-row>div { width:100%; }
 }
-button,.button {
-  border:1px solid #d7dfda;
-  border-radius:6px;
-  background:#fff;
-  color:#243331;
-  padding:9px 13px;
-  cursor:pointer;
-  text-decoration:none;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  gap:8px;
-  transition:background .12s,border-color .12s;
-}
-button:hover,.button:hover {
-  background:#edf2ef;
-  border-color:#a5b9af;
-}
-button:disabled {
-  opacity:.5;
-  cursor:wait;
-}
-a {
-  color:#176a51;
-}
-a:hover {
-  text-decoration:underline;
-}
-:focus-visible {
-  outline:3px solid #4d9e80;
-  outline-offset:3px;
-}
-.primary {
-  background:#216c53;
-  color:white;
-  border-color:#216c53;
-}
-.primary:hover {
-  background:#17523e;
-  color:white;
-}
-header {
-  height:68px;
-  border-bottom:1px solid #dde4de;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 30px;
-  background:#fff;
-}
-.brand {
-  font-weight:750;
-  letter-spacing:-.7px;
-  font-size:21px;
-  text-decoration:none;
-  color:#243331;
-  display:flex;
-  align-items:center;
-  gap:14px;
-}
-.local {
-  letter-spacing:1.3px;
-  font-size:10px;
-  color:#71837a;
-  font-weight:600;
-}
-#connection {
-  font-size:12px;
-  color:#687970;
-}
-main {
-  display:grid;
-  grid-template-columns:300px minmax(0,1fr);
-  min-height:calc(100vh - 68px);
-}
-aside {
-  padding:26px 20px;
-  border-right:1px solid #dde4de;
-  background:#f1f4ef;
-}
-.list-heading {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:20px;
-}
-h1 {
-  font-size:23px;
-  letter-spacing:-.6px;
-  margin:0;
-}
-#refresh {
-  font-size:22px;
-  padding:3px 10px;
-  background:transparent;
-  border-color:transparent;
-}
-.search input {
-  width:100%;
-  background:#fff;
-  border:1px solid #d6ded8;
-  border-radius:6px;
-  padding:11px 12px;
-  margin-bottom:28px;
-}
-.project {
-  margin:0 0 24px;
-}
-.project-title {
-  border:0;
-  background:transparent;
-  padding:0;
-  font-weight:700;
-  justify-content:flex-start;
-  text-align:left;
-}
-.project .path {
-  font-size:11px;
-  margin:7px 0 12px;
-}
-.path {
-  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
-  color:#718078;
-  overflow-wrap:anywhere;
-  line-height:1.6;
-}
-.preview-row {
-  width:100%;
-  border:0;
-  background:transparent;
-  display:flex;
-  align-items:flex-start;
-  flex-direction:column;
-  gap:7px;
-  text-align:left;
-  padding:13px 12px;
-  margin:4px 0;
-}
-.preview-row[aria-current=true] {
-  background:#fff;
-  box-shadow:inset 3px 0 #216c53;
-}
-.status {
-  font-size:12px;
-}
-.ready {
-  color:#216c53;
-}
-.warning,.error-text {
-  color:#985222;
-}
-.working {
-  color:#526d94;
-}
-.muted,.scope {
-  color:#6c7b72;
-  line-height:1.65;
-}
-.scope {
-  font-size:12px;
-  margin-top:38px;
-  max-width:240px;
-}
-.private-link {
-  font-size:12px;
-  border:0;
-  padding:7px 0;
-  background:transparent;
-  color:#985222;
-}
-article {
-  padding:42px 48px 64px;
-  max-width:1100px;
-  width:100%;
-  min-width:0;
-}
-.eyebrow {
-  text-transform:uppercase;
-  letter-spacing:1.3px;
-  font-size:11px;
-  font-weight:650;
-  color:#718078;
-  margin:0 0 8px;
-}
-h2 {
-  font-size:34px;
-  letter-spacing:-1px;
-  font-weight:650;
-  margin:0 0 12px;
-}
-h3 {
-  font-size:15px;
-  margin:0 0 12px;
-  font-weight:650;
-}
-.full-path {
-  margin-bottom:22px;
-  font-size:12px;
-}
-.headline-status {
-  font-size:15px;
-  font-weight:600;
-  margin:26px 0 18px;
-}
-.actions {
-  display:flex;
-  flex-wrap:wrap;
-  gap:9px;
-  margin:14px 0;
-}
-.section {
-  border-top:1px solid #e0e6df;
-  padding-top:24px;
-  margin-top:28px;
-}
-.section p {
-  margin:9px 0;
-}
-.service {
-  display:flex;
-  gap:18px;
-  align-items:center;
-  padding:13px 0;
-  border-bottom:1px solid #edf0ea;
-  flex-wrap:wrap;
-}
-.service strong {
-  min-width:90px;
-}
-.service .status {
-  margin-left:auto;
-}
-.service .error-text {
-  flex-basis:100%;
-}
-.service a {
-  font-size:12px;
-}
-.endpoint {
-  display:inline-block;
-  overflow-wrap:anywhere;
-  margin:7px 15px 7px 0;
-  font-family:ui-monospace,monospace;
-  font-size:12px;
-}
-.request {
-  padding:15px 0;
-  border-bottom:1px solid #e0e6df;
-  display:flex;
-  gap:14px;
-  align-items:center;
-  flex-wrap:wrap;
-}
-.request p {
-  flex-basis:100%;
-  font-size:12px;
-}
-.request button {
-  margin-left:auto;
-}
-pre {
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
-  max-height:380px;
-  overflow:auto;
-  background:#edf1ec;
-  border-radius:6px;
-  padding:18px;
-  font-size:12px;
-  line-height:1.65;
-}
-.logs {
-  background:#22342c;
-  color:#e6eee7;
-}
-.error-text {
-  line-height:1.6;
-  overflow-wrap:anywhere;
-}
-.empty-title {
-  font-size:27px;
-  letter-spacing:-.7px;
-  margin-top:60px;
-}
-.empty-list {
-  padding:10px 0;
-  color:#718078;
-}
-#notice {
-  padding:13px 30px;
-  background:#fff4d8;
-  border-bottom:1px solid #ebdcae;
-  line-height:1.5;
-}
-.back {
-  display:none;
-}
-.sr-only {
-  position:absolute;
-  width:1px;
-  height:1px;
-  overflow:hidden;
-  clip:rect(0,0,0,0);
-}
-@media(max-width:760px) {
-  header {
-    padding:0 18px;
-    height:60px;
-  }
-  .brand {
-    font-size:19px;
-  }
-  #connection {
-    font-size:10px;
-  }
-  main {
-    display:block;
-  }
-  aside {
-    border-right:0;
-    min-height:calc(100vh - 60px);
-    padding:24px;
-  }
-  article {
-    display:none;
-    padding:25px 24px 50px;
-  }
-  .show-detail aside {
-    display:none;
-  }
-  .show-detail article {
-    display:block;
-  }
-  .back {
-    display:inline-flex;
-    margin-bottom:30px;
-  }
-  .full-path {
-    font-size:11px;
-  }
-  h2 {
-    font-size:29px;
-  }
-  .service {
-    gap:10px;
-  }
-  .request button {
-    margin-left:0;
-  }
-  #notice {
-    padding:12px 18px;
-  }
-}
-@media(prefers-reduced-motion:reduce) {
-  * {
-    transition:none!important;
-  }
-}
+@media (prefers-reduced-motion:reduce) { button,.button { transition:none; } }
 `;
