@@ -27,9 +27,9 @@ test('MCP discovers with no daemon in both protocol eras and returns actionable 
     try {
       await client.connect(transport);
       const { tools } = await client.listTools();
-      assert.equal(tools.length, 12);
+      assert.equal(tools.length, 14);
       assert.deepEqual(tools.filter((tool) => tool.name.startsWith('preview_secrets_')).map((tool) => tool.name).sort(), ['preview_secrets_setup', 'preview_secrets_status']);
-      assert.ok(!tools.some((tool) => /shutdown|approve|permission/.test(tool.name)));
+      assert.ok(!tools.some((tool) => /approve|permission/.test(tool.name)));
       assert.equal(tools.find((tool) => tool.name === 'preview_wait')?.annotations?.readOnlyHint, true);
       assert.equal(tools.find((tool) => tool.name === 'preview_start')?.annotations?.readOnlyHint, false);
       assert.equal(tools.find((tool) => tool.name === 'preview_delete_data')?.annotations?.destructiveHint, true);
@@ -51,13 +51,18 @@ test('MCP discovers with no daemon in both protocol eras and returns actionable 
       assert.match(bindings, /Primary HTTP service only/);
       assert.match(bindings, /native DNS resolution and candidate readiness are not guaranteed/);
       const instructions = client.getInstructions()!;
-      assert.match(instructions.slice(0, 512), /\{port\} and 127\.0\.0\.1/);
+      assert.match(instructions, /fixed owner; do not supply project/);
+      assert.match(instructions.slice(0, 512), /project-root preview\.yml/);
+      assert.match(instructions.slice(0, 512), /Save preview\.yml only on an explicit user request/);
+      assert.match(instructions.slice(0, 512), /request private setup/);
       assert.match(instructions.slice(0, 512), /wait for the returned attempt ID/);
-      assert.match(instructions.slice(0, 512), /cleanup is uncertain.*block conflicting/);
+      assert.match(instructions, /cleanup is uncertain.*block conflicting/);
       const result = await client.callTool({ name: 'preview_list', arguments: {} });
       assert.equal(result.isError, true);
       assert.equal((result.structuredContent as { error: { code: string } }).error.code, 'DAEMON_UNAVAILABLE');
       assert.match(JSON.stringify(result.content), /previewhost serve/);
+      const redirected = await client.callTool({ name: 'preview_list', arguments: { project: directory } });
+      assert.equal(redirected.isError, true); // A fixed endpoint cannot select another project owner.
       assert.equal(stderr, '');
     } finally { await client.close(); }
   }

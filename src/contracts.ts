@@ -23,6 +23,7 @@ export const limits = {
   secretRequests: 8,
   secretResults: 32,
   secretSetupMs: 300_000,
+  secretWaitMs: 25_000,
 } as const;
 
 export const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
@@ -125,12 +126,13 @@ export interface SecretSetupStatus extends SecretSetupContext {
 }
 export interface SecretSetupApi {
   secretsSetup(spec: PreviewSpec, options?: { reopen?: boolean; signal?: AbortSignal }): Promise<SecretSetupStatus>;
-  secretsStatus(id: string): Promise<SecretSetupStatus>;
+  secretsStatus(id: string, options?: WaitOptions): Promise<SecretSetupStatus>;
   secretsEdit(id: string, options?: { signal?: AbortSignal }): Promise<SecretSetupStatus>;
 }
 export const secretRequestSchemas = {
   setup: z.strictObject({ spec: previewSpecSchema, reopen: z.boolean().optional() }),
-  status: z.strictObject({ id: z.uuid() }),
+  status: z.strictObject({ id: z.uuid(), timeoutMs: z.number().int().min(1).max(limits.secretWaitMs).optional()
+    .describe('Wait up to 25000 milliseconds for completion, cancellation, or expiry. Omit for an immediate read. Canceling the wait leaves the private form open.') }),
   edit: z.strictObject({ id: secretIdSchema }),
 };
 export interface ServiceStatus {
@@ -150,6 +152,7 @@ export interface AttemptSummary {
   type: EffectiveSpec['type'];
   state: 'starting' | 'ready' | 'failed' | 'canceled' | 'stopped' | 'cleanup-incomplete';
   startedAt: string;
+  sources: string[];
   readyAt?: string;
   error?: Failure;
   services?: Record<string, ServiceStatus>;
@@ -162,7 +165,7 @@ export interface PreviewStatus {
   candidate?: AttemptSummary;
   latest?: AttemptSummary;
   busy: boolean;
-  cleanup?: Array<{ attemptId: string; error: Failure }>;
+  cleanup?: Array<{ attemptId: string; error: Failure; sources: string[] }>;
   data?: DataStatus;
 }
 export interface PreviewDescription {

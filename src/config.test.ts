@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import test from 'node:test';
-import { loadPreviewSpec, readPreviewSpec } from './config.js';
-import { limits } from './contracts.js';
+import { promisify } from 'node:util';
+import { loadPreviewSpec, readPreviewSpec, savePreviewSpec } from './config.js';
+import { limits, type PreviewSpec } from './contracts.js';
+import { parseSpec } from './spec.js';
 
 test('JSON and YAML files produce the same environment with file-relative repositories and symbolic inputs', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost config '));
@@ -51,6 +55,76 @@ services:
   assert.deepEqual(api.env?.WEB_ORIGIN, { browserUrl: 'web' });
 });
 
+test('explicit saves round-trip all spec kinds without resolving inputs and retain allowed external sources', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'previewhost save ')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const external = join(directory, 'external'); await mkdir(external);
+  const project = join(directory, 'project'); await mkdir(project);
+  const cases: PreviewSpec[] = [
+    { name: 'static', type: 'static', directory: project, spa: true },
+    { name: 'command', type: 'command', cwd: project, command: ['node', 'app.mjs', '--port', '{port}', '#literal'], env: {
+      VALUE: { secret: 'shop/dev/token' }, INPUT: { fromEnv: 'MISSING_INPUT' }, NODE_ENV: 'development',
+    } },
+    { name: 'attached', type: 'attach', url: 'http://127.0.0.1:12345' },
+    { name: 'environment', type: 'environment', primary: 'web', services: {
+      web: { type: 'command', cwd: project, command: ['node', 'app.mjs'], env: { DB: { service: 'database' }, ORIGIN: { browserUrl: 'api' } } },
+      api: { type: 'static', directory: external }, database: { type: 'external-postgres', url: { secret: 'shop/dev/database' } },
+    } },
+  ];
+  for (const spec of cases) {
+    const result = await savePreviewSpec(spec, { projectDirectory: project, allowedRoots: [directory] });
+    assert.equal(result.file, join(project, 'preview.yml'));
+    assert.deepEqual(await loadPreviewSpec(result.file), parseSpec(spec));
+    assert.deepEqual(result.externalSources, spec.type === 'environment' ? [external] : []);
+    assert.ok(!(await readFile(result.file, 'utf8')).includes(project));
+    await rm(result.file);
+  }
+});
+
+test('save rejects invalid graphs, sources and cancellation before publication; failures leave no partial destination', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'previewhost save failure ')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = join(directory, 'source'); await mkdir(source);
+  const spec: PreviewSpec = { name: 'site', type: 'static', directory: source };
+  const options = { projectDirectory: source };
+  await assert.rejects(savePreviewSpec({ ...spec, directory }, options), { code: 'SOURCE_DENIED' });
+  await assert.rejects(savePreviewSpec({ ...spec, directory: join(source, 'missing') }, options), { code: 'INVALID_INPUT' });
+  await symlink(directory, join(source, 'escape'));
+  await assert.rejects(savePreviewSpec({ ...spec, directory: join(source, 'escape') }, options), { code: 'SOURCE_DENIED' });
+  await assert.rejects(savePreviewSpec({ name: 'cycle', type: 'environment', primary: 'web', services: {
+    web: { type: 'command', cwd: source, command: ['false'], env: { URL: { service: 'web' } } },
+  } }, options), { code: 'INVALID_INPUT' });
+  await assert.rejects(savePreviewSpec(spec, { ...options, signal: AbortSignal.abort() }), { code: 'CLOSED' });
+  const link = fs.link;
+  t.mock.method(fs, 'link', async () => { throw new Error('FAKE_private-filesystem-error'); });
+  const { syncBuiltinESMExports } = await import('node:module'); syncBuiltinESMExports();
+  try { await assert.rejects(savePreviewSpec(spec, options), { code: 'INVALID_INPUT', message: /Cannot save preview.yml/ }); }
+  finally { t.mock.method(fs, 'link', link); syncBuiltinESMExports(); }
+  assert.deepEqual(await readdir(source), ['escape']);
+});
+
+test('concurrent saves publish one complete file and preserve existing content, directories and symlink targets', async t => {
+  const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost save race ')));
+  t.after(() => rm(project, { recursive: true, force: true }));
+  const spec: PreviewSpec = { name: 'site', type: 'static', directory: project };
+  const options = { projectDirectory: project };
+  const results = await Promise.allSettled(Array.from({ length: 8 }, () => savePreviewSpec(spec, options)));
+  assert.equal(results.filter(item => item.status === 'fulfilled').length, 1);
+  assert.ok(results.filter(item => item.status === 'rejected').every(item => item.reason.code === 'ALREADY_EXISTS'));
+  const file = join(project, 'preview.yml');
+  assert.deepEqual(await loadPreviewSpec(file), parseSpec(spec));
+  await writeFile(file, '# owner content stays\n');
+  await assert.rejects(savePreviewSpec(spec, options), { code: 'ALREADY_EXISTS' });
+  assert.equal(await readFile(file, 'utf8'), '# owner content stays\n');
+  await rm(file); await mkdir(file);
+  await assert.rejects(savePreviewSpec(spec, options), { code: 'ALREADY_EXISTS' });
+  await rm(file, { recursive: true });
+  const target = join(project, 'target'); await writeFile(target, 'keep'); await symlink(target, file);
+  await assert.rejects(savePreviewSpec(spec, options), { code: 'ALREADY_EXISTS' });
+  assert.equal(await readFile(target, 'utf8'), 'keep');
+  assert.deepEqual((await readdir(project)).sort(), ['preview.yml', 'target']);
+});
+
 test('configuration rejects ambiguous YAML, extra fields, oversized input, and source excerpts in errors', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost unsafe config '));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -92,4 +166,22 @@ test('the file loader preserves legacy relative specs and honors cancellation', 
   const controller = new AbortController(); controller.abort();
   await assert.rejects(loadPreviewSpec(file, { signal: controller.signal }), { code: 'CLOSED' });
   await assert.rejects(loadPreviewSpec(join(directory, 'missing.json')), { code: 'INVALID_INPUT' });
+});
+
+test('file input rejects special files without waiting for a producer and still follows regular-file links', { timeout: 5000, skip: process.platform === 'win32' }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost file input '));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fifo = join(directory, 'preview.yml');
+  await promisify(execFile)('mkfifo', [fifo]);
+  await assert.rejects(loadPreviewSpec(fifo), { code: 'INVALID_INPUT' });
+  await assert.rejects(loadPreviewSpec(directory), { code: 'INVALID_INPUT' });
+  await writeFile(join(directory, 'spec.json'), JSON.stringify({ name: 'site', type: 'static', directory: '.' }));
+  const file = join(directory, 'linked.json'); await symlink(join(directory, 'spec.json'), file);
+  assert.deepEqual(await loadPreviewSpec(file), await loadPreviewSpec(join(directory, 'spec.json')));
+  const scoped = { allowedRoots: [directory] };
+  assert.deepEqual(await loadPreviewSpec(file, scoped), await loadPreviewSpec(file));
+  const restricted = join(directory, 'restricted'); await mkdir(restricted);
+  await symlink(join(directory, 'spec.json'), join(restricted, 'escape.json'));
+  await assert.rejects(loadPreviewSpec(file, { allowedRoots: [restricted] }), { code: 'SOURCE_DENIED' });
+  await assert.rejects(loadPreviewSpec(join(restricted, 'escape.json'), { allowedRoots: [restricted] }), { code: 'SOURCE_DENIED' });
 });

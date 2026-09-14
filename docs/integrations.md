@@ -14,13 +14,14 @@ Linux and Windows remain unverified, including static and attached previews.
 | Interface | Verified behavior | Requirement or limit |
 | --- | --- | --- |
 | ESM library | Static, command, attach, replacement, cancellation, and cleanup | The application owns the runtime lifetime |
-| CLI and daemon | JSON/YAML environments, selected inputs, authentication, and shutdown | Clients require a separate foreground daemon |
+| CLI and daemon | JSON/YAML environments, selected inputs, authentication, and shutdown | Automatic project owner, or explicit foreground connection |
 | MCP SDK | Environment lifecycle, secret setup/status, discovery, and tool errors | Client approval behavior requires a separate host check |
 | Coding-task worktrees | Live edits, replacement, data retention, and source preservation | The host prepares and removes source directories |
 | Task Monki | HTTP attachment, approval, readiness, replacement, and independent stop | Embedded runtime and browser UI integration remain unverified |
 
 The MCP client, framework, browser, and Task Monki sections below record checks under the former package name, `previewd`.
-Full preview workflows with the renamed package remain untested in those MCP hosts.
+The September 13 checks below cover the renamed package's automatic-owner flow in Codex, Claude Code and Cursor.
+Older host results do not establish that flow.
 Agent skill checks identify their tested package separately.
 The configuration examples use the public `previewhost` executable from PATH.
 The earlier host checks used an absolute Node executable and installed CLI path.
@@ -36,8 +37,8 @@ Preview stop left those containers and their data under their original owner.
 ## Agent skill
 
 Use the [README installation and usage steps](../README.md#use-the-agent-skill).
-The repository is private. Remote skill installation requires existing authenticated GitHub access.
-A public npm installation does not grant that access.
+The npm package includes `dist/skills/previewhost/SKILL.md` and materialized references. An agent can read them directly without installing a skill or accessing the repository.
+Repository-based discovery installation remains optional.
 The repository contains one `skills/previewhost/SKILL.md` entrypoint for preview operation and recipe creation.
 Its references link to the maintained documentation and examples. Agents read these documents only when the task needs them.
 
@@ -83,7 +84,7 @@ Skill installation does not install previewhost, start its daemon, configure MCP
 
 ## Connect an MCP client
 
-Follow the [README MCP quick start](../README.md#use-mcp) to install previewhost, create the frontend and backend, and start the daemon.
+Follow the [README MCP quick start](../README.md#use-mcp) to install previewhost and select the project. The registration supplies authority for automatic owner startup.
 Use the client configuration below for your host.
 Each example starts the adapter with `previewhost` from PATH.
 previewhost 0.1.0-alpha.0 passed static and README frontend/backend workflows through the CLI and MCP protocol.
@@ -96,8 +97,9 @@ Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.
 
-Discovery exposes twelve `preview_*` tools without a daemon. Tool operations
-require the daemon. A client disconnect leaves daemon previews active.
+Discovery exposes 14 `preview_*` tools without an owner. Inspection works offline.
+Start/replace and secret setup can start the project owner; read/status/cleanup tools never do.
+A client disconnect leaves owner previews active.
 Development servers require daemon execution permission through `--allow-exec`.
 Client approval does not grant that permission.
 
@@ -108,8 +110,21 @@ Add this server to your [Codex MCP configuration](https://developers.openai.com/
 ```toml
 [mcp_servers.previewhost]
 command = "previewhost"
-args = ["mcp"]
+args = ["mcp", "--project", "/absolute/project", "--allow-exec"]
 ```
+
+### September 13 automatic-owner check
+
+Codex CLI 0.146.0 passed a live model workflow against this branch's built CLI, using temporary invocation overrides and no saved configuration changes.
+The project had no YAML or installed Previewhost skill. The agent read the application, prepared a spec, requested private setup, waited for public completion, started the application and verified `/health`.
+The test harness performed the owner-only approval and entry with a disposable Keychain and fake value. No value or private capability appeared in the agent transcript, and no configuration file was created.
+The first name failed the existing lowercase-name rule; the agent corrected it. A pre-start `get` returned `NOT_FOUND` and the agent continued normally.
+This was not a zero-error transcript or a manual human approval usability study.
+
+Separate Chrome checks exercised the private approval, entry, completion, cancellation and unavailable-link screens at desktop and mobile sizes.
+Separate SDK/CLI checks exercised automatic owner sharing, concurrency, worktree roots, disconnection and restart.
+The live check preapproved this disposable server's tools. It did not retest every host approval policy below or the desktop registration UI.
+Use an explicit project path until the selected host's launch context has been verified.
 
 ### MCP approvals
 
@@ -141,7 +156,7 @@ features.guardian_approval = true
 features.tool_call_mcp_elicitation = true
 [mcp_servers.previewhost]
 command = "previewhost"
-args = ["mcp"]
+args = ["mcp", "--project", "/absolute/project", "--allow-exec"]
 
 [mcp_servers.previewhost.tools.preview_start]
 approval_mode = "prompt"
@@ -177,24 +192,117 @@ This test access restriction does not establish a previewhost defect.
 
 ## Cursor and other MCP hosts
 
-In Cursor, add this server to the project's `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "previewhost": {
-      "command": "previewhost",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+In Cursor, use the [global registration in the README](../README.md#use-mcp).
+It authorizes repository roots once. Each chat supplies its worktree through the tool's `project` field.
+A fixed `--project` remains a default for clients that serve one project.
 
 Use the host's approval controls to enable the server and its tools.
 Other stdio MCP hosts can use these executable arguments.
 Unlisted clients and models remain unverified.
 
 ### Cursor IDE
+
+#### Global registration and Cursor worktrees
+
+Cursor 3.20.21 passed the shared-connection routing check on September 14.
+Two actual chats in one Agents window used Cursor-managed Git worktrees of the same disposable repository.
+The visible model was Grok Bot, with High effort for Amber and Low for Violet.
+One global MCP registration authorized the repository through `--root`; neither worktree had a manual MCP registration.
+
+Cursor documents [global registration and workspace interpolation](https://cursor.com/docs/mcp), plus [managed worktrees](https://cursor.com/docs/configuration/worktrees).
+These features do not establish that each chat gets a separate MCP process.
+In this check, both chats sent tool calls to one process launched from the user's home directory.
+The old connection-wide project selection therefore read the wrong root YAML and routed equal preview names to the same owner.
+An absolute source path in a spec did not change that owner selection.
+
+Using `--project ${workspaceFolder}` did not reliably repair the global Agents path in this client.
+Some launches resolved the placeholder, while others passed it literally.
+The supported setup uses one authorized repository root and the tool's required `project` argument on every call.
+Both agents supplied their own checkout paths, including on later turns, through the same MCP process.
+A first call without the newly required field failed; the agent corrected it without configuration coaching.
+
+Each chat received an ordinary heading/color prompt, followed by a distinct subtitle prompt.
+Both full applications ran simultaneously with separate frontend, backend, PostgreSQL, source paths, and private data directories.
+Brave 153.1.95.101 showed only the corresponding worktree's edits and database note at each returned URL.
+Both worktrees explicitly referenced one fake Keychain entry. Each owner required private approval; only the first needed value entry.
+The agents diagnosed missing dependencies from startup failures and installed them in their own worktrees.
+Stopping either preview closed its URL while the other remained usable with the same ready attempt.
+Both restarted with their own saved notes and new public ports.
+Amber's first restart failed because the disposable Keychain was locked. Unlocking that store and an ordinary retry restored it.
+
+Reloading the Agents window retained the same MCP process.
+After a deliberate, graceful MCP process stop, Cursor offered an **Authenticate** action for the existing server.
+That action launched a new process from the refreshed local installation; both chats then used it successfully without registration changes.
+Both preview owners and their exact ready attempts survived. This client recovery required a click; it was not automatic reconnection.
+
+The check used a fresh local `previewhost@0.1.0-alpha.1` package with Node 22.23.1.
+Installed JavaScript and declaration files were compared with the local build; the unchanged package version alone was not treated as proof.
+A test-only preload selected Brave and a disposable native Keychain. Personal secrets were not used.
+A metadata-only trace recorded MCP process IDs and submitted paths, excluding values, results, and private form capabilities.
+An initial trace-wrapper bug was corrected before interpreting successful tool calls; early connection errors were not counted as product evidence.
+
+Separate automated tests exercised two Git worktrees over one real stdio connection with managed PostgreSQL.
+They covered concurrent startup, equal names, independent owners/data, cross-project attempt IDs, stale Git entries, denied roots, and stop/restart isolation.
+These are automated runtime checks, not additional Cursor model turns.
+The broad suite passed 112 tests with zero skips. The final focused run passed nine tests.
+A clean tarball consumer passed, and HTTP contract tests passed against both running full stacks, including database create/read/update/delete operations.
+Final review corrected the instructions for fixed-endpoint connections; focused automated checks passed afterward.
+The last Cursor refresh initially stopped at a locked Mac. A resumed check later that day completed verification of commit `64f9dad`.
+
+After a host restart, the temporary installation, repository metadata, and disposable Keychain were absent.
+The old worktree files and database data were preserved. Two fresh Cursor-managed worktrees used a durable disposable fixture and fresh local package installation.
+Only the existing global registration's fixture paths changed; no per-worktree registrations were added.
+Both chats used the same MCP process for full-stack startup, private setup, distinct edits, replacement, and independent stop/restart.
+Brave verified both returned URL forms and separate database notes before and after restart.
+One private fake-value entry served both owners after separate approvals.
+After deliberate MCP process loss, Cursor's **Authenticate** action restored both chats through one new process.
+Both exact ready attempts survived reconnection. The final code needed no further changes.
+This resumed run passed nine focused tests, the clean package-consumer checks, and two HTTP contract tests against the actual running stacks.
+The earlier 112-test suite was not repeated during this resumed check.
+
+The agent must know its checkout path. Previewhost cannot infer chat identity from a shared connection.
+Authorization is configured once per repository or source root; new unrelated repositories still require explicit authorization.
+Linked worktrees inherit repository source authority, but execution permission and owner-specific secret approval remain separate.
+No chat registry, Cursor-specific runtime, or dashboard was added.
+
+#### Earlier Cursor IDE checks
+
+Cursor IDE 3.20.7 (Auto) passed a fresh full-stack check on September 13.
+The project was an isolated copy of `previewhost-test-frontend` in `previewhost-test-lab`, with its sibling backend and managed PostgreSQL.
+The agent read all three repositories, installed application dependencies, and prepared service bindings and source paths.
+The project server exposed 14 tools through **Customize > MCPs**. Existing **Allow all** settings produced no per-call prompts.
+
+The check installed a newly packed local `previewhost@0.1.0-alpha.1` tarball in a clean directory.
+Every installed JavaScript and declaration file matched the current build byte for byte.
+The registration used absolute Node and installed CLI paths, so the same version number on npm was not used as evidence of build identity.
+
+| Actual IDE scenario | Result |
+| --- | --- |
+| No YAML | Direct spec started PostgreSQL, backend and frontend; no YAML was created. |
+| Private setup | Missing fake value, delayed entry, public completion and continuation after the agent ended its turn passed. |
+| Configuration | Explicit save, default root-file reuse, malformed-file errors, restoration and create-only save collision passed. Invalid input preserved the active preview. |
+| Owner lifecycle | Stop/restart and owner shutdown/restart retained notes. Cold list did not launch an owner. New approval reused the existing value without entry. |
+| Client reconnection | Workspace reload preserved the owner, URL and exact ready attempt. |
+| Real Git worktrees | Two new worktrees ran full environments with separate data directories. One reused the exact shared secret; the other used a distinct privately entered value. Neither created YAML. |
+| Cancellation | Cancel after name approval left the value missing. A fresh request completed, then the agent started the distinct worktree. |
+| Failed replacement | A missing frontend entrypoint failed with `START_FAILED`. Bounded logs diagnosed it. The active attempt survived, and a valid replacement kept the URL. |
+
+Brave 153.1.95.101 opened the returned hostname and numeric URLs for all three environments.
+Browser checks wrote separate PostgreSQL notes and verified persistence after restart and replacement.
+Separate HTTP contract tests exercised create, read, update, delete and repeated-delete behavior against each running full stack.
+
+Changing an initial registration exposed a Cursor connection problem: the UI showed connected tools while agent calls timed out.
+A new server name after workspace reload restored actual tool calls. Later worktree registrations and ordinary reconnection succeeded.
+This is an observed client workaround, not a Previewhost transport fix or a guarantee for every Cursor version.
+
+Both client checks used a disposable native Keychain fixture and fake values.
+A test-only preload redirected Keychain calls to that store and selected Brave for the native browser opener.
+The preload reached detached owners through `NODE_OPTIONS`; passing only Node `--import` arguments did not reach them because owners clear `execArgv`.
+MCP handlers, authorization, private HTTP routes and application startup were unchanged.
+No values or private capabilities were captured in screenshots.
+The fresh automated run passed 111 tests with zero skips; focused tests, TypeScript checks and a clean tarball consumer also passed.
+
+Earlier check:
 
 Cursor IDE 3.19.14 with Composer 2.5 Fast passed standalone-command and API/web
 workflows through model-driven inspect, start, wait, and stop calls.
@@ -227,6 +335,31 @@ From the project directory, start Claude Code with that file:
 claude --mcp-config ./previewhost.mcp.json --strict-mcp-config --model sonnet --effort low --permission-mode manual
 ```
 
+Claude Code 2.1.270 passed a fresh full-stack check on September 13, using a separate installation of the same local tarball described above.
+The actual terminal client ran inside Cursor's integrated terminal because Computer blocked Terminal.app access.
+It displayed Sonnet 5 and used manual per-call approval, project-only settings and an explicit fresh MCP registration with 14 tools.
+
+The agent inspected the frontend, backend and database repositories, installed dependencies, and prepared a direct three-service spec without YAML.
+An initial unapproved secret reference failed with `SECRET_DENIED` before startup.
+Private cancellation, a fresh request, delayed fake-value entry and continuation after the agent ended its turn passed.
+The agent observed public completion and started the complete PostgreSQL/backend/frontend environment.
+
+Explicit YAML saving and default-file restart passed. Both inspect and start rejected malformed root YAML without an inline fallback.
+Restoring the exact valid file made inspection succeed; the parse failures preserved the running attempt.
+Stop/restart and owner shutdown/restart retained the database note.
+Cold list did not start an owner. Fresh private approval reused the stored value without another entry field.
+
+Brave opened both returned URL forms and created and edited a database note.
+The application stayed reachable after a real Claude exit. After resume, the agent confirmed the exact same ready attempt and URLs through MCP.
+A separate HTTP contract test passed against this running full stack.
+The additional shared/distinct worktree and failed-replacement scenarios were driven by Cursor, not repeated in Claude.
+
+The earlier locked-store check motivated the current instruction that partial setup results require a fresh request.
+The fresh build includes that wording, but this fresh Claude run did not reproduce a partial write.
+Automated native-store tests covered locked, partial and unknown outcomes separately.
+
+Earlier check:
+
 Claude Code 2.1.239 passed both standalone-command and API/web workflows in its
 interactive terminal. Sonnet with low effort was available.
 The client displayed **Sonnet 5 with low effort** and recorded `claude-sonnet-5`.
@@ -238,7 +371,7 @@ the URLs passed to the applications. Stop and client exit released the applicati
 process, and listeners. The separate daemon also shut down.
 
 These checks used Node.js 22.23.1 and installed `previewd@0.1.0`.
-Other models, permission modes, databases, and secret workflows remain unverified.
+Other models and permission modes remain unverified. Database and secret checks for 2.1.270 are recorded above.
 See [Claude Code model configuration](https://code.claude.com/docs/en/model-config).
 
 ## OpenCode

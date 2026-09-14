@@ -5,9 +5,9 @@ export const secretsPage = `<!doctype html>
 <body><main><p class="brand">previewhost</p><h1 id="title">Private secret setup</h1>
 <p id="message" role="status" aria-live="polite">Loading this request…</p>
 <dl id="context"></dl><form id="form" hidden autocomplete="off"><div id="fields"></div>
-<label class="reveal"><input type="checkbox" id="reveal"> Show values</label>
-<p>Save stores these entries in macOS Keychain. It does not start an application.</p>
-<div class="actions"><button type="submit">Save</button><button type="button" id="cancel">Cancel</button></div></form>
+<label class="reveal" id="reveal-label"><input type="checkbox" id="reveal"> Show values</label>
+<p id="scope"></p>
+<div class="actions"><button type="submit" id="submit">Save to Keychain</button><button type="button" id="cancel">Cancel</button></div></form>
 <p id="result" tabindex="-1"></p></main></body></html>`;
 
 export const secretsStyle = `:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;color:light-dark(#202420,#ebeee9);background:light-dark(#f6f7f3,#181b19)}
@@ -24,6 +24,7 @@ export const secretsScript = `'use strict';
   const fields = document.getElementById('fields');
   const message = document.getElementById('message');
   const result = document.getElementById('result');
+  let needsApproval = false;
   const controls = () => form.querySelectorAll('button,textarea,input');
   const clear = () => { fields.querySelectorAll('textarea').forEach(field => { field.value = ''; }); };
   async function call(route, body) {
@@ -34,6 +35,14 @@ export const secretsScript = `'use strict';
     return data.result;
   }
   function finish(text) { clear(); capability = ''; form.hidden = true; result.textContent = text; result.focus(); }
+  function completion(request) {
+    message.textContent = request.state === 'complete' ? 'Secret setup complete' : 'Some entries still need attention';
+    const saved = request.saved.length ? 'Saved: ' + request.saved.join(', ') + '. ' : '';
+    const reused = request.alreadyPresent.length ? 'Reused existing entries: ' + request.alreadyPresent.join(', ') + '. Those values were kept; any input for them was not applied. ' : '';
+    finish(saved + reused + (request.state === 'complete' ?
+      'No application was started. If your agent stopped waiting, return to it and send “Secrets saved—continue”.' :
+      (request.error?.message || 'The request did not finish.') + ' Earlier approvals and saved values remain. Open a new setup request to recheck: ' + request.remaining.join(', ')));
+  }
   function describe(label, value) {
     const term = document.createElement('dt'); term.textContent = label;
     const detail = document.createElement('dd'); detail.textContent = value;
@@ -42,11 +51,19 @@ export const secretsScript = `'use strict';
   document.getElementById('reveal').addEventListener('change', event => form.classList.toggle('show', event.target.checked));
   document.getElementById('cancel').addEventListener('click', async () => {
     controls().forEach(control => { control.disabled = true; });
-    try { await call('cancel', {}); finish('Canceled. Nothing was started.'); }
+    try { await call('cancel', {}); finish('Canceled. No application was started. Earlier approvals and saved values remain.'); }
     catch (error) { finish(error.message); }
   });
   form.addEventListener('submit', async event => {
     event.preventDefault();
+    if (needsApproval) {
+      controls().forEach(control => { control.disabled = true; }); message.textContent = 'Allowing the requested names…';
+      try {
+        const approved = await call('approve', {});
+        if (approved.state === 'pending') render(approved); else completion(approved);
+      } catch (error) { finish(error.message + ' Check setup status before retrying.'); }
+      return;
+    }
     const values = Object.create(null);
     for (const field of fields.querySelectorAll('textarea')) {
       const value = field.value;
@@ -58,36 +75,49 @@ export const secretsScript = `'use strict';
     controls().forEach(control => { control.disabled = true; }); message.textContent = 'Saving…';
     try {
       const saved = await call('save', { values });
-      message.textContent = saved.state === 'complete' ? 'Saved' : 'Some entries still need attention';
-      finish(saved.state === 'complete' ? 'You can return to your client and retry the preview.' :
-        (saved.error?.message || 'The save did not finish.') + ' Open a new setup request to check: ' + saved.remaining.join(', '));
+      completion(saved);
     } catch (error) {
       message.textContent = 'Check the save result in your client';
       finish('The response was lost or rejected. A write may have completed. Check secret setup status before retrying. ' + error.message);
     } finally { for (const id of Object.keys(values)) delete values[id]; }
   });
   window.addEventListener('pagehide', () => { clear(); capability = ''; });
-  (async () => {
-    if (!/^[a-f0-9]{64}$/.test(capability)) throw new Error('This private link is unavailable. Open a new secret setup request from your client.');
-    const request = await call('form', {});
-    document.getElementById('title').textContent = request.mode === 'edit' ? 'Replace a stored secret' : 'Add missing secrets';
-    message.textContent = request.mode === 'edit' ? 'Replacement affects all future readers of this exact secret name. Existing values are never shown.' :
-      'Only missing entries are added. An entry created elsewhere while this form is open keeps its value.';
-    describe('Daemon', location.origin);
+  function render(request) {
+    clear(); fields.replaceChildren(); document.getElementById('context').replaceChildren();
+    needsApproval = request.requirements.some(item => !item.selected);
+    document.getElementById('title').textContent = needsApproval ? 'Allow these secret names?' : request.mode === 'edit' ? 'Replace a stored secret' : 'Add missing secrets';
+    message.textContent = needsApproval ? 'These exact Keychain names are shared across projects that select them. Existing values will be reused, never shown or overwritten.' :
+      request.mode === 'edit' ? 'Replacement affects all future readers of this exact secret name. Existing values are never shown.' :
+      'Enter only the missing values below. An entry created elsewhere while this form is open keeps its value.';
+    document.getElementById('scope').textContent = needsApproval ?
+      'Allow this runtime to use these names until it shuts down. Any execution-authorized preview on this runtime can bind an allowed name. This does not start an application.' :
+      'Save stores values in macOS Keychain without starting an application. Earlier access approvals last until this runtime shuts down.';
+    document.getElementById('submit').textContent = needsApproval ? 'Allow names' : 'Save to Keychain';
+    document.getElementById('reveal-label').hidden = needsApproval;
+    describe('Runtime', location.origin);
     if (request.name) describe('Preview', request.name);
     for (const source of request.sources) describe('Source directory', source);
     describe('Expires', new Date(request.expiresAt).toLocaleTimeString());
     for (const id of request.remaining) {
       const requirement = request.requirements.find(item => item.id === id);
       const wrapper = document.createElement('div'); wrapper.className = 'field';
-      const label = document.createElement('label'); const field = document.createElement('textarea');
-      field.id = 'secret-' + fields.children.length; field.dataset.id = id; field.required = true; field.spellcheck = false;
-      field.autocomplete = 'off'; field.autocapitalize = 'off'; field.setAttribute('autocorrect', 'off');
-      label.htmlFor = field.id; label.textContent = id;
+      const label = document.createElement(needsApproval ? 'strong' : 'label'); label.textContent = id;
       const recipients = document.createElement('span'); recipients.className = 'recipient';
       recipients.textContent = requirement.bindings.length ? 'Used here by: ' + requirement.bindings.map(item => (item.service ? item.service + ' · ' : '') + item.key).join(', ') : 'Shared entry; recipients depend on future requests.';
-      wrapper.append(label, recipients, field); fields.append(wrapper);
+      wrapper.append(label, recipients);
+      if (!needsApproval) {
+        const field = document.createElement('textarea');
+        field.id = 'secret-' + fields.children.length; field.dataset.id = id; field.required = true; field.spellcheck = false;
+        field.autocomplete = 'off'; field.autocapitalize = 'off'; field.setAttribute('autocorrect', 'off');
+        label.htmlFor = field.id; wrapper.append(field);
+      }
+      fields.append(wrapper);
     }
+    controls().forEach(control => { control.disabled = false; });
     form.hidden = false; fields.querySelector('textarea')?.focus();
+  }
+  (async () => {
+    if (!/^[a-f0-9]{64}$/.test(capability)) throw new Error('This private link is unavailable. Open a new secret setup request from your client.');
+    render(await call('form', {}));
   })().catch(error => { message.textContent = error.message; capability = ''; });
 })();`;

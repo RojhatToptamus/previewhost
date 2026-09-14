@@ -11,6 +11,7 @@ import { checkTokenDirectory, defaultTokenFile, readToken } from './client.js';
 import { failure, PreviewError } from './errors.js';
 import { SecretSetup } from './secrets-setup.js';
 import { secretsPage, secretsScript, secretsStyle } from './secrets-page.js';
+import type { ProjectOwnerInfo } from './project.js';
 
 async function createToken(path: string, runtime: PreviewRuntime): Promise<string> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -60,8 +61,8 @@ function readBody(req: IncomingMessage, signal: AbortSignal): Promise<unknown> {
   });
 }
 
-/** Starts an explicit foreground control listener around the supplied runtime. */
-export async function startDaemon(options: { runtime: PreviewRuntime; port?: number; tokenFile?: string }): Promise<{
+/** Starts an authenticated control listener around the supplied runtime. */
+export async function startDaemon(options: { runtime: PreviewRuntime; port?: number; tokenFile?: string; owner?: ProjectOwnerInfo }): Promise<{
   endpoint: string; closed: Promise<void>; close(): Promise<void>;
 }> {
   const port = options.port ?? 9400;
@@ -154,7 +155,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       case 'stop': { const p = parse(requestSchemas.stop, value); return runtime.stop(p.name, { afterEngineRestart: p.afterEngineRestart }); }
       case 'deleteData': return runtime.deleteData(parse(requestSchemas.deleteData, value).name);
       case 'secrets/setup': { const p = parse(secretRequestSchemas.setup, value); return secrets.setup(p.spec, signal, p.reopen); }
-      case 'secrets/status': return secrets.status(parse(secretRequestSchemas.status, value).id);
+      case 'secrets/status': { const p = parse(secretRequestSchemas.status, value); return secrets.wait(p.id, { timeoutMs: p.timeoutMs, signal }); }
       case 'secrets/edit': return secrets.setup(parse(secretRequestSchemas.edit, value).id, signal);
       default: throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
     }
@@ -182,7 +183,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       if (req.headers.host !== authority || headerCount('host') !== 1) {
         throw new PreviewError('UNAUTHORIZED', 'Requests require the exact numeric loopback Host.');
       }
-      const browser = ['/secrets/form', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
+      const browser = ['/secrets/form', '/secrets/approve', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
       const asset = req.url === '/secrets' ? [secretsPage, 'text/html'] : req.url === '/secrets.js' ? [secretsScript, 'text/javascript'] :
         req.url === '/secrets.css' ? [secretsStyle, 'text/css'] : undefined;
       if (asset && req.method === 'GET') {
@@ -206,21 +207,25 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         throw new PreviewError('INVALID_INPUT', 'Use POST with Content-Type: application/json.');
       }
       const method = req.url?.slice(1) ?? '';
-      if (!Object.hasOwn(requestSchemas, method) && !['secrets/setup', 'secrets/status', 'secrets/edit'].includes(method) && !browser && method !== 'shutdown') throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
+      if (!Object.hasOwn(requestSchemas, method) && !['secrets/setup', 'secrets/status', 'secrets/edit', 'info', 'shutdown'].includes(method) && !browser) throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
       const cleanup = ['stop', 'cancel', 'shutdown'].includes(method);
-      if (active >= limits.controlRequests - (cleanup ? 0 : 2) || (method === 'wait' && waits >= limits.controlWaits)) {
+      const waiting = method === 'wait' || method === 'secrets/status';
+      if (active >= limits.controlRequests - (cleanup ? 0 : 2) || (waiting && waits >= limits.controlWaits)) {
         throw new PreviewError('BUSY', 'Control request capacity is full; stop and cancel retain reserved capacity.');
       }
       active++; counted = true;
-      if (method === 'wait') { waits++; countedWait = true; }
+      if (waiting) { waits++; countedWait = true; }
       requests.add(controller);
       if (Number(req.headers['content-length']) > limits.controlBytes) throw new PreviewError('INVALID_INPUT', 'The control request exceeds 1 MiB.');
       const value = await readBody(req, controller.signal);
       if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The control request was closed.');
       if (browser) {
         const result = method === 'secrets/save' ? await secrets.save(supplied, value) : (parse(requestSchemas.list, value),
-          method === 'secrets/cancel' ? secrets.cancel(supplied) : secrets.form(supplied));
+          method === 'secrets/cancel' ? secrets.cancel(supplied) : method === 'secrets/approve' ? await secrets.approve(supplied) : secrets.form(supplied));
         send(res, 200, { result });
+      } else if (method === 'info') {
+        parse(requestSchemas.list, value);
+        send(res, 200, { result: options.owner ?? null });
       } else if (method === 'shutdown') {
         parse(requestSchemas.list, value);
         try { await stopRuntime(); send(res, 200, { result: null }); }

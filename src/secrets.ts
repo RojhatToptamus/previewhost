@@ -41,7 +41,7 @@ export function secretRequirements(spec: EffectiveSpec, selected: ReadonlySet<st
 
 export function requireSelected(requirements: SecretRequirement[]): void {
   if (requirements.some((item) => !item.selected)) {
-    throw new PreviewError('SECRET_DENIED', 'The daemon owner must select the required secret names with --secret.', { requirements });
+    throw new PreviewError('SECRET_DENIED', 'Open private secret setup so the owner can approve these exact names, or select them at owner startup with --secret.', { requirements });
   }
 }
 

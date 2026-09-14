@@ -6,11 +6,18 @@ The daemon owns the preview's application processes, routes, and managed databas
 
 ## Select the task and its source
 
-1. Use the task's existing frontend and backend paths.
-2. Choose one preview name from the host's stable task identity.
-3. Retain the submitted service paths and preview name in the host's task context.
-4. Read the project commands and the selected environment file.
-5. Check each service path and its command entrypoint.
+1. Supply the task's actual checkout root as `project` on every automatic MCP call.
+2. Use the task's existing frontend and backend paths.
+3. Choose one preview name from the host's stable task identity.
+4. Retain the submitted service paths and preview name in the host's task context.
+5. Read the project commands and the selected environment file.
+6. Check each service path and its command entrypoint.
+
+One global MCP registration can authorize a repository and its registered Git worktrees through `--root`.
+The agent supplies `project`; the user does not register each worktree or change the registration between chats.
+A new chat does not imply a new MCP connection. No operation relies on the previously selected project.
+With `--docker-socket` and no `--data-dir`, each automatic owner uses separate private data storage.
+See the [actual Cursor check](integrations.md#global-registration-and-cursor-worktrees).
 
 Branches do not need matching names. One repository can supply several services.
 Paths in a configuration file resolve relative to that file.
@@ -26,7 +33,8 @@ Replace both `/absolute/...` paths with your source parent and private data dire
 Keep the data directory outside any task directory that the host can remove.
 Managed databases also require the [database prerequisites](../examples/multi-repo/README.md#install-the-dependencies).
 
-In a separate terminal, start the daemon:
+Normal automatic mode gives each canonical worktree root a separate owner. Use `--project` when launch context is uncertain.
+For an explicitly shared owner across the task worktrees, this optional manual example starts a foreground daemon:
 
 ```sh
 previewhost serve --root /absolute/task-worktrees --allow-exec \
@@ -37,6 +45,8 @@ previewhost serve --root /absolute/task-worktrees --allow-exec \
 `./node_modules/.bin/previewhost` from the application directory.
 `--allow-exec` permits ordinary execution as your user, without a sandbox.
 Multiple tasks can share this daemon with different preview names.
+For this manual example, append `--endpoint http://127.0.0.1:9400` to every CLI client command below, and pass that endpoint in the MCP registration.
+Bare client commands use automatic project mode instead.
 
 From the coding host, complete these steps:
 
@@ -140,9 +150,8 @@ Daemon access and native execution provide no security isolation between tasks.
 3. Resolve external preparation and the host's other source users.
 4. After every process that uses the directory stops, remove or move it through the host.
 
-Current `get` and `list` responses omit source paths.
-The host must remember which directories each submitted spec uses until every
-related process stops. An edited configuration can omit paths from older attempts.
+Current `get` and `list` responses include `sources` on active, candidate and latest attempts, and on incomplete cleanup records.
+Paths become canonical after source validation. Check the actual consuming attempts until every related process stops. An edited configuration can omit paths from older attempts.
 If the host cannot identify those directories or processes, keep the source and do not retry setup.
 
 A wait timeout leaves startup active. Cancel requires the exact candidate ID
@@ -166,3 +175,10 @@ previewhost delete-data task-notes-42
 Attached services remain under their original owner.
 After all tasks finish with the daemon, run `previewhost shutdown`.
 See [recovery limits](security.md#recovery) before source removal after a crash.
+
+## Secret names across worktrees
+
+The same exact `{secret: ID}` uses one Keychain value wherever that name is approved.
+Each automatic worktree owner needs its own private approval, unless the name was explicitly selected at launch.
+Existing values are reused; the form collects only missing values. For a different worktree value, choose a different qualified ID and change that binding explicitly.
+Do not overwrite the shared entry or introduce a hidden worktree-specific copy. YAML remains optional.

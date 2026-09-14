@@ -3,7 +3,7 @@
 ## Runtime and client
 
 The ESM package exports `createPreviewRuntime`, `connectPreviewDaemon`,
-`loadPreviewSpec`, `PreviewError`, and public TypeScript types. The runtime and
+`loadPreviewSpec`, `savePreviewSpec`, `PreviewError`, and public TypeScript types. The runtime and
 daemon client implement `PreviewApi`.
 
 These configuration fragments assume imports from `previewhost`.
@@ -53,7 +53,7 @@ cannot restart a canceled attempt. Source files can change while approval is pen
 
 `runtime.close()` stops all owned previews and prevents new work. `client.close()`
 only closes client requests. `client.shutdown()` explicitly stops the daemon.
-The MCP interface does not expose daemon shutdown.
+MCP exposes the same owner-wide operation as `preview_shutdown`.
 
 ## Specs
 
@@ -63,8 +63,8 @@ The `active` field identifies the attempt that serves requests.
 During replacement, both can exist under the same preview name.
 
 The fragments below describe each spec type.
-For CLI use, save one complete spec in your application directory.
-Start the daemon separately.
+CLI accepts JSON stdin or an explicit JSON/YAML file. Root `preview.yml` is the optional default.
+MCP accepts a direct spec or a file and starts a project owner when needed.
 See [CLI commands](#cli) for startup, status, and cleanup.
 
 Names match `[a-z][a-z0-9-]{0,47}`. Unknown fields are errors. Library and MCP source
@@ -76,7 +76,8 @@ const spec = await loadPreviewSpec('/absolute/project/preview.yaml', { signal })
 const description = await runtime.inspect(spec);
 ```
 
-`loadPreviewSpec` accepts one UTF-8 file of at most 1 MiB. `.yaml` and `.yml`
+`loadPreviewSpec` accepts one regular UTF-8 file of at most 1 MiB. Pipes belong on JSON stdin.
+Its optional `allowedRoots` constrains the resolved file target, including symlinks. `.yaml` and `.yml`
 files use YAML 1.2. Other file names use JSON. YAML aliases, tags, merge keys,
 duplicate keys, and multiple documents are errors. The loader never runs code
 or loads `.env` files. Source authorization still occurs in the runtime.
@@ -296,16 +297,19 @@ Successful commands exit 0. Errors exit nonzero. An interrupted client exits 130
 
 `start` and `replace` wait by default. `--no-wait` returns the starting status.
 `--timeout-ms` controls this wait, separately from the spec readiness timeout.
+When this budget expires, start/replace reads the current attempt and returns its state, including `starting`, with exit 0.
+Continue waiting for that ID. A real failed attempt remains an error.
 An error after a successful start request includes the name and attempt ID.
 `wait` returns a terminal outcome as JSON, including failed outcomes.
 
-The command examples below assume a spec named `app` in `preview.json` and an active daemon.
+The command examples below assume a spec named `app` in `preview.json`.
+Cold command startup requires `--allow-exec`; static previews need no execution grant.
 They show separate operations. `ATTEMPT_ID` is the candidate ID from start or status.
 Use `./node_modules/.bin/previewhost` for a local installation without `previewhost` on PATH.
 
 ```sh
 previewhost inspect --file preview.json
-previewhost start --file preview.json --no-wait
+previewhost start --file preview.json --allow-exec --no-wait
 previewhost wait app ATTEMPT_ID --timeout-ms 30000
 previewhost replace --file preview.json
 previewhost get app
@@ -319,8 +323,22 @@ previewhost shutdown
 `shop` represents a stopped environment with managed data.
 `delete-data` permanently removes that data. `shutdown` closes the daemon and its previews.
 
-All client commands accept `--endpoint` and `--token-file`. Their defaults are
-`http://127.0.0.1:9400` and `~/.local/share/previewd/token`.
+CLI commands default to the current canonical Git worktree root, or cwd outside Git.
+Automatic MCP tools select the `project` supplied with each call.
+`--project DIR` selects another project. Each project has one persistent owner with a dynamic loopback port.
+Start, replace, and secret setup/edit can start it. Read/status/cleanup commands never create an owner.
+Inspection validates offline before an owner exists. It does not open managed storage or resolve Keychain values.
+MCP discovery needs no owner or skill installation.
+
+`mcp`, `inspect`, `start`, `replace`, and `secrets setup/edit` accept `--root`, `--allow-exec`, `--env`, `--secret`, `--data-dir`, and `--docker-socket`.
+The default source root is the selected project. Existing owner settings are reused when flags are omitted.
+Incompatible explicit settings report an error without reconfiguring or terminating the owner.
+Selected input values are captured at startup; restarting the owner is required to refresh them.
+
+An explicit `--endpoint` or `--token-file` selects connection-only mode.
+That mode uses `http://127.0.0.1:9400` and `~/.local/share/previewd/token` for any omitted connection value.
+It accepts no launch-permission flags and never starts an owner.
+`--version` prints the installed package version.
 `serve` accepts repeated `--root`, repeated `--env`, repeated `--secret`, `--data-dir`,
 `--docker-socket`, `--allow-exec`, `--port`, and `--token-file`.
 Its default root is the current directory. Port `0` selects an available control
@@ -328,26 +346,33 @@ port, which the startup JSON reports.
 
 `--env NAME` selects the current value once at owner startup. Missing selected
 keys are errors. Startup JSON reports selected key names without their values.
-`--data-dir` enables owned database storage explicitly. `--docker-socket` requires
-that directory. Without `--data-dir`, the daemon cannot create managed databases.
+`--data-dir` selects an exact private directory for managed databases.
+Automatic owners with `--docker-socket` default to `data` inside their private project-owner directory.
+Explicit data directories retain their existing behavior. A shared directory permits only one owner at a time.
+Foreground `serve` still requires `--data-dir` for managed databases.
 
 `--allow-exec` grants native execution, managed database operations, and explicit
-data deletion/recovery through the trusted daemon. `stop --after-engine-restart`
+data deletion/recovery and private secret setup through the trusted daemon. `stop --after-engine-restart`
 requests recovery after a Docker Engine restart, as described above. It never implies data deletion.
 
 ## Stored secrets
 
 Stored secrets require macOS 13 or later and the packaged Keychain helper.
 Commands below use `previewhost` from PATH, or `./node_modules/.bin/previewhost` from your application directory.
-`shop/dev/token` is an example name. `preview.yaml` must bind that name with `{secret: shop/dev/token}`.
-For setup or edit, start the daemon with `--allow-exec --secret shop/dev/token`.
+`shop/dev/token` is an example name, bound with `{secret: shop/dev/token}` in a direct spec or optional file.
+For cold setup, use `--allow-exec`. The private form can approve unselected names. Explicit edit still requires an already selected name.
 Replace `REQUEST_ID` with the ID from setup or edit.
 
 Select exact names through `RuntimeOptions.secretIds` or repeated `serve --secret ID`.
-The selection is copied at owner creation and defaults to empty. Names match
+The initial selection is copied at owner creation and defaults to empty.
+Private setup can add exact names after browser approval. Grants last until owner shutdown.
+The same exact name reuses one Keychain value across worktrees and projects that approve it.
+Use a distinct explicit reference for a different value; missing-value setup never overwrites shared entries. Names match
 `[A-Za-z0-9][A-Za-z0-9._/-]{0,127}`. Slashes have no inheritance or filesystem meaning.
 Specs bind these names to standalone command fields, environment command fields,
-or external database URLs. Unselected names fail before storage access.
+or external database URLs. Start/replace rejects unselected names before storage access.
+Setup checks neither presence nor values for an unselected name until private approval.
+Approval revalidates source scope and unions selected names within the existing 128-name limit.
 
 Inspect returns `secrets: [{id, selected, bindings: [{service?, key}]}]` without
 reading Keychain values. Start/replace resolves each required ID once, after
@@ -355,10 +380,10 @@ authorization and source checks, before candidate resources or databases start.
 Only declared recipients receive each value. Failed replacement preserves active routes.
 
 ```sh
-previewhost secrets setup --file preview.yaml
-previewhost secrets setup --file preview.yaml --reopen
+previewhost secrets setup --file preview.yml --allow-exec
+previewhost secrets setup --file preview.yml --allow-exec --reopen
 previewhost secrets edit shop/dev/token
-previewhost secrets status REQUEST_ID
+previewhost secrets status REQUEST_ID --timeout-ms 25000
 previewhost secrets set shop/dev/token
 previewhost secrets set shop/dev/token --stdin
 previewhost secrets list
@@ -383,22 +408,28 @@ Writes are atomic per item, with no cross-item transaction or ordering guarantee
 Partial results keep successful writes. A dispatched write without a confirmed
 response reports `error.outcome: "unknown"`. An absent response does not imply rollback.
 
-The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id)`, and
+The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id, {timeoutMs?, signal?})`, and
 `secretsEdit(id, {signal?})`. Results include public `id`, `mode`, optional `name`,
 `sources`, `requirements`, `expiresAt`, `browser`, `state`, `saved`, `alreadyPresent`,
 `remaining`, and optional `error`. No result contains a private URL or capability.
 
 States are `pending`, `saving`, `complete`, `partial`, `canceled`, and `expired`.
+`partial` is terminal. After resolving its error, request fresh setup; the old private form cannot be reused.
 Remaining names have unconfirmed writes. They are not necessarily absent.
-`complete` means the entries were present or their writes succeeded.
+`complete` means the exact names are approved and the entries were present or their writes succeeded.
+Status can wait up to 25,000 ms. Canceling that wait leaves the form open; no new background job is created.
 It does not check whether a credential works with its service or remains accessible later.
 
-`browser: "failed"` means use hidden CLI input or `--reopen`.
+For `browser: "failed"`, retry with `--reopen`. Hidden CLI input can supply missing values for selected names.
+CLI entry does not approve unselected names. Those still need private approval or explicit selection when the owner starts.
 A fresh setup rechecks availability after CLI entry and invalidates an obsolete form.
 
-Save starts no application. Check status before another start/replace with the current spec.
+Save starts no application. Check status and current preview state before another start/replace with the current spec.
+Re-read file-based specs after private entry. Do not run an obsolete file or implicitly approve newly edited names.
+If the agent turn ends, send “Secrets saved—continue”. Retain the original project path and request ID together.
 Form close or expiry also starts no application.
-Daemon restart loses grants and setup history. Cancellation stops setup preparation.
+Owner restart loses access approvals and setup history, but stored values remain.
+Cancellation stops setup preparation; it does not undo earlier name approvals or saved values.
 A client disconnect after grant creation does not revoke the form automatically.
 
 Updates affect later resolutions. Running applications can retain old values.
@@ -420,7 +451,7 @@ See [Keychain permissions and recovery](security.md#stored-secrets-and-private-e
 The daemon accepts authenticated JSON `POST /METHOD` requests.
 The body contains the method arguments, such as `{ "spec": { ... } }` or
 `{ "name": "app", "attemptId": "...", "timeoutMs": 30000 }`.
-`list` and `shutdown` take `{}`. Successful responses contain `{ "result": ... }`.
+`list`, `info`, and `shutdown` take `{}`. Successful responses contain `{ "result": ... }`.
 Failures contain `{ "error": { "code": "...", "message": "..." } }`.
 
 Control requests require `Authorization: Bearer TOKEN`, `Content-Type: application/json`,
@@ -429,9 +460,32 @@ client, the library client, or the CLI. This is not a browser control API.
 
 MCP tools use the names `preview_inspect`, `preview_start`, `preview_replace`,
 `preview_list`, `preview_get`, `preview_wait`, `preview_logs`, `preview_cancel`,
-`preview_stop`, `preview_delete_data`, `preview_secrets_setup`, and
-`preview_secrets_status`. Arguments match the HTTP method arguments, except the
-owner-only `reopen` option. There is no MCP edit, set, remove, read, or export tool.
+`preview_stop`, `preview_delete_data`, `preview_secrets_setup`, `preview_secrets_status`,
+`preview_save_config`, and `preview_shutdown` (14 tools).
+Automatic MCP tools require an absolute `project` on every call unless the registration supplies `--project` as a default.
+This includes reads, waits, secret status, stopping, and owner shutdown. The field selects the owner, file base, and default source root.
+Selection permits configured roots and registered Git worktrees of those repositories. It does not grant execution or select secret names.
+A shared connection retains no current-chat or last-project state. Equal preview names in different projects remain independent.
+Explicit endpoint/token mode keeps one fixed owner and rejects `project` tool arguments.
+MCP inspect/start/replace/setup accepts either `spec` or `file`, never both.
+If both are omitted, it reads project-root `preview.yml`. Invalid or unreadable files are errors.
+Explicit file paths resolve from the MCP project; source paths resolve relative to that file.
+MCP files must resolve inside that project or an explicitly configured `--root`; symlink escapes are rejected.
+The HTTP/runtime API continues to accept spec objects only. `reopen` remains owner-only.
+There is no public name-approval, secret edit, set, remove, value-read, or export tool.
+
+`preview_save_config({project, spec})` creates root `preview.yml` only on an explicit user request.
+It uses the original prepared spec, validates schema, dependencies, attachments and source scope, then round-trips through the strict YAML loader.
+It preserves non-secret literals and references without resolving inputs, credentials, service URLs or ports.
+Project-local source paths become relative. The result contains `file` and `externalSources` (nonportable paths).
+It does not run code or establish application health. Save/load cannot certify arbitrary strings contain no secrets.
+Existing files, directories and symlinks produce `ALREADY_EXISTS`. Use a normal editor for requested updates and validate them.
+Complete-file publication permits one concurrent creator and exposes no partial file.
+The same operation is available as `savePreviewSpec(spec, {projectDirectory, allowedRoots?, signal?})` in the library.
+
+`info` reports a project owner's project, PID, launch roots, execution mode, input keys, initial secret IDs and data/socket paths.
+Manual owners return `null`. Values and dynamic browser grants are not copied into connection files.
+Attempt summaries and incomplete cleanup records include `sources` so callers can identify directories still in use.
 
 Data deletion uses `POST /deleteData` with `{ "name": "shop" }`.
 Stop accepts `{ "name": "shop", "afterEngineRestart": true }` for explicit recovery.
@@ -439,10 +493,10 @@ The deletion tool has a destructive annotation and requires owner authorization.
 Both `structuredContent` and the text fallback contain the response envelope.
 Tool failures also set `isError: true`.
 
-`POST /secrets/setup` takes `{spec, reopen?}`, `/secrets/status` takes `{id}`,
+`POST /secrets/setup` takes `{spec, reopen?}`, `/secrets/status` takes `{id, timeoutMs?}`,
 and `/secrets/edit` takes an exact secret `{id}`. These require the daemon's control token.
 The fixed `GET /secrets`, `/secrets.js`, and `/secrets.css` assets grant no permission.
-Browser `POST /secrets/form`, `/secrets/save`, and `/secrets/cancel` require exact
+Browser `POST /secrets/form`, `/secrets/approve`, `/secrets/save`, and `/secrets/cancel` require exact
 Host/Origin and the private one-use grant, independently of the control bearer.
 These private routes are used only by the owner page. They are never public preview routes.
 

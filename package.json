@@ -20,6 +20,7 @@
     "dist/*.js",
     "dist/*.d.ts",
     "dist/native/keychain",
+    "dist/skills/previewhost",
     "examples/static.json",
     "examples/command.json",
     "examples/server.mjs",

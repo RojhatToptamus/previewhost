@@ -13,7 +13,7 @@ From a terminal where previewhost works, find its executable:
 command -v previewhost
 ```
 
-Use the returned absolute path as the MCP `command`. Keep `args` as `["mcp"]`.
+Use the returned absolute path as the MCP `command`. Retain the project and startup options in `args`.
 For example:
 
 ```json
@@ -21,7 +21,7 @@ For example:
   "mcpServers": {
     "previewhost": {
       "command": "/absolute/npm-prefix/bin/previewhost",
-      "args": ["mcp"]
+      "args": ["mcp", "--project", "/absolute/project", "--allow-exec"]
     }
   }
 }
@@ -40,15 +40,26 @@ npm root -g
 ```
 
 Use the Node path as `command`.
-Set `args` to `["/absolute/global/node_modules/previewhost/dist/cli.js", "mcp"]`.
+Set `args` to `["/absolute/global/node_modules/previewhost/dist/cli.js", "mcp", "--project", "/absolute/project", "--allow-exec"]`.
 Replace `/absolute/global/node_modules` with the directory from `npm root -g`.
 For a local package, use its absolute `node_modules/previewhost/dist/cli.js` path instead.
 
 ## The client cannot find the daemon
 
-Start `previewhost serve` in a foreground terminal.
-Use the same `--endpoint` and `--token-file` for each client.
-`previewhost mcp` does not start the daemon.
+Without an explicit connection, CLI uses the canonical project root. MCP uses the tool call's `project` or registration's `--project` default.
+Check that the selected path is this chat's actual worktree.
+Read/status/cleanup operations never start a missing owner; inspect works offline.
+Start or secret setup can create the owner with the required current launch flags, such as `--allow-exec`.
+A living owner with incompatible settings is left unchanged. Shut it down explicitly before changing its launch configuration.
+
+After a crash, `CLEANUP_INCOMPLETE` names the retained connection file.
+Retain sources and verify old application/process-group cleanup, using the existing recovery checks below.
+The record's PID is a diagnostic clue, not authority to kill a process. An absent owner does not prove its children stopped.
+Only after cleanup is confirmed, remove that project's `connection.json` and retry. Keep the permanent `.lock` inode.
+Clean shutdown handles record removal automatically and retains stored values and managed data.
+
+For an explicit manual connection, start `previewhost serve` in a foreground terminal.
+Use the same `--endpoint` and `--token-file` for its clients. Explicit connection mode never starts or reconfigures an owner.
 
 If the control port is occupied, start the daemon on another port:
 
@@ -143,7 +154,8 @@ Only selected values reach `{fromEnv: NAME}` bindings.
 previewhost does not load `.env` files.
 YAML files require one document without aliases, tags, or merge keys.
 
-Managed databases require an explicit private `--data-dir` and cached local Docker images.
+Managed databases require private data storage and cached local Docker images.
+Automatic owners with `--docker-socket` default to separate private storage per project. Foreground `serve` requires `--data-dir`.
 See the [database example](../examples/multi-repo/README.md).
 External database URLs require `127.0.0.1`, an explicit port, and a valid database path.
 A reachable TCP port does not prove successful authentication.
@@ -170,19 +182,22 @@ A daemon restart loses the process records needed for cleanup. It cannot identif
 
 ## Stored secrets are missing or inaccessible
 
-For `SECRET_REQUIRED`, run `previewhost secrets setup --file preview.yaml` or call `preview_secrets_setup` through MCP.
-Enter values only in the private owner form.
+For `SECRET_REQUIRED` or unselected names, use `previewhost secrets setup --allow-exec` with root `preview.yml`, an explicit file, or JSON stdin; MCP uses `preview_secrets_setup` with `file` or `spec`.
+The private owner form first approves access to unselected names, then collects missing values. Existing values are reused.
 Save does not start an application.
-Check `previewhost secrets status REQUEST_ID` before a startup retry.
+Check `previewhost secrets status REQUEST_ID --timeout-ms 25000` before a startup retry.
+Use the original project path and re-read the current spec. If the agent turn ended, send “Secrets saved—continue”.
 
-If the browser cannot open, use `previewhost secrets set ID` in a terminal.
-Then request setup again. `setup --reopen` reopens a pending form.
+If the browser cannot open, `setup --reopen` retries a pending form.
+For already selected names, use `previewhost secrets set ID` in a terminal, then request setup again.
+Terminal entry stores a value but does not approve runtime access. Unselected names still need private approval or explicit owner startup with `--secret ID`.
 
 `--stdin` accepts a pipe. Hidden terminal entry is the default.
 Keep values out of arguments.
 A page refresh or close loses its grant from browser memory.
 
-For `SECRET_DENIED`, check the daemon's exact `--secret ID` selections and authorization.
+For `SECRET_DENIED`, request private setup for the exact current references, or check the owner's explicit `--secret ID` launch selections.
+Do not bypass owner denial through another interface.
 `--allow-exec` alone does not select stored secrets.
 
 For locked storage, unlock the default Keychain in Keychain Access.
@@ -191,6 +206,8 @@ An updated helper can require approval. Do not grant all applications access.
 A missing helper requires a macOS package build.
 
 Partial saves retain completed writes.
+`partial` is terminal; its private form cannot accept another submission.
+After resolving the reported error, request fresh setup instead of waiting on the old result.
 An unknown write result can already have changed the item.
 Check public status before a fresh setup request for remaining entries.
 Presence alone does not prove that an explicit edit succeeded.
@@ -256,9 +273,12 @@ The runtime does not retain every previous attempt or log tail.
 
 For executable lookup errors, use the [PATH troubleshooting steps](#the-client-cannot-find-previewhost).
 
-Start the foreground daemon separately.
+Verify the project context and current launch authority. Only explicit endpoint/token mode needs a separately running daemon.
 MCP stdout must contain only protocol messages.
 Remove shell wrappers that print banners to stdout.
-Check the tool list for twelve `preview_*` tools, including secret setup/status.
+Check the tool list for 14 `preview_*` tools, including secret setup/status, configuration saving and owner shutdown.
 Read the tool's error envelope before a retry.
+After changing a registration's command or environment, reload the client workspace and reconnect the server.
+In Cursor 3.20.7, an edited registration showed connected tools while agent calls timed out; a new server name after reload restored calls.
+Verify an actual tool result before treating the connection indicator as proof. See the fresh [client check](integrations.md#cursor-ide).
 See [MCP client configuration](integrations.md#connect-an-mcp-client).

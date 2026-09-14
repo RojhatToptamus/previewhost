@@ -4,7 +4,7 @@ import {
   type LogResult, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
 } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
-import { attachmentTarget, canonicalDirectory, describeSpec, normalizeSpec, parseSpec, resolveInput, sameSources, validateResolvedInputs } from './spec.js';
+import { attachmentTarget, canonicalDirectory, describeSpec, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
 import { createGateway, type Gateway } from './gateway.js';
 import { startStatic } from './static.js';
 import { startNative } from './native.js';
@@ -42,8 +42,14 @@ export interface PreviewRuntime extends PreviewApi {
   /** Excludes an owner's private directory from current and future static previews. */
   protectDirectory(directory: string): Promise<void>;
   /** Validates and authorizes a private form without reading values or starting code. */
-  prepareSecretSetup(input: PreviewSpec | string, signal: AbortSignal): Promise<SecretSetupContext>;
+  prepareSecretSetup(input: PreviewSpec | string, signal: AbortSignal): Promise<PreparedSecretSetup>;
   close(): Promise<void>;
+}
+
+/** The approval closure stays with the owner-private form, never on a control transport. */
+export interface PreparedSecretSetup {
+  context: SecretSetupContext;
+  approve?: (signal: AbortSignal) => Promise<SecretSetupContext>;
 }
 
 export async function createPreviewRuntime(options: RuntimeOptions): Promise<PreviewRuntime> {
@@ -73,7 +79,7 @@ class Runtime implements PreviewRuntime {
   private closing?: Promise<void>;
   constructor(
     private readonly roots: string[], private readonly authorize: RuntimeOptions['authorize'],
-    private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: ReadonlySet<string>, private readonly data?: DataOwner,
+    private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data?: DataOwner,
   ) {
     if (data) this.privateDirectories.add(data.directory);
     for (const name of data?.names() ?? []) this.slots.set(name, { name, cleanup: new Set() });
@@ -97,14 +103,14 @@ class Runtime implements PreviewRuntime {
     return { ...describeSpec(spec), ...(secrets.length ? { secrets } : {}) };
   }
 
-  async prepareSecretSetup(input: PreviewSpec | string, signal: AbortSignal): Promise<SecretSetupContext> {
+  async prepareSecretSetup(input: PreviewSpec | string, signal: AbortSignal): Promise<PreparedSecretSetup> {
     this.assertOpen();
     throwIfAborted(signal);
     const mode = typeof input === 'string' ? 'edit' : 'missing';
     if (typeof input === 'string') validateSecretId(input);
     const spec = typeof input === 'string' ? undefined : await abortable(normalizeSpec(parseSpec(input), this.roots, this.inputs, this.privateDirectories), signal);
     const requirements = spec ? secretRequirements(spec, this.secretIds) : [{ id: input as string, selected: this.secretIds.has(input as string), bindings: [] }];
-    requireSelected(requirements);
+    if (mode === 'edit') requireSelected(requirements);
     if (!this.authorize || !await abortable(Promise.resolve(this.authorize({ operation: 'secrets-setup', mode,
       ids: requirements.map((item) => item.id), ...(spec ? { spec: structuredClone(spec) } : {}), signal })), signal)) {
       throw new PreviewError('EXECUTION_DENIED', 'The owner did not authorize this private secret form.');
@@ -115,9 +121,25 @@ class Runtime implements PreviewRuntime {
       if (!sameSources(spec, checked)) throw new PreviewError('SOURCE_DENIED', 'The source directory changed during authorization.');
     }
     throwIfAborted(signal);
-    const sources = spec?.type === 'command' ? [spec.cwd] : spec?.type === 'static' ? [spec.directory] : spec?.type === 'environment'
-      ? Object.values(spec.services).flatMap((service) => service.type === 'command' ? [service.cwd] : service.type === 'static' ? [service.directory] : []) : [];
-    return { mode, ...(spec ? { name: spec.name } : {}), sources: [...new Set(sources)].sort(), requirements };
+    const context: SecretSetupContext = { mode, ...(spec ? { name: spec.name } : {}), sources: spec ? sourceDirectories(spec) : [], requirements };
+    if (!spec || requirements.every((item) => item.selected)) return { context };
+    return { context,
+      approve: async (approvalSignal: AbortSignal) => {
+        this.assertOpen();
+        throwIfAborted(approvalSignal);
+        const checked = await abortable(normalizeSpec(spec, this.roots, this.inputs, this.privateDirectories), approvalSignal);
+        if (!sameSources(spec, checked)) throw new PreviewError('SOURCE_DENIED', 'The source directory changed before secret access approval.');
+        this.assertOpen();
+        throwIfAborted(approvalSignal);
+        const ids = secretRequirements(spec, this.secretIds).map((item) => item.id);
+        if (new Set([...this.secretIds, ...ids]).size > limits.secrets) {
+          throw new PreviewError('INVALID_INPUT', `A runtime can select at most ${limits.secrets} secret names. Shut it down before choosing a different set.`);
+        }
+        // No await between the limit check and additions: concurrent approvals form one bounded union.
+        for (const id of ids) this.secretIds.add(id);
+        return { ...context, requirements: secretRequirements(spec, this.secretIds) };
+      },
+    };
   }
 
   async start(input: PreviewSpec): Promise<PreviewStatus> {
@@ -250,7 +272,7 @@ class Runtime implements PreviewRuntime {
 
   private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace'): PreviewStatus {
     const attempt: Attempt = {
-      summary: { id: randomUUID(), type: spec.type, state: 'starting', startedAt: new Date().toISOString() },
+      summary: { id: randomUUID(), type: spec.type, state: 'starting', startedAt: new Date().toISOString(), sources: sourceDirectories(spec) },
       controller: new AbortController(), completed: false, waiters: new Set(),
       log: Buffer.alloc(0), truncated: false, nodes: nodeCost(spec),
     };
@@ -275,6 +297,7 @@ class Runtime implements PreviewRuntime {
     }, input.timeoutMs) : undefined;
     try {
       const spec = await abortable(normalizeSpec(input, this.roots, this.inputs, this.privateDirectories), signal);
+      attempt.summary.sources = sourceDirectories(spec);
       this.admitted(slot, attempt);
       if (this.authorize) {
         const approved = await abortable(Promise.resolve(this.authorize({ operation, spec: structuredClone(spec), signal })), signal);
@@ -507,7 +530,9 @@ class Runtime implements PreviewRuntime {
       ...(slot.candidate ? { candidate: copySummary(slot.candidate.summary) } : {}),
       ...(slot.latest ? { latest: copySummary(slot.latest.summary) } : {}),
       busy: !!slot.operation || !!slot.stopping,
-      ...(slot.cleanup.size ? { cleanup: [...slot.cleanup].filter((attempt) => attempt.summary.state === 'cleanup-incomplete').map((attempt) => ({ attemptId: attempt.summary.id, error: attempt.summary.error! })) } : {}),
+      ...(slot.cleanup.size ? { cleanup: [...slot.cleanup].filter((attempt) => attempt.summary.state === 'cleanup-incomplete').map((attempt) => ({
+        attemptId: attempt.summary.id, error: attempt.summary.error!, sources: [...attempt.summary.sources],
+      })) } : {}),
       ...(data ? { data } : {}),
     };
   }
