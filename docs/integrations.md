@@ -34,6 +34,30 @@ Stop and daemon restart retained the data. Explicit deletion removed the test's 
 The external-database variant also passed with separate local PostgreSQL and Redis containers.
 Preview stop left those containers and their data under their original owner.
 
+## September 14 agent-guidance check
+
+Cursor 3.20.21 (Grok Bot Low) and Claude Code 2.1.270 (Sonnet 5 Low) used the local `0.1.0-alpha.1` build with updated MCP guidance.
+Both clients used fresh MCP processes. Their executable paths and tool descriptions matched the installed local build.
+Claude ran interactively inside Cursor's terminal with individual tool approvals.
+
+Both agents prepared complete frontend/backend/PostgreSQL environments without YAML, absolute-path errors, or reserved environment bindings.
+They chose project-specific secret references without corrected arguments in user prompts.
+Each agent stopped after three deliberate cancellations across this check, including one with the final wording.
+These observations establish model compliance in these trials, not a server guarantee against another setup request.
+
+Brave handled private fake-value entry and application checks through the normal runtime and Keychain mechanisms.
+Delayed entry passed. Claude resumed startup after private entry completed outside its interrupted turn.
+Both clients explicitly saved YAML with relative source paths and restarted with retained database data.
+Cursor also recovered after owner shutdown and diagnosed and repaired a deliberately truncated YAML file.
+Claude reused an explicitly selected reference from the Cursor project after private approval. Their database records remained separate.
+Brave verified hostname and numeric URLs, database writes, updates, and deletion of a disposable row.
+The Maple application remained live after Claude exited. After reconnection, Claude found the same ready environment through MCP.
+
+Claude first missed application dependencies and the frontend build prerequisite. It diagnosed the logs, installed dependencies, built the frontend, and retried successfully.
+Cursor required a full restart to refresh cached tool descriptions. Neither issue required another Previewhost runtime mechanism.
+Concurrent worktree routing, browser-launch failure, and partial Keychain writes were not repeated in these model trials.
+The automated suite separately passed 112 tests, with no skips. Final focused tests passed 19 tests, and the installed-package consumer check passed.
+
 ## Agent skill
 
 Use the [README installation and usage steps](../README.md#use-the-agent-skill).
@@ -92,6 +116,11 @@ The README embedded-library example also passed.
 Cursor Agent 2026.09.02-c22c1a3 discovered all twelve tools through the project configuration.
 That discovery check used no model.
 For executable lookup errors, see [PATH troubleshooting](troubleshooting.md#the-client-cannot-find-previewhost).
+
+After replacing a local MCP build, restart the client and open a fresh chat.
+Cursor can retain old tool descriptions after **Reload MCP Server** or **Reload Window**.
+Its [MCP update guide](https://cursor.com/docs/mcp) recommends a full Cursor restart for local server changes.
+Confirm the new descriptions are available before testing agent behavior.
 
 Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`

@@ -34,10 +34,11 @@ const readyPath = z.string().max(2048).refine(
 const timeoutMs = z.number().int().min(100).max(120_000).default(30_000)
   .describe('Service readiness deadline in milliseconds, including any startup preparation. Default 30000; maximum 120000.');
 const directory = z.string().min(1).max(4096)
-  .describe('Existing live source directory, including uncommitted files. Use an absolute path in library/MCP calls; config-file paths resolve from that file.');
+  .describe('Existing live source directory, including uncommitted files. In a direct spec, cwd and directory must be absolute paths, even when project is supplied. JSON/YAML file inputs also support paths relative to that file.');
 const envKey = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(128);
 const literal = z.string().max(4096).refine((value) => !value.includes('\0'), 'Values cannot contain NUL.');
-export const secretIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'Use a secret name of 1–128 letters, numbers, dots, dashes, underscores or slashes.');
+export const secretIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'Use a secret name of 1–128 letters, numbers, dots, dashes, underscores or slashes.')
+  .describe('Stored Keychain reference, not the application environment-variable name. For a new binding, choose a project-specific reference, for example API_SECRET: {secret: "my-project/dev/api"}. Preserve existing references. Use an existing exact reference only for intentional sharing; matching references share one value across projects and worktrees after approval.');
 const inputReferenceSchema = z.strictObject({ fromEnv: envKey.describe('Environment input explicitly selected by the daemon owner; not an arbitrary client or shell variable.') });
 export const scalarValueSchema = z.union([literal, inputReferenceSchema, z.strictObject({ secret: secretIdSchema })]);
 export type ScalarValue = z.output<typeof scalarValueSchema>;
@@ -46,8 +47,8 @@ const argv = z.array(z.string().max(8192).refine((value) => !value.includes('\0'
   .describe('Executable and argv, with no implicit shell: no $PORT expansion, pipes, redirects, or &&. Literal {port} is replaced with the allocated private port. Honor injected PORT and HOST=127.0.0.1 or pass explicit loopback/port flags; disable port fallback. Dependencies must exist or come from explicit project preparation. A command must stay running and serve HTTP, not only exit successfully.');
 const envSchema = z.record(envKey, scalarValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
-  .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'PORT, HOST and PREVIEW_URL are reserved.')
-  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and numeric public origin. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
+  .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'Remove PORT, HOST and PREVIEW_URL from env; Previewhost injects them at runtime.')
+  .default({}).describe('Application bindings only. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and numeric public origin. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
 
 export const environmentValueSchema = z.union([
   scalarValueSchema,
@@ -57,8 +58,8 @@ export const environmentValueSchema = z.union([
 ]);
 const serviceEnvironment = z.record(envKey, environmentValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
-  .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'PORT, HOST and PREVIEW_URL are reserved.')
-  .default({}).describe('Explicit command bindings. PORT, HOST and PREVIEW_URL are reserved: private port, 127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
+  .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'Remove PORT, HOST and PREVIEW_URL from env; Previewhost injects them at runtime.')
+  .default({}).describe('Application bindings only. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
 export const environmentServiceSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('static'), directory, spa: z.boolean().default(false) }),
   z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs }),

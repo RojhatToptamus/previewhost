@@ -188,7 +188,11 @@ Save does not start an application.
 Check `previewhost secrets status REQUEST_ID --timeout-ms 25000` before a startup retry.
 Use the original project path and re-read the current spec. If the agent turn ended, send “Secrets saved—continue”.
 
-If the browser cannot open, `setup --reopen` retries a pending form.
+If status is `canceled`, stop setup. Wait for an explicit user request before new setup or startup.
+Do not assume the user closed the browser accidentally. A canceled form cannot be reused.
+A wait timeout with `pending` or `saving` leaves setup in progress. Use the same request ID.
+If status is `expired`, ask before requesting a new form.
+If the browser cannot open, `browser: "failed"` reports launch failure. `setup --reopen` retries a pending form.
 For already selected names, use `previewhost secrets set ID` in a terminal, then request setup again.
 Terminal entry stores a value but does not approve runtime access. Unselected names still need private approval or explicit owner startup with `--secret ID`.
 

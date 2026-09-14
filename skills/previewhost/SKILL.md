@@ -37,7 +37,8 @@ An MCP denial remains a denial: do not switch to CLI or another daemon to bypass
 
 The CLI examples use optional root `preview.yml`, a preview named `app`, and the returned `ATTEMPT_ID`.
 Substitute the actual recipe, name, executable, and connection arguments.
-For MCP, use its declared tool schema and absolute source paths.
+For direct MCP specs, use absolute `cwd` and `directory` paths, even when `project` is supplied.
+Do not bind `PORT`, `HOST`, or `PREVIEW_URL` in `env`. Previewhost injects them at runtime.
 CLI and MCP file paths inside recipes resolve relative to that file. MCP accepts `file` or `spec`, never both.
 CLI accepts JSON stdin. Explicit file/stdin input overrides the root default.
 
@@ -97,11 +98,17 @@ Do not serialize inspection output: it omits literal environment bindings.
 - Missing stored credentials: [private secret entry](references/docs/api.md#stored-secrets).
   Use `preview_secrets_setup` / `preview_secrets_status`, or CLI `secrets setup` / `secrets status` with the selected connection.
   Let the owner approve unselected names and enter missing values in the private browser form. Never request values in chat or tool arguments, or inspect the form.
-  Exact names share one Keychain value across worktrees/projects that approve them. Use a distinct explicit name for a different value.
+  For new bindings, choose a project-specific stored reference, such as `API_SECRET: {secret: "my-project/dev/api"}`.
+  `API_SECRET` is the application variable; `my-project/dev/api` is the stored reference. Preserve existing references.
+  Share an exact reference across projects or worktrees only when sharing is intended and approved.
   Approval lasts for this owner lifetime and permits any execution-authorized preview on it to bind the approved names.
   Wait on status with `timeoutMs: 25000`, retaining the request ID with its original project connection.
   Saving starts nothing. Re-read file-based specs, inspect current state, then retry normal start/replace after completion.
-  If the turn ends, the owner can send “Secrets saved—continue”. Do not reopen canceled or expired forms automatically.
+  If status is `canceled`, stop setup and wait for an explicit user request before new setup or startup.
+  Do not interpret cancellation as accidental browser closure or ask for input in the canceled form.
+  A wait timeout with `pending` or `saving` is not cancellation. Continue with the same request ID.
+  `browser: "failed"` means launch failure; `expired` means the form expired. Ask before opening a new expired form.
+  If the turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue”.
   A locked store requires owner unlock. Shutdown ends approvals but keeps stored values.
 - Data retention, deletion, or exceptional recovery: [security and recovery](references/docs/security.md#recovery).
 
