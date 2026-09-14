@@ -186,7 +186,18 @@ export interface PreviewDescription {
 }
 export interface LogResult { name: string; attemptId: string; text: string; truncated: boolean }
 export interface WaitOptions { timeoutMs?: number; signal?: AbortSignal }
-export interface StopOptions { afterEngineRestart?: boolean }
+export interface StopOptions {
+  afterEngineRestart?: boolean;
+  /** Reject a stale management action before touching a different attempt. */
+  expected?: { active: string | null; candidate: string | null; latest: string | null };
+}
+export type SecretSetupSummary = Pick<SecretSetupStatus, 'id' | 'name' | 'mode' | 'state' | 'browser' | 'expiresAt'>;
+export interface PreviewManagementApi {
+  describe(name: string, attemptId: string): Promise<PreviewDescription>;
+  startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
+  secretsList(): Promise<SecretSetupSummary[]>;
+  secretsOpen(id: string, options?: { signal?: AbortSignal }): Promise<SecretSetupStatus>;
+}
 export interface PreviewApi {
   inspect(spec: PreviewSpec): Promise<PreviewDescription>;
   start(spec: PreviewSpec): Promise<PreviewStatus>;
@@ -227,6 +238,10 @@ export const requestSchemas = {
     .describe('Wait limit in milliseconds, default and maximum 30000. Timeout or canceling this wait leaves startup running; wait again or cancel the exact candidate.') }),
   logs: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema.optional(), maxBytes: z.number().int().min(1).max(limits.logBytes).optional() }),
   cancel: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
-  stop: z.strictObject({ name: nameSchema, afterEngineRestart: z.boolean().optional() }),
+  stop: z.strictObject({ name: nameSchema, afterEngineRestart: z.boolean().optional(), expected: z.strictObject({
+    active: attemptIdSchema.nullable(), candidate: attemptIdSchema.nullable(), latest: attemptIdSchema.nullable(),
+  }).optional() }),
+  describe: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
+  startAgain: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   deleteData: z.strictObject({ name: nameSchema }),
 };

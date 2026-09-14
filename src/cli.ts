@@ -14,6 +14,7 @@ import { version } from './version.js';
 const help = `previewhost — local previews and application environments
 
 Owner:
+  previewhost dashboard
   previewhost serve [--root DIR ...] [--allow-exec] [--env NAME ...] [--secret ID ...]
                     [--data-dir DIR] [--docker-socket PATH] [--port 9400] [--token-file PATH]
   previewhost mcp [--project DIR] [--allow-exec] [--root DIR ...]
@@ -83,7 +84,8 @@ owned data and requires owner authorization. For an unresolved missing Docker
 creation, use --after-engine-restart only after the operator restarts the actual
 local Engine. The flag confirms that action; it never restarts Docker itself.
 
-Results are JSON on stdout. Errors are JSON on stderr with a nonzero exit code.
+Operation results are JSON on stdout. Dashboard prints a launcher message instead.
+Errors are JSON on stderr with a nonzero exit code.
 `;
 
 function integer(value: string | undefined, name: string, maximum: number, minimum = 1): number | undefined {
@@ -120,6 +122,7 @@ async function main(): Promise<void> {
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
   if (command === 'secrets') { await secretCommand(positionals.slice(1), values); return; }
   const accepted: Record<string, string[]> = {
+    dashboard: [],
     serve: ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket', 'port', 'token-file'],
     mcp: ['endpoint', 'token-file'],
     inspect: ['file', 'endpoint', 'token-file'],
@@ -131,7 +134,7 @@ async function main(): Promise<void> {
     'delete-data': ['endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
   };
   if (!Object.hasOwn(accepted, command)) throw new PreviewError('INVALID_INPUT', 'Unknown command. Run previewhost --help.');
-  if (command !== 'serve') accepted[command].push('project');
+  if (!['serve', 'dashboard'].includes(command)) accepted[command].push('project');
   if (['mcp', 'inspect', 'start', 'replace'].includes(command)) accepted[command].push(...launchFlags);
   for (const key of Object.keys(values)) if (!accepted[command].includes(key)) throw new PreviewError('INVALID_INPUT', `--${key} is not supported for ${command}.`);
   const counts: Record<string, [number, number]> = { get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
@@ -140,6 +143,17 @@ async function main(): Promise<void> {
   const tokenFile = values['token-file'] ? resolve(values['token-file']) : defaultTokenFile();
   const timeoutMs = integer(values['timeout-ms'], '--timeout-ms', limits.waitMs);
   const maxBytes = integer(values['max-bytes'], '--max-bytes', limits.logBytes);
+
+  if (command === 'dashboard') {
+    const { startDashboard } = await import('./dashboard.js');
+    const dashboard = await startDashboard();
+    const stop = () => { void dashboard.close(); };
+    process.once('SIGINT', stop); process.once('SIGTERM', stop);
+    try { await dashboard.open(); }
+    catch (error) { await dashboard.close(); throw error; }
+    process.stdout.write('Previewhost dashboard opened. Keep this terminal running. Ctrl-C closes management; previews keep running.\n');
+    return;
+  }
 
   if (command === 'serve') {
     const { createPreviewRuntime } = await import('./runtime.js');

@@ -164,6 +164,30 @@ Manual `previewhost serve` remains available. To use it, pass `--endpoint` or `-
 That mode connects only and never starts or reconfigures an owner.
 See [connection configuration](docs/api.md#cli).
 
+## Manage local previews
+
+Run `previewhost dashboard` to open an optional local browser dashboard. Keep its
+terminal running. Closing the dashboard leaves previews running.
+
+Find previews by project/worktree path, open application links, inspect errors and
+logs, cancel a startup or update, and stop a preview while keeping its database data.
+**Start again** reruns a stopped preview's retained configuration against current
+source. It does not reload `preview.yml`; its URL may change. Read-only configuration
+shows variable names and secret references without their values.
+
+Pending secret requests appear before application startup. **Open private form**
+uses the existing private browser flow. Cancellation is terminal for that request;
+if the agent ended its turn after saving, send it a short continuation message.
+
+The dashboard discovers automatic project owners, not every project or saved database.
+Cleanly shut-down owners, standalone `serve` instances, and embedded runtimes are not
+listed. It never starts an owner, grants execution, or changes its permissions.
+An older running owner may need an explicit upgrade before new controls are available.
+Reloading the browser loses the private session; run `previewhost dashboard` again.
+
+Create/edit/save configuration, delete retained data, and shut down owners through
+the existing CLI/MCP or editor workflows. There is no dashboard configuration store.
+
 ## Use the CLI
 
 From the demo directory, start the example:

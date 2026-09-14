@@ -113,7 +113,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   server.registerTool('preview_stop', {
     description: 'Stop the named preview and join owned application/container cleanup. Preserves database data, attached services, and source files. Set afterEngineRestart only after the operator confirms an actual local Engine restart. This resolves an absent indeterminate creation and requires recovery authorization. It never restarts Docker.',
     inputSchema: requestSchemas.stop.extend(scope), annotations: cleanup,
-  }, input => run('cleanup', input, client => client.stop(input.name, { afterEngineRestart: input.afterEngineRestart })));
+  }, input => run('cleanup', input, client => client.stop(input.name, { afterEngineRestart: input.afterEngineRestart, expected: input.expected })));
   server.registerTool('preview_delete_data', {
     description: 'Permanently delete a stopped environment\'s verified owned database data. Requires an explicit user request and daemon owner authorization. Rejects live applications or unresolved cleanup. Never deletes attached databases or source directories. Stop alone preserves data.',
     inputSchema: requestSchemas.deleteData.extend(scope), annotations: cleanup,

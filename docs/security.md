@@ -293,3 +293,21 @@ The owner browser holds entered values and the private grant.
 Agents that can inspect that browser, execute same-user code, or modify the
 receiving application remain outside this privacy boundary.
 Masked fields reduce incidental display. They do not isolate hostile agents.
+
+
+## Local dashboard
+
+The optional dashboard serves fixed assets on numeric loopback. Its browser uses a
+separate memory-only capability, delivered through the native launcher. Owner bearer
+tokens stay in the local dashboard process and are never sent to browser JavaScript.
+The dashboard requires exact Host/Origin headers and authenticated JSON POST actions;
+the existing owner control listener still rejects browser Origin headers.
+
+Discovery validates private connection records and authenticates each owner identity.
+It does not scan ports, launch owners, grant roots, or infer cleanup from an unreachable
+endpoint. One unresponsive owner has a bounded read deadline and does not hide others.
+
+The dashboard can request native reopening of an existing pending secret form. It
+cannot approve or write secrets through its management session. The owner-private
+form remains the only browser channel for those actions. Logs retain existing
+best-effort redaction limits and are shown on request, never treated as HTML.

@@ -3,7 +3,7 @@ import { lstat, open } from 'node:fs/promises';
 import { request, type ClientRequest } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { limits, type ErrorCode, type PreviewApi, type SecretSetupApi } from './contracts.js';
+import { limits, type ErrorCode, type PreviewApi, type SecretSetupApi, type PreviewManagementApi } from './contracts.js';
 import { PreviewError } from './errors.js';
 import type { ProjectOwnerInfo } from './project.js';
 
@@ -48,7 +48,7 @@ export async function readToken(path: string): Promise<string> {
 }
 
 /** Connects on demand. Closing this client never stops daemon-owned previews. */
-export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & SecretSetupApi & {
+export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & SecretSetupApi & PreviewManagementApi & {
   close(): Promise<void>; shutdown(): Promise<void>; info(): Promise<ProjectOwnerInfo | null>;
 } {
   let endpoint: URL;
@@ -138,6 +138,10 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
   }
 
   return {
+    describe: (name, attemptId) => call('describe', { name, attemptId }),
+    startAgain: (name, attemptId) => call('startAgain', { name, attemptId }),
+    secretsList: () => call('secrets/list', {}),
+    secretsOpen: (id, opts = {}) => call('secrets/open', { id }, opts.signal),
     info: () => call('info', {}),
     inspect: (spec) => call('inspect', { spec }),
     start: (spec) => call('start', { spec }),
@@ -147,7 +151,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
     wait: (name, attemptId, opts = {}) => call('wait', { name, attemptId, timeoutMs: opts.timeoutMs }, opts.signal),
     logs: (name, attemptId, maxBytes) => call('logs', { name, attemptId, maxBytes }),
     cancel: (name, attemptId) => call('cancel', { name, attemptId }),
-    stop: (name, opts = {}) => call('stop', { name, afterEngineRestart: opts.afterEngineRestart }),
+    stop: (name, opts = {}) => call('stop', { name, afterEngineRestart: opts.afterEngineRestart, expected: opts.expected }),
     deleteData: (name) => call('deleteData', { name }),
     secretsSetup: (spec, opts = {}) => call('secrets/setup', { spec, reopen: opts.reopen }, opts.signal),
     secretsStatus: (id, opts = {}) => call('secrets/status', { id, timeoutMs: opts.timeoutMs }, opts.signal),

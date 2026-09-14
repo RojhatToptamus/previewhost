@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { openLocalBrowser } from './local-browser.js';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { limits, type PreviewSpec, type SecretSetupContext, type SecretSetupStatus, type WaitOptions } from './contracts.js';
@@ -70,6 +70,24 @@ export class SecretSetup {
     const entry = this.entries.get(id);
     if (!entry) throw new PreviewError('NOT_FOUND', 'This secret request expired from the daemon history. Create a new setup request.');
     return structuredClone(entry.status);
+  }
+
+  list() {
+    this.prune();
+    return [...this.entries.values()].map(({ status: { id, name, mode, state, browser, expiresAt } }) =>
+      ({ id, name, mode, state, browser, expiresAt }));
+  }
+
+  async reopen(id: string, signal: AbortSignal): Promise<SecretSetupStatus> {
+    throwIfAborted(signal);
+    this.prune();
+    const entry = this.entries.get(id);
+    if (this.closed || !entry?.capability || entry.status.state !== 'pending') {
+      throw new PreviewError('CLOSED', 'This private request is no longer pending. Ask for a new setup only when you want to continue.');
+    }
+    if (entry.work) throw new PreviewError('BUSY', 'Private setup is already in progress.');
+    await this.launch(entry, signal);
+    return this.status(id);
   }
 
   async wait(id: string, options: WaitOptions = {}): Promise<SecretSetupStatus> {
@@ -184,22 +202,7 @@ export class SecretSetup {
 
   /** Kept on the owner to test private launch delivery without exposing it on a transport. */
   async openBrowser(url: string, signal: AbortSignal): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const env: NodeJS.ProcessEnv = {};
-      for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) env[key] = process.env[key];
-      const child = spawn('/usr/bin/open', [url], { stdio: 'ignore', env });
-      let failed = false;
-      const abort = () => { failed = true; child.kill('SIGKILL'); };
-      const timer = setTimeout(abort, 5000);
-      signal.addEventListener('abort', abort, { once: true });
-      child.once('error', () => { failed = true; });
-      child.once('close', (code) => {
-        clearTimeout(timer); signal.removeEventListener('abort', abort);
-        if (failed || code !== 0) reject(new PreviewError('START_FAILED', 'The browser could not open. Use previewhost secrets set with hidden terminal input, then retry.'));
-        else resolve();
-      });
-      if (signal.aborted) abort();
-    });
+    await openLocalBrowser(url, signal);
   }
 
   private async launch(entry: Entry, signal: AbortSignal): Promise<void> {

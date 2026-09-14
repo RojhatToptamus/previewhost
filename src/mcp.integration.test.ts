@@ -97,6 +97,9 @@ test('SDK MCP start, wait, replace, and stop share the same preview with CLI-com
   const replacement = await other.replace('site', { name: 'site', type: 'static', directory: second });
   assert.equal((await other.wait('site', replacement.candidate!.id)).state, 'ready');
   assert.equal(await (await fetch(ready.url!)).text(), 'second');
+  const staleStop = await mcp.callTool({ name: 'preview_stop', arguments: { name: 'site', expected: { active: ready.id, candidate: null, latest: ready.id } } });
+  assert.equal(staleStop.isError, true);
+  assert.equal(await (await fetch(ready.url!)).text(), 'second');
   const stopped = await mcp.callTool({ name: 'preview_stop', arguments: { name: 'site' } });
   assert.ok(!stopped.isError);
   assert.equal((await other.get('site')).active, undefined);

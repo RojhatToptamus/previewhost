@@ -34,7 +34,7 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   return parsed.data;
 }
 
-function readBody(req: IncomingMessage, signal: AbortSignal): Promise<unknown> {
+export function readBody(req: IncomingMessage, signal: AbortSignal): Promise<unknown> {
   return new Promise((resolveBody, reject) => {
     const chunks: Buffer[] = [];
     let length = 0;
@@ -144,6 +144,10 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
 
   async function dispatch(method: string, value: unknown, signal: AbortSignal): Promise<unknown> {
     switch (method) {
+      case 'describe': { const p = parse(requestSchemas.describe, value); return runtime.describe(p.name, p.attemptId); }
+      case 'startAgain': { const p = parse(requestSchemas.startAgain, value); return runtime.startAgain(p.name, p.attemptId); }
+      case 'secrets/list': parse(requestSchemas.list, value); return secrets.list();
+      case 'secrets/open': return secrets.reopen(parse(secretRequestSchemas.status.pick({ id: true }), value).id, signal);
       case 'inspect': return runtime.inspect(parse(requestSchemas.inspect, value).spec);
       case 'start': return runtime.start(parse(requestSchemas.start, value).spec);
       case 'replace': { const p = parse(requestSchemas.replace, value); return runtime.replace(p.name, p.spec); }
@@ -152,7 +156,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       case 'wait': { const p = parse(requestSchemas.wait, value); return runtime.wait(p.name, p.attemptId, { timeoutMs: p.timeoutMs, signal }); }
       case 'logs': { const p = parse(requestSchemas.logs, value); return runtime.logs(p.name, p.attemptId, p.maxBytes); }
       case 'cancel': { const p = parse(requestSchemas.cancel, value); return runtime.cancel(p.name, p.attemptId); }
-      case 'stop': { const p = parse(requestSchemas.stop, value); return runtime.stop(p.name, { afterEngineRestart: p.afterEngineRestart }); }
+      case 'stop': { const p = parse(requestSchemas.stop, value); return runtime.stop(p.name, { afterEngineRestart: p.afterEngineRestart, expected: p.expected }); }
       case 'deleteData': return runtime.deleteData(parse(requestSchemas.deleteData, value).name);
       case 'secrets/setup': { const p = parse(secretRequestSchemas.setup, value); return secrets.setup(p.spec, signal, p.reopen); }
       case 'secrets/status': { const p = parse(secretRequestSchemas.status, value); return secrets.wait(p.id, { timeoutMs: p.timeoutMs, signal }); }
@@ -207,7 +211,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         throw new PreviewError('INVALID_INPUT', 'Use POST with Content-Type: application/json.');
       }
       const method = req.url?.slice(1) ?? '';
-      if (!Object.hasOwn(requestSchemas, method) && !['secrets/setup', 'secrets/status', 'secrets/edit', 'info', 'shutdown'].includes(method) && !browser) throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
+      if (!Object.hasOwn(requestSchemas, method) && !['secrets/setup', 'secrets/status', 'secrets/edit', 'secrets/list', 'secrets/open', 'info', 'shutdown'].includes(method) && !browser) throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
       const cleanup = ['stop', 'cancel', 'shutdown'].includes(method);
       const waiting = method === 'wait' || method === 'secrets/status';
       if (active >= limits.controlRequests - (cleanup ? 0 : 2) || (waiting && waits >= limits.controlWaits)) {

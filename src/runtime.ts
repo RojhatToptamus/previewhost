@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   limits, nameSchema, requestSchemas, type AttemptResult, type AttemptSummary, type EffectiveSpec, type Failure,
-  type LogResult, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
+  type LogResult, type PreviewDescription, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
 } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
 import { attachmentTarget, canonicalDirectory, describeSpec, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
@@ -16,6 +16,7 @@ import { requireSelected, resolveSecrets, secretRequirements, validateSecretId }
 
 interface Attempt {
   summary: AttemptSummary;
+  declaration: EffectiveSpec;
   controller: AbortController;
   completed: boolean;
   waiters: Set<() => void>;
@@ -39,6 +40,8 @@ interface Slot {
 }
 
 export interface PreviewRuntime extends PreviewApi {
+  describe(name: string, attemptId: string): Promise<PreviewDescription>;
+  startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
   /** Excludes an owner's private directory from current and future static previews. */
   protectDirectory(directory: string): Promise<void>;
   /** Validates and authorizes a private form without reading values or starting code. */
@@ -178,6 +181,22 @@ class Runtime implements PreviewRuntime {
   async list(): Promise<PreviewStatus[]> { return [...this.slots.values()].map((slot) => this.status(slot)); }
   async get(name: string): Promise<PreviewStatus> { return this.status(this.slot(name)); }
 
+  async describe(name: string, attemptId: string) {
+    const spec = this.attempt(this.slot(name), attemptId).declaration;
+    const secrets = secretRequirements(spec, this.secretIds);
+    return structuredClone({ ...describeSpec(spec), ...(secrets.length ? { secrets } : {}) });
+  }
+
+  async startAgain(name: string, attemptId: string): Promise<PreviewStatus> {
+    const slot = this.slot(name);
+    const attempt = this.attempt(slot, attemptId);
+    if (slot.latest !== attempt || attempt.summary.state !== 'stopped') {
+      throw new PreviewError('STALE_ATTEMPT', 'Select the current stopped attempt before starting again.');
+    }
+    // start admits synchronously; its normal startup path revalidates sources and authority.
+    return this.start(attempt.declaration);
+  }
+
   async wait(name: string, attemptId: string, options: WaitOptions = {}): Promise<AttemptResult> {
     const slot = this.slot(name, 'ATTEMPT_EXPIRED');
     const attempt = this.attempt(slot, attemptId);
@@ -214,6 +233,10 @@ class Runtime implements PreviewRuntime {
   async stop(name: string, options: StopOptions = {}): Promise<PreviewStatus> {
     if (!requestSchemas.stop.safeParse({ ...options, name }).success) throw new PreviewError('INVALID_INPUT', 'Invalid stop options.');
     const slot = this.slot(name);
+    if (options.expected && (options.expected.active !== (slot.active?.summary.id ?? null) ||
+        options.expected.candidate !== (slot.candidate?.summary.id ?? null) || options.expected.latest !== (slot.latest?.summary.id ?? null))) {
+      throw new PreviewError('STALE_ATTEMPT', 'This preview changed. Review its current state before stopping it.');
+    }
     if (options.afterEngineRestart && (slot.active || slot.candidate || slot.operation || slot.stopping)) {
       throw new PreviewError('BUSY', 'Engine-restart recovery requires a stopped environment with no operation in progress.');
     }
@@ -273,7 +296,7 @@ class Runtime implements PreviewRuntime {
   private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace'): PreviewStatus {
     const attempt: Attempt = {
       summary: { id: randomUUID(), type: spec.type, state: 'starting', startedAt: new Date().toISOString(), sources: sourceDirectories(spec) },
-      controller: new AbortController(), completed: false, waiters: new Set(),
+      declaration: structuredClone(spec), controller: new AbortController(), completed: false, waiters: new Set(),
       log: Buffer.alloc(0), truncated: false, nodes: nodeCost(spec),
     };
     slot.candidate = attempt;
@@ -297,6 +320,7 @@ class Runtime implements PreviewRuntime {
     }, input.timeoutMs) : undefined;
     try {
       const spec = await abortable(normalizeSpec(input, this.roots, this.inputs, this.privateDirectories), signal);
+      attempt.declaration = structuredClone(spec);
       attempt.summary.sources = sourceDirectories(spec);
       this.admitted(slot, attempt);
       if (this.authorize) {
@@ -434,11 +458,18 @@ class Runtime implements PreviewRuntime {
     await slot.operation?.catch(() => {});
     const attempts = new Set([...slot.cleanup, ...[slot.active, slot.candidate, slot.latest].filter((value): value is Attempt => !!value)]);
     await Promise.allSettled([...attempts].map((attempt) => this.cleanupAttempt(slot, attempt)));
+    // Remember the application actually stopped, rather than a failed replacement of it.
+    if (slot.active) slot.latest = slot.active;
     slot.active = undefined;
     slot.candidate = undefined;
     await this.closeGateway(slot);
     if (slot.cleanup.size) throw new PreviewError('CLEANUP_INCOMPLETE', 'Some owned resources could not be verified as stopped. The cleanup handles remain available for retry.');
     await this.stopData(slot, attempts, options);
+    // Listener/data cleanup can fail after the application resource is already gone.
+    if (slot.latest?.summary.state === 'cleanup-incomplete') {
+      slot.latest.summary.state = 'stopped';
+      delete slot.latest.summary.error;
+    }
   }
 
   private async stopData(slot: Slot, attempts: Iterable<Attempt>, options?: StopOptions): Promise<void> {

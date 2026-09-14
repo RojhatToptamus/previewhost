@@ -239,3 +239,40 @@ test('native library flow verifies readiness, preserves a working server on repl
   await assert.rejects(fetch(first.url!));
   assert.ok((await fs.stat(path.join(directory, 'server.mjs'))).isFile());
 });
+
+test('guarded Stop and Start again retain the serving declaration after a failed replacement', async t => {
+  const { runtime, spec, directory } = await fixture(t);
+  const original = await ready(runtime, await runtime.start(spec()));
+  const failed = await runtime.replace('page', { name: 'page', type: 'static', directory: path.join(directory, 'missing') });
+  await runtime.wait('page', failed.candidate!.id);
+  await assert.rejects(runtime.stop('page', { expected: { active: original.id, candidate: null, latest: original.id } }), code('STALE_ATTEMPT'));
+  assert.equal(await (await fetch(original.url!)).text(), '<h1>one</h1>');
+  const stopped = await runtime.stop('page');
+  assert.equal(stopped.latest?.id, original.id);
+  const results = await Promise.allSettled([runtime.startAgain('page', original.id), runtime.startAgain('page', original.id)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  const started = results.find(r => r.status === 'fulfilled')!;
+  if (started.status !== 'fulfilled') throw new Error();
+  const result = await ready(runtime, started.value);
+  assert.equal(await (await fetch(result.url!)).text(), '<h1>one</h1>');
+  await runtime.stop('page');
+  await fs.rm(path.join(directory, 'one'), { recursive: true });
+  const description = await runtime.describe('page', result.id);
+  assert.equal(description.spec.type, 'static');
+  const retry = await runtime.startAgain('page', result.id);
+  assert.equal((await runtime.wait('page', retry.candidate!.id)).state, 'failed');
+});
+
+test('retained descriptions cannot mutate commands or expose literal environment bindings', async t => {
+  const { runtime, directory } = await fixture(t, () => true);
+  const status = await runtime.start({ name: 'script', type: 'command', cwd: directory,
+    command: [process.execPath, '-e', 'process.exit(1)'], env: { PRIVATE_INPUT: 'disposable-placeholder' } });
+  await runtime.wait('script', status.candidate!.id);
+  const description = await runtime.describe('script', status.candidate!.id);
+  assert.ok(!JSON.stringify(description).includes('disposable-placeholder'));
+  if (description.spec.type !== 'command') throw new Error();
+  description.spec.command[0] = 'changed';
+  const again = await runtime.describe('script', status.candidate!.id);
+  if (again.spec.type !== 'command') throw new Error();
+  assert.equal(again.spec.command[0], process.execPath);
+});
