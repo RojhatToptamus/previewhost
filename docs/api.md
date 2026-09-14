@@ -413,14 +413,22 @@ The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id, {ti
 `sources`, `requirements`, `expiresAt`, `browser`, `state`, `saved`, `alreadyPresent`,
 `remaining`, and optional `error`. No result contains a private URL or capability.
 
-States are `pending`, `saving`, `complete`, `partial`, `canceled`, and `expired`.
-`partial` is terminal. After resolving its error, request fresh setup; the old private form cannot be reused.
+| Setup result | Meaning and next action |
+| --- | --- |
+| `pending` or `saving` | Setup is in progress. A status wait timeout does not cancel it. Keep the same request ID. |
+| `canceled` | The request ended and its private form is invalid. Stop setup. Wait for an explicit user request before new setup or startup. |
+| `expired` | The form reached its deadline. Ask before requesting a new form. |
+| `complete` | Access is approved and all required entries were observed present or saved. Check preview state before startup. |
+| `partial` | Setup ended with an error; the private form cannot be reused. Resolve the error before requesting fresh setup. |
+
+Do not interpret `canceled` as accidental browser closure. A browser close alone does not change status to `canceled`.
+The server invalidates canceled forms. The instruction to wait for explicit user intent is agent guidance, not a server-enforced restriction on new requests.
 Remaining names have unconfirmed writes. They are not necessarily absent.
-`complete` means the exact names are approved and the entries were present or their writes succeeded.
 Status can wait up to 25,000 ms. Canceling that wait leaves the form open; no new background job is created.
 It does not check whether a credential works with its service or remains accessible later.
 
-For `browser: "failed"`, retry with `--reopen`. Hidden CLI input can supply missing values for selected names.
+The `browser` field reports launch delivery separately from setup state.
+For a pending request with `browser: "failed"`, retry with `--reopen`. Hidden CLI input can supply missing values for selected names.
 CLI entry does not approve unselected names. Those still need private approval or explicit selection when the owner starts.
 A fresh setup rechecks availability after CLI entry and invalidates an obsolete form.
 

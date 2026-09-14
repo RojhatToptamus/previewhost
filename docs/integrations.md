@@ -93,6 +93,11 @@ Cursor Agent 2026.09.02-c22c1a3 discovered all twelve tools through the project 
 That discovery check used no model.
 For executable lookup errors, see [PATH troubleshooting](troubleshooting.md#the-client-cannot-find-previewhost).
 
+After replacing a local MCP build, restart the client and open a fresh chat.
+Cursor can retain old tool descriptions after **Reload MCP Server** or **Reload Window**.
+Its [MCP update guide](https://cursor.com/docs/mcp) recommends a full Cursor restart for local server changes.
+Confirm the new descriptions are available before testing agent behavior.
+
 Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.

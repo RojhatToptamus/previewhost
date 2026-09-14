@@ -16,7 +16,8 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   const projectField = z.string().min(1).max(4096).describe(
     'Absolute root of this chat’s actual checkout/worktree. Supply the same project on every call, including status, secrets, stop and restart. Never substitute the main checkout. Must be within a configured root or its registered Git worktrees.');
   const scope = { project: fixed ? z.never().optional() : options.projectDirectory ? projectField.optional() : projectField };
-  const inputShape = { ...scope, spec: requestSchemas.start.shape.spec.optional(), file: z.string().min(1).max(4096).optional()
+  const inputShape = { ...scope, spec: requestSchemas.start.shape.spec.optional()
+    .describe('Direct spec: all cwd and directory paths must be absolute, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. Use file instead for JSON/YAML with file-relative paths.'), file: z.string().min(1).max(4096).optional()
     .describe('One regular JSON/YAML file within the project or an explicitly allowed root, relative to the project directory. Sources resolve relative to this file. Omit both file and spec to use root preview.yml.') };
   const exclusive = (input: { file?: string; spec?: unknown }) => !(input.file !== undefined && input.spec !== undefined);
   const inputSchema = z.strictObject(inputShape).refine(exclusive, 'Supply either file or spec, never both.');
@@ -29,17 +30,20 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
         'Supply this chat’s actual worktree as project on every call; connections can be shared. ') +
       'Use project-root preview.yml when present; fix invalid files. Otherwise inspect the project and ' +
       'supply a spec directly. Start, then wait for the returned attempt ID. For secrets, supply {secret: ID}; ' +
-      'request private setup, wait on status, then retry startup. Never request values in chat or inspect the private form. ' +
+      'request private setup, wait on status, then retry startup only after complete. Never request values in chat or inspect the private form. ' +
       'Save preview.yml only on an explicit user request, using the original spec. An active owner survives MCP disconnect. ' +
+      'If secret setup is canceled, stop and wait for an explicit user request before new setup or startup. Never assume accidental browser closure. ' +
+      'Use absolute cwd/directory paths in direct specs, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. ' +
+      'For new secret bindings, choose project-specific stored references, distinct from environment-variable names. Preserve existing references; share exact references only intentionally. ' +
       'Commands are argv without a shell; use {port} and 127.0.0.1 or injected PORT/HOST. Reuse current task sources, ' +
       'including uncommitted changes. Prepare dependencies with existing project commands. Keep a stable preview name. ' +
-      'Wait timeout or cancellation leaves startup running. After an uncertain mutation, check get/list before retrying. ' +
+      'Preview wait timeout or interruption leaves startup running. After an uncertain mutation, check get/list before retrying. ' +
       'Replacement overlaps processes and cannot undo source edits or migrations. Stop affected previews before ' +
       'conflicting shared preparation or source removal. While cleanup is uncertain, retain sources and block conflicting retries. ' +
       'Stop preserves data; delete only on explicit request. Set afterEngineRestart only after confirmed local Docker Engine restart. ' +
       'Owner authority is separate from host tool approval. Private secret approval lasts until owner shutdown and permits ' +
       'any execution-authorized preview on that owner to bind those exact shared names. Saving secrets starts no code. ' +
-      'Re-read file-based specs after private entry. If your turn ends, the owner can send “Secrets saved—continue”. ' +
+      'Re-read file-based specs after private entry. If your turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue”. ' +
       'A locked Keychain needs owner unlock. Never retry through another interface to bypass a denial.',
 
   });
@@ -115,11 +119,11 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     inputSchema: requestSchemas.deleteData.extend(scope), annotations: cleanup,
   }, input => run('request', input, client => client.deleteData(input.name)));
   server.registerTool('preview_secrets_setup', {
-    description: 'Request exact secret names for this spec through the owner’s private browser form. The owner approves runtime access to unselected names, then enters only missing values privately. Existing entries are reused, never overwritten. Any authorized preview on this owner can use approved names until shutdown. Returns public metadata only. Never supply values or inspect the private form. Requires owner setup authorization. Saving starts no code; check status, then retry ordinary start/replace with the current spec.',
+    description: 'Request exact secret references through the owner’s private browser form. For new bindings, choose project-specific references, not generic environment-variable names such as API_SECRET. Preserve existing references; use the same exact reference only for intentional sharing. After a canceled result, do not call this tool again or retry startup until the user explicitly asks to resume. The owner approves runtime access to unselected names, then enters only missing values privately. Existing entries are reused, never overwritten. Any authorized preview on this owner can use approved names until shutdown. Returns public metadata only. Never supply values or inspect the private form. Requires owner setup authorization. Saving starts no code; check status, then retry ordinary start/replace with the current spec only after complete.',
     inputSchema, annotations: write,
   }, (input, context) => run('request', input, async (client, project) => client.secretsSetup(await load(input, project, context.mcpReq.signal), { signal: context.mcpReq.signal })));
   server.registerTool('preview_secrets_status', {
-    description: 'Read or wait up to 25000ms for the public result of private secret setup. No values are read or returned. Complete records access approval and observed presence, not credential validity or future Keychain access. Check current preview state before startup with the current spec. Partial is terminal: its private form cannot be reused. After the owner fixes the reported issue, request fresh setup; do not keep waiting on a partial result or ask the owner to resubmit the old form. Retain this request ID with its original project. If the agent turn ends, the owner can send “Secrets saved—continue” to resume.',
+    description: 'Read or wait up to 25000ms for the public result of private secret setup. canceled is terminal: stop and wait for an explicit user request before new setup or startup. Do not assume accidental closure or ask for values in the canceled form. pending or saving after a wait timeout means setup is still in progress; keep the same request ID. An interrupted status wait leaves the form available. expired is terminal; ask before new setup. browser: failed reports launch failure, not cancellation. No values are read or returned. Complete records access approval and observed presence, not credential validity or future Keychain access. Check current preview state before startup with the current spec. Partial is terminal: its private form cannot be reused. After the owner fixes the reported issue, request fresh setup; do not keep waiting on a partial result or ask the owner to resubmit the old form. Retain this request ID with its original project. If the turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue” to resume.',
     inputSchema: secretRequestSchemas.status.extend(scope), annotations: read,
   }, (input, context) => run(input.timeoutMs ? 'wait' : 'request', input, client => client.secretsStatus(input.id, { timeoutMs: input.timeoutMs, signal: context.mcpReq.signal })));
   server.registerTool('preview_shutdown', {
