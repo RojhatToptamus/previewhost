@@ -167,6 +167,8 @@ The [integration record](integrations.md#cursor-ide) separates these actual-clie
 The September 14 [global Cursor worktree check](integrations.md#global-registration-and-cursor-worktrees) used two actual chats in one Agents window.
 Both full stacks passed source, update, database, shared-secret, stop/restart, and MCP process-reconnection checks.
 Reconnection required Cursor's offered authentication click. The broad suite passed 112 tests; the final focused run passed nine.
+The resumed check verified the committed build in two fresh Cursor-managed worktrees after a host restart left the temporary fixture unavailable.
+Both full stacks passed again, including shared-process reconnection. No additional implementation changes were needed.
 
 Still deferred or unverified:
 

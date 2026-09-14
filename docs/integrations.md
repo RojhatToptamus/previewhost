@@ -247,7 +247,18 @@ These are automated runtime checks, not additional Cursor model turns.
 The broad suite passed 112 tests with zero skips. The final focused run passed nine tests.
 A clean tarball consumer passed, and HTTP contract tests passed against both running full stacks, including database create/read/update/delete operations.
 Final review corrected the instructions for fixed-endpoint connections; focused automated checks passed afterward.
-The last Cursor refresh was blocked by a locked Mac. The earlier real-client checks exercised the same automatic-routing behavior.
+The last Cursor refresh initially stopped at a locked Mac. A resumed check later that day completed verification of commit `64f9dad`.
+
+After a host restart, the temporary installation, repository metadata, and disposable Keychain were absent.
+The old worktree files and database data were preserved. Two fresh Cursor-managed worktrees used a durable disposable fixture and fresh local package installation.
+Only the existing global registration's fixture paths changed; no per-worktree registrations were added.
+Both chats used the same MCP process for full-stack startup, private setup, distinct edits, replacement, and independent stop/restart.
+Brave verified both returned URL forms and separate database notes before and after restart.
+One private fake-value entry served both owners after separate approvals.
+After deliberate MCP process loss, Cursor's **Authenticate** action restored both chats through one new process.
+Both exact ready attempts survived reconnection. The final code needed no further changes.
+This resumed run passed nine focused tests, the clean package-consumer checks, and two HTTP contract tests against the actual running stacks.
+The earlier 112-test suite was not repeated during this resumed check.
 
 The agent must know its checkout path. Previewhost cannot infer chat identity from a shared connection.
 Authorization is configured once per repository or source root; new unrelated repositories still require explicit authorization.
