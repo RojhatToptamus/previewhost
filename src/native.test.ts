@@ -302,11 +302,16 @@ setInterval(() => {}, 1000);
   const original = childProcess.execFile;
   let inspections = 0;
   // Real process inspection can fail (for example permissions or a deadline).
-  // Reproduce that boundary while the command really kills its guardian.
+  // Wait for actual guardian loss before returning the unavailable observation.
+  // A fixed delay can let cleanup stop the command before the fixture runs.
   const replacement = test.mock.method(childProcess, 'execFile', (...args: unknown[]) => {
     if (args[0] === '/bin/ps' && ++inspections === 2) {
       const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
-      setTimeout(() => callback(new Error('Identity observation unavailable'), '', ''), 100);
+      void (async () => {
+        identity = JSON.parse(await untilFile(path.join(root, 'identity.json')));
+        await deadline(resource!.exited!, 2_000);
+      })().then(() => callback(new Error('Identity observation unavailable'), '', ''),
+        (error: Error) => callback(error, '', ''));
       return undefined;
     }
     return Reflect.apply(original, childProcess, args);
