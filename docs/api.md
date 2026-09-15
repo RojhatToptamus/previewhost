@@ -273,7 +273,8 @@ by application code. Changes between an environment and a single preview require
 stop/start. Managed resource definitions must match retained data.
 
 The runtime retains active attempts, candidates, cleanup handles, and the latest
-outcome for each name. It does not retain every historical replacement.
+outcome for each name. After Stop, `latest` retains the application actually stopped,
+rather than a failed replacement of it. It does not retain every historical replacement.
 At most 128 inactive names remain. Unknown or expired attempt IDs return
 `ATTEMPT_EXPIRED`, never a different attempt result.
 Up to 128 retained data records remain independently of that application history.
@@ -539,3 +540,54 @@ traffic perform no Keychain reads.
 
 After a lost response to start, replace, cancel, stop, or delete-data, read `get` or `list` before another attempt.
 A transport failure does not prove that the original operation failed.
+
+
+## Local dashboard operations
+
+`previewhost dashboard` opens an authenticated local management page for existing
+automatic project owners. It starts no preview or owner. Its foreground process can
+close without stopping applications. Private browser session delivery follows the
+same native-launch pattern as secret forms, with separate credentials. The dashboard
+keeps its capability in per-tab `sessionStorage` so the same tab can reload. Browser
+session restore may retain that storage; stopping the dashboard process ends its
+authority. Private secret forms continue to keep their capabilities only in memory.
+If session storage is unavailable, the initial launch works but reload needs a new launch.
+
+The authenticated owner client also supports:
+
+- `describe(name, attemptId)`: redacted requested configuration for a retained attempt,
+  including secret reference metadata without checking Keychain presence.
+- `startAgain(name, attemptId)`: rerun the current stopped or failed attempt's declaration
+  through ordinary startup, source validation, and authorization. Existing active,
+  busy, and cleanup checks still apply. No YAML is reloaded. The dashboard labels a
+  stopped attempt **Start preview** and a failed attempt **Retry start**.
+  Canceled attempts cannot use this operation.
+- `saveConfiguration(name, attemptId)`: create root `preview.yml` from that exact
+  retained attempt through the existing validated saver. The automatic owner's project
+  fixes the destination; callers cannot supply a path or a replacement spec. Returns
+  `{ file, externalSources }` and does not start, stop, or replace an application.
+- `secretsList()`: bounded request summaries, including requests made before preview startup.
+- `secretsOpen(id)`: reopen only an idle pending private form through the native launcher.
+  It does not approve access, check values, or revive canceled/expired requests.
+
+`stop(name, { expected: { active, candidate, latest } })` optionally checks the exact
+observed attempt IDs (or `null`) before changing state. A mismatch returns
+`STALE_ATTEMPT`. The dashboard always supplies this guard. CLI/MCP behavior without
+it is unchanged; MCP also forwards an explicitly supplied guard.
+
+Declarations and logs remain bounded owner memory. They are unavailable after owner
+shutdown or history eviction. Start again may allocate a different URL and keeps
+managed data. A later agent Start remains authorized after a human Stop: this is not
+a permanent pause or a new agent-approval lifecycle.
+In the dashboard, use Retry start after resolving the failure. It creates no
+private setup request and does not bypass secret approval or Keychain access checks.
+
+Saving keeps secret/input references unexpanded. It never reads Keychain values or
+exports the raw declaration through the dashboard response. Sources inside the project
+become relative paths; external sources keep absolute paths and appear in `externalSources`.
+Existing files and symlinks win: saving returns `ALREADY_EXISTS` without overwriting them.
+An expired attempt cannot be reconstructed from status. An owner without a project
+directory cannot use this operation; save the original spec through CLI/MCP or the library.
+The file is future input, not a configuration change applied to the running preview.
+Declared literal values remain part of the recipe; saving does not certify that arbitrary
+strings contain no secrets.

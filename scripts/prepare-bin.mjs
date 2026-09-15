@@ -2,6 +2,11 @@ import { chmod, cp, mkdir, rm } from 'node:fs/promises';
 import { basename } from 'node:path';
 await chmod(new URL('../dist/cli.js', import.meta.url), 0o755);
 
+// Both compiled entry points serve the same bundled dashboard fonts.
+for (const output of ['dist', '.local/test-build']) {
+  await cp(new URL('../src/fonts/', import.meta.url), new URL(`../${output}/fonts/`, import.meta.url), { recursive: true });
+}
+
 // Materialize the maintained skill's source links for npm, which excludes symlinks.
 const skill = new URL('../dist/skills/previewhost/', import.meta.url);
 await rm(skill, { recursive: true, force: true });

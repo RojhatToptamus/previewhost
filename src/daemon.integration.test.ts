@@ -60,6 +60,14 @@ test('the authenticated client shares live previews, preserves errors, and close
   await assert.rejects(fetch(ready.url!));
 });
 
+test('configuration saving requires owner project metadata', async t => {
+  const f = await fixture(t);
+  const status = await f.client.start({ name: 'page', type: 'static', directory: f.directory });
+  await f.client.wait('page', status.candidate!.id);
+  await assert.rejects(f.client.saveConfiguration('page', status.candidate!.id), { code: 'INVALID_INPUT' });
+  await assert.rejects(readFile(join(f.directory, 'preview.yml')), { code: 'ENOENT' });
+});
+
 test('control authority, content, strict schemas, and body bounds are enforced before execution', async (t) => {
   const f = await fixture(t);
   const token = (await readFile(f.tokenFile, 'utf8')).trim();

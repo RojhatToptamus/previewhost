@@ -32,6 +32,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
       'supply a spec directly. Start, then wait for the returned attempt ID. For secrets, supply {secret: ID}; ' +
       'request private setup, wait on status, then retry startup only after complete. Never request values in chat or inspect the private form. ' +
       'Save preview.yml only on an explicit user request, using the original spec. An active owner survives MCP disconnect. ' +
+      'When the user wants to compare or manage local previews, suggest previewhost dashboard; it can inspect, stop, rerun, and explicitly save a retained configuration. ' +
       'If secret setup is canceled, stop and wait for an explicit user request before new setup or startup. Never assume accidental browser closure. ' +
       'Use absolute cwd/directory paths in direct specs, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. ' +
       'For new secret bindings, choose project-specific stored references, distinct from environment-variable names. Preserve existing references; share exact references only intentionally. ' +
@@ -113,7 +114,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   server.registerTool('preview_stop', {
     description: 'Stop the named preview and join owned application/container cleanup. Preserves database data, attached services, and source files. Set afterEngineRestart only after the operator confirms an actual local Engine restart. This resolves an absent indeterminate creation and requires recovery authorization. It never restarts Docker.',
     inputSchema: requestSchemas.stop.extend(scope), annotations: cleanup,
-  }, input => run('cleanup', input, client => client.stop(input.name, { afterEngineRestart: input.afterEngineRestart })));
+  }, input => run('cleanup', input, client => client.stop(input.name, { afterEngineRestart: input.afterEngineRestart, expected: input.expected })));
   server.registerTool('preview_delete_data', {
     description: 'Permanently delete a stopped environment\'s verified owned database data. Requires an explicit user request and daemon owner authorization. Rejects live applications or unresolved cleanup. Never deletes attached databases or source directories. Stop alone preserves data.',
     inputSchema: requestSchemas.deleteData.extend(scope), annotations: cleanup,

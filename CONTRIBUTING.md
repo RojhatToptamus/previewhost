@@ -17,7 +17,7 @@ git diff --check
 npm pack --dry-run
 ```
 
-`npm test` builds the package and runs the Node tests beside their source files, one at a time.
+`npm test` builds the package and runs the compiled Node tests one at a time.
 Native tests skip on unsupported platforms. A skipped test does not establish platform support.
 Some sandbox environments require explicit permission for local listeners and
 process inspection.
@@ -93,7 +93,7 @@ From the repository directory, run:
 ```sh
 PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
 npm pack --ignore-scripts
-npm run check:package -- /absolute/path/to/previewhost-0.1.0-alpha.0.tgz
+npm run check:package -- /absolute/path/to/previewhost-VERSION.tgz
 ```
 
 `verify:release` requires macOS and an explicit local Docker Unix socket. It runs
@@ -130,6 +130,7 @@ Never stop unrelated processes to make a test pass.
 For a contract change, exercise the library, CLI, and MCP consumers. For a package
 change, install a fresh tarball in a separate project. Check its ESM import,
 TypeScript declarations, executable, native supervisor path, and packaged Keychain helper.
+Check the bundled skill references and local dashboard font assets too.
 
 Base support claims on exercised workflows. Record the tested operating system,
 Node version, framework, and agent client. Keep proposed support separate.
@@ -137,9 +138,12 @@ An SDK test alone does not establish host compatibility.
 
 ## Keep the repository small
 
-Current behavior belongs in tracked documentation. Research, private reviews,
-plans, fixtures, benchmark results, and screenshots belong in ignored `.local/`.
-Do not add credentials, tokens, generated output, or test artifacts to the package.
+Current behavior and maintained design rationale belong in tracked documentation.
+Keep private reviews, temporary plans, fixtures, and raw verification artifacts in ignored `.local/`.
+Curated product screenshots for the README belong in `assets/`.
+Use disposable examples without credentials or private URLs.
+Do not commit supplied designer specifications, HTML prototypes, or prototype runtime files.
+Do not add credentials, tokens, generated output, or raw test artifacts to the package.
 
 Before finishing a change, inspect the complete diff and package inventory.
 Remove duplicated state, unused options, speculative abstractions, and stale docs.

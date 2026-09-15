@@ -383,3 +383,31 @@ test('expired grants lose write permission and pending form capacity is recovere
     assert.equal(opened.length, 9);
   } finally { await setup.close(); await runtime.close(); }
 });
+
+test('management lists metadata and reopens only pending private requests without additional Keychain reads or approval', enabled, async t => {
+  const fixture = await testKeychain(t);
+  let opened = '';
+  t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened = url; });
+  const has = t.mock.method(keychain, 'has', async () => { throw new Error('Unapproved names must not be checked'); });
+  const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
+  const tokenFile = join(fixture.directory, 'management', 'token');
+  const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
+  const client = connectPreviewDaemon({ endpoint: daemon.endpoint, tokenFile });
+  t.after(async () => { await client.close(); await daemon.close(); });
+  const spec: PreviewSpec = { name: 'pending-project', type: 'command', cwd: fixture.directory, command: [process.execPath, '-e', 'process.exit(1)'], env: { API_SECRET: { secret: 'pending-project-api' } } };
+  const setup = await client.secretsSetup(spec);
+  assert.equal(setup.state, 'pending');
+  assert.equal((await client.list()).length, 0);
+  const summaries = await client.secretsList();
+  assert.equal(summaries[0].name, spec.name);
+  assert.ok(!JSON.stringify(summaries).includes(new URL(opened).hash.slice(1)));
+  assert.ok(!JSON.stringify(summaries).includes('requirements'));
+  await new Promise(resolve => setTimeout(resolve, 1050));
+  assert.equal((await client.secretsOpen(setup.id)).state, 'pending');
+  assert.equal(has.mock.callCount(), 0);
+  const canceled = await browserCall(daemon.endpoint, new URL(opened).hash.slice(1), 'cancel');
+  assert.equal(canceled.data.result?.state, 'canceled');
+  await assert.rejects(client.secretsOpen(setup.id), { code: 'CLOSED' });
+  assert.equal((await client.secretsList())[0].state, 'canceled');
+  assert.equal(has.mock.callCount(), 0);
+});

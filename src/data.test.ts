@@ -123,6 +123,8 @@ test('public recovery remains available after failed runtime close and releases 
     await assert.rejects(runtime.close(), { code: 'CLEANUP_INCOMPLETE' });
     const recovered = await runtime.stop('sample', { afterEngineRestart: true });
     assert.equal(recovered.data?.cleanup, undefined);
+    assert.equal(recovered.latest?.state, 'stopped');
+    assert.equal(recovered.latest?.error, undefined);
     await runtime.close();
     await runtime.close();
     assert.equal((await runtime.stop('sample')).data?.running, false);

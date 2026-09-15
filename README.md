@@ -20,11 +20,14 @@ previewhost starts services in dependency order and waits for them to become rea
 When you replace a preview, its local URL stays the same.
 New requests switch to the replacement services only after they pass readiness checks.
 
+![Previewhost dashboard with a frontend, API, PostgreSQL and Redis in an isolated worktree](./assets/dashboard.png)
+
 Control environments through the CLI, MCP tools, or an embedded Node.js library:
 
 - [CLI](#use-the-cli): control previews from a terminal or script.
 - [MCP](#use-mcp): give an agent tools to control previews.
 - [Library](#embed-the-library): manage previews inside your Node.js application.
+- [Dashboard](#manage-local-previews): review worktrees, open apps, inspect failures, and stop or restart previews.
 - [Optional agent skill](#use-the-agent-skill): give an agent instructions and recipe references for the CLI or MCP.
 
 ## Install
@@ -163,6 +166,53 @@ A living owner's permissions are reused; incompatible explicit launch options pr
 Manual `previewhost serve` remains available. To use it, pass `--endpoint` or `--token-file` explicitly to clients.
 That mode connects only and never starts or reconfigures an owner.
 See [connection configuration](docs/api.md#cli).
+
+## Manage local previews
+
+After you start a preview through the CLI or MCP, open another terminal and run:
+
+```sh
+previewhost dashboard
+```
+
+The command opens the dashboard in your default browser. No account or separate server setup is required.
+Keep this terminal open. Closing the page or stopping the dashboard does not stop your applications.
+Use the theme button in the navbar to switch between light and dark mode.
+
+Each worktree has its own preview, service connections, and managed database data.
+The overview shows what is ready and what needs attention.
+
+![Three Storefront worktrees with separate previews and an update that needs attention](./assets/dashboard-worktrees.png)
+
+| What you need | Dashboard control |
+| --- | --- |
+| Open the right worktree | Check its source path, then select **Open app**. |
+| Diagnose a failed update | Compare **Serving now** with **Latest update**, then open that attempt's **Logs**. |
+| Cancel an unfinished update | Select **Cancel update**. The previous application keeps running. |
+| Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
+| Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
+| Supply a missing secret | Select **Open private form** to approve access and enter values outside the chat. |
+
+A failed replacement leaves the previous application available. **Open app** still points to that serving attempt.
+
+<details>
+<summary>See a failed update with the previous application still available</summary>
+
+![Failed update beside the serving attempt, with the frontend, API, PostgreSQL and Redis still ready](./assets/dashboard-update.png)
+
+</details>
+
+**Start preview** uses the retained configuration and current source. It does not reload `preview.yml`, and its URL can change.
+After you fix an initial startup failure, **Retry start** reruns that attempt.
+Saving a recipe does not change the running preview. Stored secret values are not included in the dashboard's configuration view.
+If your agent ends its turn before private setup finishes, send it a short continuation message after saving.
+Canceled private requests stay canceled.
+
+The dashboard lists live automatic project owners created through the CLI or MCP.
+Standalone `serve` instances and embedded library runtimes are not automatically listed.
+It does not start owners or grant execution permissions.
+Use your editor or the CLI/MCP to edit configuration, delete retained data, or shut down an owner.
+See [dashboard operations](docs/api.md#local-dashboard-operations) for lifecycle and permission details.
 
 ## Use the CLI
 

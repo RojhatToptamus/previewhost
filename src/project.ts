@@ -1,16 +1,16 @@
 import { execFile, fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open } from 'node:fs/promises';
+import { lstat, open, opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import { z } from 'zod';
 import { checkTokenDirectory, connectPreviewDaemon, type ClientOptions } from './client.js';
 import { limits, secretIdSchema, type Failure } from './contracts.js';
-import { PreviewError } from './errors.js';
+import { PreviewError, failure } from './errors.js';
 import { canonicalDirectory, isWithin } from './spec.js';
 
 export interface ProjectOptions extends ClientOptions {
@@ -73,6 +73,30 @@ export async function selectMcpProject(requested: string | undefined, options: P
 export function projectOwnerDirectory(project: string): string {
   // Fixed-length filesystem address for an arbitrary absolute path, not a permission/configuration hash.
   return join(homedir(), '.local', 'share', 'previewd', 'projects', createHash('sha256').update(project).digest('hex'));
+}
+
+/** Discover records only; reading them never launches an owner or grants authority. */
+export async function discoverProjectOwners(directory = join(homedir(), '.local', 'share', 'previewd', 'projects')) {
+  const owners: Array<{ id: string; connection?: NonNullable<Awaited<ReturnType<typeof readConnection>>>; tokenFile: string; error?: Failure }> = [];
+  const stat = await lstat(directory).catch(error => { if (error.code !== 'ENOENT') throw error; return undefined; });
+  if (!stat) return owners;
+  await checkTokenDirectory(join(directory, 'token'));
+  const entries = await opendir(directory);
+  for await (const entry of entries) {
+    if (!/^[a-f0-9]{64}$/.test(entry.name)) continue;
+    if (owners.length >= 128) throw new PreviewError('BUSY', 'Too many project owners to display. Use the project CLI to inspect them.');
+    const ownerDirectory = join(directory, entry.name);
+    const tokenFile = join(ownerDirectory, 'token');
+    try {
+      const connection = await readConnection(ownerDirectory);
+      if (!connection) continue;
+      if (!isAbsolute(connection.projectDirectory) || createHash('sha256').update(connection.projectDirectory).digest('hex') !== entry.name) {
+        throw new PreviewError('UNAUTHORIZED', 'The owner record does not match its project directory.');
+      }
+      owners.push({ id: entry.name, connection, tokenFile });
+    } catch (error) { owners.push({ id: entry.name, tokenFile, error: failure(error) }); }
+  }
+  return owners;
 }
 
 async function readConnection(directory: string): Promise<{ endpoint: string; pid: number; projectDirectory: string } | undefined> {
@@ -206,6 +230,11 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
     finally { clients.delete(client); await client.close(); }
   }
   return {
+    describe: (name, id) => call(false, client => client.describe(name, id)),
+    startAgain: (name, id) => call(false, client => client.startAgain(name, id)),
+    saveConfiguration: (name, id) => call(false, client => client.saveConfiguration(name, id)),
+    secretsList: () => call(false, client => client.secretsList()),
+    secretsOpen: (id, opts) => call(false, client => client.secretsOpen(id, opts)),
     info: () => call(false, client => client.info()),
     inspect: async spec => {
       try { return await call(false, client => client.inspect(spec)); }

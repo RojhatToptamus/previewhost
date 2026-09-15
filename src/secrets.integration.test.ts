@@ -84,6 +84,33 @@ test('selected references resolve once before effects, reach only declared recip
   }
 });
 
+test('explicit failed-start retry recovers an unlocked Keychain and repeats ordinary authorization', enabled, async t => {
+  const fixture = await testKeychain(t);
+  await writeFile(join(fixture.directory, 'app.mjs'), app);
+  await setSecret('retry-project/api', 'FAKE_retry');
+  let authorizations = 0;
+  const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['retry-project/api'],
+    authorize: () => { authorizations++; return true; } });
+  try {
+    await fixture.control('lock');
+    const failed = await outcome(runtime, await runtime.start({ name: 'retry', type: 'command', cwd: fixture.directory,
+      command: [process.execPath, 'app.mjs'], env: { VALUE: { secret: 'retry-project/api' } } }));
+    assert.equal(failed.state, 'failed');
+    assert.equal(failed.error?.code, 'SECRET_STORE_UNAVAILABLE');
+    await assert.rejects(readFile(join(fixture.directory, 'starts')), { code: 'ENOENT' });
+    await fixture.control('unlock');
+    const retries = await Promise.allSettled([runtime.startAgain('retry', failed.id), runtime.startAgain('retry', failed.id)]);
+    assert.equal(retries.filter(result => result.status === 'fulfilled').length, 1);
+    const accepted = retries.find(result => result.status === 'fulfilled');
+    assert.ok(accepted?.status === 'fulfilled');
+    const ready = await outcome(runtime, accepted.value);
+    assert.equal(ready.state, 'ready');
+    assert.equal(authorizations, 2);
+    assert.equal((await body(ready.url!)).value, 'FAKE_retry');
+    await assert.rejects(runtime.startAgain('retry', failed.id), { code: 'ATTEMPT_EXPIRED' });
+  } finally { await runtime.close(); }
+});
+
 test('unselected and canceled secret resolution create no listener or command', enabled, async (t) => {
   const fixture = await testKeychain(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
@@ -107,6 +134,7 @@ test('unselected and canceled secret resolution create no listener or command', 
     await reading;
     await runtime.cancel('canceled', pending.candidate!.id);
     assert.equal((await runtime.get('canceled')).latest?.state, 'canceled');
+    await assert.rejects(runtime.startAgain('canceled', pending.candidate!.id), { code: 'STALE_ATTEMPT' });
     assert.equal((await runtime.get('canceled')).url, undefined);
     await assert.rejects(readFile(join(fixture.directory, 'starts')), { code: 'ENOENT' });
   } finally { await runtime.close(); }
