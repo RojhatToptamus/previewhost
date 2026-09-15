@@ -1,8 +1,8 @@
 # Releases
 
-previewhost uses Changesets 3 and GitHub Actions, starting at `0.1.0-alpha.0`.
-`.changeset/pre.json` selects the `alpha` prerelease channel.
-Only a maintainer's explicit promotion leaves that channel.
+previewhost uses Changesets 3 and GitHub Actions. Regular releases publish to `latest`.
+The `0.1.0` release exits the initial alpha channel.
+If prerelease mode is enabled again, `.changeset/pre.json` selects its channel; leaving it requires explicit maintainer approval.
 
 ## Make a release
 
@@ -14,15 +14,15 @@ Only a maintainer's explicit promotion leaves that channel.
 4. On that release PR, select **Approve workflows to run** when GitHub requests it.
    Review the changelog and wait for **Verify macOS package** to pass.
 5. Merge the release PR. Release verifies the merged source, publishes the
-   verified tarball to npm, and creates a GitHub prerelease with changelog notes.
+   verified tarball to npm, and creates a GitHub release with changelog notes. Alpha versions are marked as prereleases.
 
 Use patch for fixes, minor for features, and major for breaking changes.
 Prerelease numbering follows Changesets. Review the generated version in the release PR.
-Alpha releases use `npm install previewhost@alpha`.
+Regular releases use `npm install previewhost`. Alpha releases use `npm install previewhost@alpha`.
 Do not change the package version or npm tag by hand for normal releases.
 
 Documentation and tooling changes that do not affect the package need no changeset.
-Consumed alpha changesets are retained under `.changeset/pre/` for the eventual regular changelog.
+During prerelease mode, consumed changesets stay under `.changeset/pre/` until promotion includes them in the regular changelog.
 
 ## What runs
 
@@ -160,7 +160,7 @@ Changing repository visibility is a separate decision.
 
 ## Promote to a regular release
 
-On a branch, run:
+When prerelease mode is active, run on a branch:
 
 ```sh
 npm run changeset -- pre exit
@@ -169,7 +169,7 @@ npm run changeset -- pre exit
 Review the retained `.changeset/pre/` notes and include the exit change in a PR.
 After it merges, Changesets opens a regular release PR. Review its version and
 changelog, approve its CI if requested, and merge it to publish to `latest`.
-For the current initial alpha series, the regular version is `0.1.0`.
+The initial alpha series was promoted to `0.1.0`.
 The release workflow derives the expected tag from the version, so no workflow
 edit is needed. Existing `alpha` tags remain until deliberately changed.
 
@@ -180,7 +180,7 @@ For a test/build failure, fix the cause and rerun Release on `main`.
 Do not bypass the zero-skip release gate.
 
 If publication or GitHub release creation fails, first inspect
-`npm view previewhost@alpha versions dist-tags --json` and the GitHub release.
+`npm view previewhost versions dist-tags --json` and the GitHub release.
 Use `npm view previewhost@<version> --json` to check the attempted version directly.
 An npm version cannot be overwritten. If npm already has the version, repair only
 the missing tag or GitHub release after confirming the original source commit.

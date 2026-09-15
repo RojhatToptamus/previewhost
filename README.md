@@ -32,7 +32,7 @@ Control environments through the CLI, MCP tools, or an embedded Node.js library:
 
 ## Install
 
-This alpha supports macOS and requires Node.js 22.23 or later.
+Previewhost supports macOS and requires Node.js 22.23 or later.
 Development servers require the macOS `ps` and `lsof` tools.
 Stored secrets and managed databases require macOS 13 or later.
 Linux and Windows remain unverified.
@@ -40,7 +40,7 @@ Linux and Windows remain unverified.
 For CLI and MCP use, install the package globally:
 
 ```sh
-npm install -g previewhost@alpha
+npm install -g previewhost
 ```
 
 The npm package requires no native build tools.
@@ -146,7 +146,7 @@ Paths resolve relative to the recipe file.
 For library imports or a project-specific CLI, install the package in `previewhost-demo`:
 
 ```sh
-npm install previewhost@alpha
+npm install previewhost
 ```
 
 For a local CLI installation, use `./node_modules/.bin/previewhost` in place of `previewhost` in the commands below.
