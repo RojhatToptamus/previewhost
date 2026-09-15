@@ -1,5 +1,11 @@
 # previewhost
 
+## 0.2.0-alpha.0
+
+### Minor Changes
+
+- af214d3: Register MCP once across projects and worktrees with explicit source approval. Restore approved backend access after owner restart, and show configuration errors without hiding the running application.
+
 ## 0.1.0
 
 ### Minor Changes
