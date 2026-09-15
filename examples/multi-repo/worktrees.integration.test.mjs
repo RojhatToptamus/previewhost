@@ -134,10 +134,18 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
     assert.equal(description.spec.services.reporting.cwd, await realpath(join(backend, 'reporting')));
 
     // A task worktree can lack packages. Starting does not install them implicitly.
-    await assert.rejects(runCli(['start', '--file', '-'], stdout), (error) => {
-      assert.equal(JSON.parse(error.stderr).error.code, 'START_FAILED');
-      return true;
-    });
+    const missingStart = await runCli(['start', '--no-wait', '--file', '-'], stdout);
+    let missingResult;
+    while (!missingResult) {
+      t.signal.throwIfAborted();
+      try { missingResult = await runCli(['wait', spec.name, missingStart.candidate.id]); }
+      catch (error) {
+        // A wait timeout leaves startup running, including cold database preparation.
+        assert.equal(JSON.parse(error.stderr).error.code, 'TIMEOUT');
+      }
+    }
+    assert.equal(missingResult.state, 'failed');
+    assert.equal(missingResult.error.code, 'START_FAILED');
     await assert.rejects(readFile(join(backend, 'node_modules/pg/package.json')), { code: 'ENOENT' });
     assert.deepEqual(await sourceState(), before);
     // The synthetic caller supplies an independent installed tree without registry traffic.
