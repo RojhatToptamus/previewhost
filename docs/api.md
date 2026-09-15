@@ -356,6 +356,20 @@ Foreground `serve` still requires `--data-dir` for managed databases.
 data deletion/recovery and private secret setup through the trusted daemon. `stop --after-engine-restart`
 requests recovery after a Docker Engine restart, as described above. It never implies data deletion.
 
+### Managed databases with MCP
+
+Start your local Docker Engine and [download the required database images](../examples/multi-repo/README.md#install-the-dependencies).
+For Docker Desktop on macOS, append this argument to the MCP registration command after `--allow-exec`:
+
+```sh
+--docker-socket "$HOME/.docker/run/docker.sock"
+```
+
+In Cursor, add `"--docker-socket"` and the expanded absolute socket path as two entries in `args`.
+JSON does not expand `$HOME`. For another local Engine, use its Unix socket path. Docker CLI context selection does not configure Previewhost.
+Each automatic project owner uses separate private data storage. Do not supply one shared `--data-dir` across projects.
+If an owner already runs with different settings, follow the [owner restart instructions](troubleshooting.md#the-client-cannot-find-the-daemon).
+
 ## Stored secrets
 
 Stored secrets require macOS 13 or later and the packaged Keychain helper.

@@ -247,24 +247,21 @@ previewhost shutdown
 
 ## Use MCP
 
-The MCP client starts the stdio adapter, which finds or starts the persistent project owner.
-A connection can serve multiple chats. Each agent supplies its actual worktree as `project` on every tool call.
+Register Previewhost once so your agent can run and manage local applications across projects and worktrees.
 
-Install Previewhost globally once, then register it in each client you use. No repository paths or root lists are needed.
+[Install Previewhost globally](#install), then choose your client. No repository paths or root lists are needed.
 
-**Codex**
+### Codex
+
+Run in your terminal:
 
 ```sh
 codex mcp add previewhost -- previewhost mcp --allow-exec
 ```
 
-**Claude Code**
+### Cursor
 
-```sh
-claude mcp add --scope user --transport stdio previewhost -- previewhost mcp --allow-exec
-```
-
-**Cursor** — add this entry to `~/.cursor/mcp.json`, preserving other servers:
+Add Previewhost to `~/.cursor/mcp.json` without removing other servers:
 
 ```json
 {
@@ -277,34 +274,38 @@ claude mcp add --scope user --transport stdio previewhost -- previewhost mcp --a
 }
 ```
 
-Enable the server in your client. On first use, approve the exact project and any separate backend source directories.
-Each worktree needs its own approval. Reconnection requires approval again; running previews remain available.
-An agent-supplied path never grants access. Clients must support MCP form confirmation; cancellation leaves access denied.
-Existing registrations with explicit `--root` or `--project` retain their restrictions.
+Enable Previewhost in Cursor’s MCP settings.
 
-For managed PostgreSQL or Redis, start Docker and add `--docker-socket` with its local socket to the server arguments.
-For Docker Desktop on macOS, this is normally `$HOME/.docker/run/docker.sock`; expand `$HOME` before placing it in JSON.
-Each project gets separate private data storage. Do not use one shared `--data-dir` across projects.
-See [database prerequisites](examples/multi-repo/README.md) and [client verification](docs/integrations.md).
-If your client cannot find the executable, see [PATH troubleshooting](docs/troubleshooting.md#the-client-cannot-find-previewhost).
+### Claude Code
 
-Ask the agent:
+Run in your terminal:
 
-```text
-Change this button and preview the app with Previewhost.
+```sh
+claude mcp add --scope user previewhost -- previewhost mcp --allow-exec
 ```
 
-The agent inspects application dependencies, requests access where needed, and runs the frontend, backend, and required databases.
-It reuses root `preview.yml` when present. Invalid YAML must be repaired; it is never silently ignored.
-Without YAML, the agent submits a direct spec. To save it, ask “Save this setup as preview.yml.”
-Secret values belong only in the private browser form.
+### Preview your application
 
-Open `previewhost dashboard` to compare environments, inspect each attempt's configuration and errors, or stop and restart an environment.
-A broken root YAML file is shown separately from the configuration of an application that is already serving.
+Ask the agent in your project chat:
 
-Open the returned URL and check the application. After use, ask the agent to stop its preview.
-A client disconnect leaves previews active.
-For owner teardown, use `previewhost shutdown` or ask the agent to call `preview_shutdown`. This stops every preview on that owner.
+```text
+Change this button and preview the application with Previewhost.
+```
+
+- **Execution:** `--allow-exec` permits trusted application commands, managed database operations, and private secret setup as your local user.
+- **Databases:** Managed PostgreSQL or Redis requires Docker, local database images, and [socket configuration](docs/api.md#managed-databases-with-mcp).
+- **Approvals:** Approve project and backend access in your client. Approve secret names and enter missing values only in the private browser form. Your client can also require individual tool approvals.
+
+`preview.yml` is optional. The agent reuses it when present and reports invalid YAML. Configuration is saved only when you ask.
+
+Open the dashboard to compare previews, inspect configuration and errors, or stop and restart an environment:
+
+```sh
+previewhost dashboard
+```
+
+See [advanced configuration](docs/api.md#http-and-mcp), [troubleshooting](docs/troubleshooting.md), and [tested clients and limitations](docs/integrations.md#september-15-global-onboarding-check).
+The [agent skill](#use-the-agent-skill) is optional and installed separately from MCP registration.
 
 ## Embed the library
 
