@@ -24,6 +24,7 @@ Use CLI `--project DIR` to select an explicit project.
 For MCP, supply this chat's absolute worktree path as `project` on every tool call.
 Keep that project with its attempt and secret-request IDs. A shared MCP connection does not identify the current chat.
 Use one global registration with `--root /absolute/repository` for its authorized checkout and registered Git worktrees.
+On `SOURCE_DENIED`, keep the actual worktree and ask the user to correct the registration. Do not copy or relocate sources to bypass denial.
 A fixed `--project` is a default for a single-project client, not a replacement for worktree selection.
 On a cold start, trusted commands need `--allow-exec`; selected inputs and names use `--env` and `--secret`.
 For example, register `previewhost mcp --root /absolute/repository --allow-exec`.
@@ -89,7 +90,7 @@ If startup fails, read that attempt's logs and error before changing the recipe.
 
 Stop the task's previews when cleanup is requested or their source will be removed.
 Stop preserves source and owned database data. Attached servers and databases remain under their original owner.
-Use CLI `shutdown` or MCP `preview_shutdown` only for requested owner teardown; it stops every preview on that owner.
+Use CLI `shutdown` or MCP `preview_shutdown` only for requested owner teardown; it stops every preview on that owner, ends dynamic secret approvals, and leaves other project owners unaffected.
 Delete retained data only on an explicit request.
 For incomplete cleanup or uncertain process ownership, use the [recovery guide](references/docs/troubleshooting.md#replacement-or-cleanup-is-incomplete).
 Retain affected source until cleanup is complete.

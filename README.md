@@ -178,6 +178,7 @@ previewhost dashboard
 The command opens the dashboard in your default browser. No account or separate server setup is required.
 Keep this terminal open. Closing the page or stopping the dashboard does not stop your applications.
 Use the theme button in the navbar to switch between light and dark mode.
+Private secret forms use the same design and theme control. Browser preferences are saved separately for each local address.
 
 Each worktree has its own preview, service connections, and managed database data.
 The overview shows what is ready and what needs attention.

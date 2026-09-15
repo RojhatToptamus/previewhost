@@ -2,7 +2,7 @@ import { chmod, cp, mkdir, rm } from 'node:fs/promises';
 import { basename } from 'node:path';
 await chmod(new URL('../dist/cli.js', import.meta.url), 0o755);
 
-// Both compiled entry points serve the same bundled dashboard fonts.
+// Both compiled entry points serve the same bundled UI fonts.
 for (const output of ['dist', '.local/test-build']) {
   await cp(new URL('../src/fonts/', import.meta.url), new URL(`../${output}/fonts/`, import.meta.url), { recursive: true });
 }

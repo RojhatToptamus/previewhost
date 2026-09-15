@@ -66,7 +66,7 @@ export async function selectMcpProject(requested: string | undefined, options: P
       } catch { /* Non-Git or inaccessible roots cannot authorize another checkout. */ }
     }
   }
-  if (!permitted) throw new PreviewError('SOURCE_DENIED', 'The project must be within a configured root or be a registered Git worktree of that repository.');
+  if (!permitted) throw new PreviewError('SOURCE_DENIED', 'The project must be within a configured root or be a registered Git worktree of that repository. Register the repository itself with --root, not its parent folder, to include external worktrees. Keep this chat’s actual source path; do not copy or relocate it to bypass this denial.');
   return { ...options, projectDirectory: project, allowedRoots: options.allowedRoots ? [...new Set([project, ...roots])] : [project] };
 }
 
@@ -212,7 +212,7 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
       if (options.dataDirectory) expected.dataDirectory = resolve(options.dataDirectory);
       if (options.dockerSocket) expected.dockerSocket = resolve(options.dockerSocket);
       for (const key of Object.keys(expected) as Array<keyof ProjectOwnerInfo>) {
-        if (!isDeepStrictEqual(expected[key], actual.data[key])) throw new PreviewError('INVALID_INPUT', `The living project owner has different ${key}. Its permissions were not changed. Shut it down explicitly before launching with new options.`);
+        if (!isDeepStrictEqual(expected[key], actual.data[key])) throw new PreviewError('INVALID_INPUT', `The owner for ${root} has different ${key}. Its permissions were not changed. To apply new options, explicitly shut down this project using CLI shutdown with --project set to that path and no launch overrides. This stops only that owner’s previews and ends its dynamic secret approvals; stored values and managed data remain. Other project owners are unaffected.`);
       }
       if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The project client is closed.');
       return client;

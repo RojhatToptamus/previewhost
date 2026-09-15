@@ -50,7 +50,19 @@ Without an explicit connection, CLI uses the canonical project root. MCP uses th
 Check that the selected path is this chat's actual worktree.
 Read/status/cleanup operations never start a missing owner; inspect works offline.
 Start or secret setup can create the owner with the required current launch flags, such as `--allow-exec`.
-A living owner with incompatible settings is left unchanged. Shut it down explicitly before changing its launch configuration.
+A living owner with incompatible settings is left unchanged. To apply new options, explicitly shut down only that project:
+
+```sh
+previewhost shutdown --project /absolute/project
+```
+
+Use its actual path and omit launch overrides such as `--root`.
+Shutdown stops that owner's previews and ends dynamic secret approvals. Stored values and managed data remain.
+Other project owners are unaffected. Restart with the corrected registration and reapprove secrets when prompted.
+
+For `SOURCE_DENIED` on a Cursor-managed worktree, check the global registration's `--root`.
+Register the repository itself, not its parent folder, to authorize its registered Git worktrees.
+Do not copy sources into another directory or substitute another project to bypass the denial.
 
 After a crash, `CLEANUP_INCOMPLETE` names the retained connection file.
 Retain sources and verify old application/process-group cleanup, using the existing recovery checks below.

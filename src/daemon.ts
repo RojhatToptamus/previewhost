@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, open } from 'node:fs/promises';
+import { mkdir, open, readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import { dirname, resolve } from 'node:path';
@@ -68,6 +68,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
   const port = options.port ?? 9400;
   if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new PreviewError('INVALID_INPUT', 'The control port must be an integer between 0 and 65535.');
   const token = await createToken(resolve(options.tokenFile ?? defaultTokenFile()), options.runtime);
+  const [geist, geistMono] = await Promise.all(['geist.woff2', 'geist-mono.woff2'].map(file => readFile(new URL(`./fonts/${file}`, import.meta.url))));
   const runtime = options.runtime;
   let secrets: SecretSetup;
   const sockets = new Set<Socket>();
@@ -193,13 +194,14 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         throw new PreviewError('UNAUTHORIZED', 'Requests require the exact numeric loopback Host.');
       }
       const browser = ['/secrets/form', '/secrets/approve', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
-      const asset = req.url === '/secrets' ? [secretsPage, 'text/html'] : req.url === '/secrets.js' ? [secretsScript, 'text/javascript'] :
-        req.url === '/secrets.css' ? [secretsStyle, 'text/css'] : undefined;
+      const asset: [string | Buffer, string] | undefined = req.url === '/secrets' ? [secretsPage, 'text/html; charset=utf-8'] : req.url === '/secrets.js' ? [secretsScript, 'text/javascript; charset=utf-8'] :
+        req.url === '/secrets.css' ? [secretsStyle, 'text/css; charset=utf-8'] :
+        req.url === '/fonts/geist.woff2' ? [geist, 'font/woff2'] : req.url === '/fonts/geist-mono.woff2' ? [geistMono, 'font/woff2'] : undefined;
       if (asset && req.method === 'GET') {
         if (req.headers.origin !== undefined && (req.headers.origin !== secrets.origin || headerCount('origin') !== 1)) throw new PreviewError('UNAUTHORIZED', 'Use the same origin for this private page.');
-        res.writeHead(200, { 'content-type': `${asset[1]}; charset=utf-8`, 'content-length': Buffer.byteLength(asset[0]),
+        res.writeHead(200, { 'content-type': asset[1], 'content-length': Buffer.byteLength(asset[0]),
           'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'cross-origin-resource-policy': 'same-origin',
-          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", connection: 'close' });
+          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", connection: 'close' });
         res.end(asset[0]); return;
       }
       if (browser ? req.headers.origin !== secrets.origin || headerCount('origin') !== 1 : req.headers.origin !== undefined) {
