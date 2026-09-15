@@ -282,7 +282,9 @@ It sends the grant in a header to the exact origin.
 Browser history and the OS launch briefly hold the private URL.
 The launcher receives no ambient credential values.
 
-The form uses no cookies, browser storage, external assets, or telemetry.
+The form uses no cookies, external assets, or telemetry. It uses the dashboard’s shared
+styles and bundled fonts. Only the theme preference uses `localStorage` (`previewhost.theme`),
+separately for each local address. Secret values and private grants never enter browser storage.
 Host/Origin checks, JSON input, restrictive CSP, and scoped single-use grants
 protect writes. Labels render as text.
 Save validates all fields and consumes the grant before writes.

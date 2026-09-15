@@ -32,7 +32,8 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
       'supply a spec directly. Start, then wait for the returned attempt ID. For secrets, supply {secret: ID}; ' +
       'request private setup, wait on status, then retry startup only after complete. Never request values in chat or inspect the private form. ' +
       'Save preview.yml only on an explicit user request, using the original spec. An active owner survives MCP disconnect. ' +
-      'When the user wants to compare or manage local previews, suggest previewhost dashboard; it can inspect, stop, rerun, and explicitly save a retained configuration. ' +
+      'On SOURCE_DENIED, keep the actual worktree and ask the user to correct the registration; never copy sources or substitute another project to bypass it. ' +
+      'When the user wants to compare or manage local previews, suggest previewhost dashboard; it can inspect, stop, rerun, and explicitly save a retained configuration. Use preview_replace for replacement; the dashboard does not replace previews. ' +
       'If secret setup is canceled, stop and wait for an explicit user request before new setup or startup. Never assume accidental browser closure. ' +
       'Use absolute cwd/directory paths in direct specs, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. ' +
       'For new secret bindings, choose project-specific stored references, distinct from environment-variable names. Preserve existing references; share exact references only intentionally. ' +

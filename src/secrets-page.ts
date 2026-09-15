@@ -1,22 +1,50 @@
+import { uiStyle, themeScript } from './ui.js';
+
 // Fixed first-party assets. Request labels are inserted as text by the script.
 export const secretsPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>previewhost · Secrets</title><link rel="stylesheet" href="/secrets.css"><script src="/secrets.js" defer></script></head>
-<body><main><p class="brand">previewhost</p><h1 id="title">Private secret setup</h1>
+<body><header><span class="brand">previewhost</span><span class="slash">/</span><span id="crumb">Private setup</span><button id="theme" aria-label="Switch to dark theme">Dark</button></header><main><h1 id="title">Private secret setup</h1>
 <p id="message" role="status" aria-live="polite">Loading this request…</p>
 <dl id="context"></dl><form id="form" hidden autocomplete="off"><div id="fields"></div>
 <label class="reveal" id="reveal-label"><input type="checkbox" id="reveal"> Show values</label>
-<p id="scope"></p>
-<div class="actions"><button type="submit" id="submit">Save to Keychain</button><button type="button" id="cancel">Cancel</button></div></form>
-<p id="result" tabindex="-1"></p></main></body></html>`;
+<div class="actions"><button type="submit" id="submit" class="primary hero">Save to Keychain</button><button type="button" id="cancel" class="hero">Cancel</button></div><p id="scope"></p></form>
+<div id="result" class="notice" role="status" tabindex="-1"></div></main></body></html>`;
 
-export const secretsStyle = `:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;color:light-dark(#202420,#ebeee9);background:light-dark(#f6f7f3,#181b19)}
-*{box-sizing:border-box}body{margin:0}main{max-width:660px;margin:7vh auto;padding:28px}h1{font-size:1.75rem;line-height:1.2;margin:12px 0 20px}.brand{font-size:.9rem;font-weight:700;letter-spacing:.04em}p{color:light-dark(#51594f,#bbc4b7)}
-dl{margin:28px 0;overflow-wrap:anywhere}dt{font-size:.8rem;color:light-dark(#60695e,#a9b2a5);margin-top:16px}dd{margin:4px 0}label{display:block;font-weight:600}.recipient{display:block;font-size:.85rem;font-weight:400;color:light-dark(#60695e,#a9b2a5);margin:4px 0 8px;overflow-wrap:anywhere}
-.field{margin:24px 0}textarea{width:100%;min-height:72px;padding:12px;font:16px/1.5 ui-monospace,monospace;border:1px solid light-dark(#9da798,#687262);border-radius:6px;background:light-dark(#fff,#21261f);color:inherit;resize:vertical;-webkit-text-security:disc}form.show textarea{-webkit-text-security:none}
-.reveal{display:flex;align-items:center;gap:8px;font-size:.9rem;font-weight:400}input[type=checkbox]{width:18px;height:18px}.actions{display:flex;gap:12px;margin-top:24px}button{border:1px solid light-dark(#9da798,#687262);border-radius:6px;padding:10px 24px;font:inherit;cursor:pointer;background:transparent;color:inherit}button[type=submit]{background:light-dark(#28563b,#b5d4a5);color:light-dark(#fff,#182815);border-color:transparent}button:disabled{opacity:.55;cursor:wait}:focus-visible{outline:3px solid light-dark(#2f754a,#b5d4a5);outline-offset:3px}[hidden]{display:none!important}#result:empty{display:none}@media(max-width:480px){main{margin:16px auto;padding:20px}.actions button{flex:1}}`;
+export const secretsStyle = uiStyle + `
+header #theme { margin-left:auto; }
+main { width:100%; max-width:720px; margin:0 auto; padding:40px 32px 64px; }
+h1 { margin-bottom:14px; }
+#message { color:var(--t3); font-size:13.5px; line-height:1.6; }
+dl { margin:26px 0; border:1px solid var(--border); border-radius:8px; padding:0 16px; }
+.context-row { display:grid; grid-template-columns:120px minmax(0,1fr); gap:16px; padding:12px 0; }
+.context-row+.context-row { border-top:1px solid var(--divider); }
+dt { color:var(--t5); font-size:12.5px; }
+dd { margin:0; min-width:0; overflow-wrap:anywhere; }
+.field { padding:18px 0; }
+.field+.field { border-top:1px solid var(--divider); }
+label { display:block; }
+.recipient { display:block; font-size:12.5px; color:var(--t4); margin:4px 0 10px; overflow-wrap:anywhere; }
+textarea { width:100%; min-height:80px; padding:12px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t1); resize:vertical; -webkit-text-security:disc; }
+form.show textarea { -webkit-text-security:none; }
+.reveal { display:flex; align-items:center; gap:8px; color:var(--t4); font-size:13px; margin:8px 0 24px; }
+input[type=checkbox] { width:16px; height:16px; accent-color:var(--inv-bg); }
+#scope { color:var(--t4); font-size:13px; line-height:1.6; padding-top:16px; border-top:1px solid var(--border); }
+.actions { margin-top:24px; }
+#result { margin-top:26px; }
+#result:empty,dl:empty { display:none; }
+@media(max-width:600px) {
+  header { padding:0 16px; }
+  main { padding:28px 20px 40px; }
+  h1 { font-size:26px; }
+  .context-row { grid-template-columns:1fr; gap:4px; }
+  .path { flex-wrap:wrap; }
+  .path-parent { flex-basis:100%; }
+  .path-tail { white-space:normal; overflow-wrap:anywhere; flex-shrink:1; }
+}
+`;
 
-export const secretsScript = `'use strict';
+export const secretsScript = "'use strict';" + themeScript + `
 (() => {
   let capability = location.hash.slice(1);
   history.replaceState(null, '', '/secrets');
@@ -34,25 +62,39 @@ export const secretsScript = `'use strict';
     if (!response.ok || data.error) throw new Error(data.error?.message || 'The request could not finish.');
     return data.result;
   }
-  function finish(text) { clear(); capability = ''; form.hidden = true; result.textContent = text; result.focus(); }
+  function finish(title, text, tone = '') {
+    clear(); capability = ''; form.hidden = true;
+    document.getElementById('title').textContent = title;
+    message.textContent = ''; result.className = 'notice ' + tone;
+    const copy = document.createElement('p'); copy.textContent = text;
+    result.replaceChildren(copy); result.focus();
+  }
   function completion(request) {
-    message.textContent = request.state === 'complete' ? 'Secret setup complete' : 'Some entries still need attention';
     const saved = request.saved.length ? 'Saved: ' + request.saved.join(', ') + '. ' : '';
     const reused = request.alreadyPresent.length ? 'Reused existing entries: ' + request.alreadyPresent.join(', ') + '. Those values were kept; any input for them was not applied. ' : '';
-    finish(saved + reused + (request.state === 'complete' ?
+    finish(request.state === 'complete' ? 'Secret setup complete' : 'Some entries still need attention', saved + reused + (request.state === 'complete' ?
       'No application was started. If your agent stopped waiting, return to it and send “Secrets saved—continue”.' :
-      (request.error?.message || 'The request did not finish.') + ' Earlier approvals and saved values remain. Open a new setup request to recheck: ' + request.remaining.join(', ')));
+      (request.error?.message || 'The request did not finish.') + ' Earlier approvals and saved values remain. Open a new setup request to recheck: ' + request.remaining.join(', ')), request.state === 'complete' ? '' : 'warning');
   }
-  function describe(label, value) {
+  function describe(label, value, machine = false) {
     const term = document.createElement('dt'); term.textContent = label;
-    const detail = document.createElement('dd'); detail.textContent = value;
-    document.getElementById('context').append(term, detail);
+    const detail = document.createElement('dd');
+    if (label === 'Source directory') {
+      const path = document.createElement('span'); path.className = 'path'; path.title = value;
+      const parts = value.split('/'); const tail = parts.splice(-2).join('/');
+      for (const [text, cls] of [[parts.length ? parts.join('/') + '/' : '', 'path-parent'], [tail, 'path-tail']]) {
+        const span = document.createElement('span'); span.className = cls; span.textContent = text; path.append(span);
+      }
+      detail.append(path);
+    } else { detail.textContent = value; if (machine) detail.className = 'machine'; }
+    const row = document.createElement('div'); row.className = 'context-row'; row.append(term, detail);
+    document.getElementById('context').append(row);
   }
   document.getElementById('reveal').addEventListener('change', event => form.classList.toggle('show', event.target.checked));
   document.getElementById('cancel').addEventListener('click', async () => {
     controls().forEach(control => { control.disabled = true; });
-    try { await call('cancel', {}); finish('Canceled. No application was started. Earlier approvals and saved values remain.'); }
-    catch (error) { finish(error.message); }
+    try { await call('cancel', {}); finish('Secret setup canceled', 'No application was started. Earlier approvals and saved values remain. Return to your agent only when you want to resume setup.'); }
+    catch (error) { finish('Could not cancel setup', error.message + ' Check setup status in your client before retrying.', 'warning'); }
   });
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -61,7 +103,7 @@ export const secretsScript = `'use strict';
       try {
         const approved = await call('approve', {});
         if (approved.state === 'pending') render(approved); else completion(approved);
-      } catch (error) { finish(error.message + ' Check setup status before retrying.'); }
+      } catch (error) { finish('Could not approve access', error.message + ' Check setup status in your client before retrying.', 'warning'); }
       return;
     }
     const values = Object.create(null);
@@ -77,8 +119,7 @@ export const secretsScript = `'use strict';
       const saved = await call('save', { values });
       completion(saved);
     } catch (error) {
-      message.textContent = 'Check the save result in your client';
-      finish('The response was lost or rejected. A write may have completed. Check secret setup status before retrying. ' + error.message);
+      finish('Check the save result in your client', 'The response was lost or rejected. A write may have completed. Check secret setup status before retrying. ' + error.message, 'warning');
     } finally { for (const id of Object.keys(values)) delete values[id]; }
   });
   window.addEventListener('pagehide', () => { clear(); capability = ''; });
@@ -94,20 +135,25 @@ export const secretsScript = `'use strict';
       'Save stores values in macOS Keychain without starting an application. Earlier access approvals last until this runtime shuts down.';
     document.getElementById('submit').textContent = needsApproval ? 'Allow names' : 'Save to Keychain';
     document.getElementById('reveal-label').hidden = needsApproval;
-    describe('Runtime', location.origin);
+    describe('Runtime', location.origin, true);
     if (request.name) describe('Preview', request.name);
     for (const source of request.sources) describe('Source directory', source);
-    describe('Expires', new Date(request.expiresAt).toLocaleTimeString());
+    describe('Expires', new Date(request.expiresAt).toLocaleTimeString(), true);
     for (const id of request.remaining) {
       const requirement = request.requirements.find(item => item.id === id);
       const wrapper = document.createElement('div'); wrapper.className = 'field';
-      const label = document.createElement(needsApproval ? 'strong' : 'label'); label.textContent = id;
+      const label = document.createElement(needsApproval ? 'strong' : 'label'); label.textContent = id; label.className = 'machine';
       const recipients = document.createElement('span'); recipients.className = 'recipient';
-      recipients.textContent = requirement.bindings.length ? 'Used here by: ' + requirement.bindings.map(item => (item.service ? item.service + ' · ' : '') + item.key).join(', ') : 'Shared entry; recipients depend on future requests.';
+      recipients.textContent = requirement.bindings.length ? 'Used here by: ' : 'Shared entry; recipients depend on future requests.';
+      requirement.bindings.forEach((item, index) => {
+        if (index) recipients.append(', ');
+        if (item.service) recipients.append(item.service + ' · ');
+        const key = document.createElement('code'); key.textContent = item.key; recipients.append(key);
+      });
       wrapper.append(label, recipients);
       if (!needsApproval) {
         const field = document.createElement('textarea');
-        field.id = 'secret-' + fields.children.length; field.dataset.id = id; field.required = true; field.spellcheck = false;
+        field.className = 'machine'; field.id = 'secret-' + fields.children.length; field.dataset.id = id; field.required = true; field.spellcheck = false;
         field.autocomplete = 'off'; field.autocapitalize = 'off'; field.setAttribute('autocorrect', 'off');
         label.htmlFor = field.id; wrapper.append(field);
       }
@@ -119,5 +165,5 @@ export const secretsScript = `'use strict';
   (async () => {
     if (!/^[a-f0-9]{64}$/.test(capability)) throw new Error('This private link is unavailable. Open a new secret setup request from your client.');
     render(await call('form', {}));
-  })().catch(error => { message.textContent = error.message; capability = ''; });
+  })().catch(error => { finish('Private setup unavailable', error.message, 'warning'); });
 })();`;

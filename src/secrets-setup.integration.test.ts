@@ -62,6 +62,16 @@ test('MCP missing → private save → status → ordinary retry keeps values an
     assert.equal(shell.status, 200);
     assert.match(shell.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
     assert.equal(shell.headers.get('cache-control'), 'no-store');
+    assert.match(shell.headers.get('content-security-policy')!, /font-src 'self';/);
+    for (const file of ['geist.woff2', 'geist-mono.woff2']) {
+      const font = await fetch(`${daemon.endpoint}/fonts/${file}`);
+      assert.equal(font.status, 200);
+      assert.equal(font.headers.get('content-type'), 'font/woff2');
+      assert.equal(font.headers.get('cross-origin-resource-policy'), 'same-origin');
+      assert.ok((await font.arrayBuffer()).byteLength > 1000);
+      assert.equal((await fetch(`${daemon.endpoint}/fonts/${file}`, { headers: { Origin: 'http://evil.example' } })).status, 401);
+    }
+    assert.equal((await fetch(`${daemon.endpoint}/fonts/unknown.woff2`)).status, 401);
     assert.ok(!(await shell.text()).includes(capability));
     assert.equal((await browserCall(daemon.endpoint, setup.result.id, 'form')).status, 401);
     const form = await browserCall(daemon.endpoint, capability, 'form');
