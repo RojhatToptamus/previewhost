@@ -20,7 +20,7 @@ Linux and Windows remain unverified, including static and attached previews.
 | Task Monki | HTTP attachment, approval, readiness, replacement, and independent stop | Embedded runtime and browser UI integration remain unverified |
 
 The MCP client, framework, browser, and Task Monki sections below record checks under the former package name, `previewd`.
-The September 13 checks below cover the renamed package's automatic-owner flow in Codex, Claude Code and Cursor.
+The September 15 check covers global project approval. The September 13 checks cover the renamed package's automatic-owner flow in Codex, Claude Code and Cursor.
 Older host results do not establish that flow.
 Agent skill checks identify their tested package separately.
 The configuration examples use the public `previewhost` executable from PATH.
@@ -33,6 +33,65 @@ Browser checks covered note writes, public backend routes, PostgreSQL and Redis 
 Stop and daemon restart retained the data. Explicit deletion removed the test's owned containers, volumes, and credentials.
 The external-database variant also passed with separate local PostgreSQL and Redis containers.
 Preview stop left those containers and their data under their original owner.
+
+## September 15 global-onboarding check
+
+The local `0.1.0` development build used one global registration per client, without repository lists.
+Checks used disposable repositories, an isolated test Keychain, fake credentials, and local Docker PostgreSQL.
+Executable paths and loaded JavaScript build fingerprints were recorded without tool arguments or secret values.
+Test-only injection routed Keychain calls to the disposable store; it was removed from global registrations afterward.
+This isolates credentials for verification and is not required user setup.
+
+| Actual client | Result |
+| --- | --- |
+| Cursor 3.20.21 | Two chats in separate worktree windows used the same MCP process. Each ran frontend, separate backend, and PostgreSQL. Updates and dashboard Stop/Start remained independent. |
+| Claude Code 2.1.271, interactive terminal | Full environment and private setup passed with individual tool approvals. Auto mode blocked project-access calls before they reached Previewhost. |
+| Codex CLI 0.154.0, interactive terminal | Project approval and a full environment passed. An initial literal dummy credential led to stronger guidance. A fresh project then used private setup, stopped after cancellation, and resumed full startup after delayed entry and a completed turn. |
+| Codex desktop | MCP initialization was observed, but native UI control was unavailable. No desktop workflow pass is claimed. |
+
+Cursor reused and explicitly saved YAML, diagnosed broken YAML, and recovered a failed update while the previous app kept serving.
+Private-form cancellation, delayed entry, existing-value reuse, and intentional sharing were exercised in Cursor/Claude workflows.
+Claude continued after private entry completed outside its interrupted turn. A finished turn can still need a continuation message.
+Brave verified real note writes through the frontend and backend, isolated database records, hostname/numeric URLs, and retained data after restart.
+The dashboard displayed the serving configuration and diagnosed broken root YAML separately.
+A controlled slow retry exposed a stale failure notice; the display condition was fixed and retested in Brave.
+Dashboard Cancel preserved the serving attempt. Configuration errors were checked in light/dark themes and a narrow window.
+Codex exposed lost backend-source access after owner shutdown. Startup and private setup now restore the connection's already approved roots.
+The regression failed before the fix and passed afterward over real stdio. The final installed build also passed live Codex owner recovery,
+including private reapproval, existing-value reuse, and an exact comparison of the retained database row.
+In that live retry, the agent also called `preview_access` again; the no-repeat-access recovery path was verified by the automated test.
+Claude and both Cursor chats reconnected, reapproved their projects, and found their existing environments unchanged.
+
+These observations establish behavior for these trials, not guaranteed model compliance.
+Client-native keyboard/clipboard failures interrupted some follow-up trials. They are not Previewhost runtime failures.
+The automated release suite passed 126 tests without skips; focused MCP and package-consumer checks also passed.
+Automated tests covered both negotiated MCP protocol paths, forged/replayed approval rejection, cancellation, symlink escape rejection,
+reconnection, owner restart, fixed-daemon restrictions, and source approval without command-execution authority.
+
+### Final-build follow-up
+
+Cursor 3.20.21 and interactive Claude Code 2.1.272 used the final local build from this branch.
+Installed JavaScript matched the build; both clients loaded the same recorded bundle fingerprint.
+The earlier tests above were retained for unaffected workflows instead of being repeated.
+
+Two Cursor-managed worktrees in one Agents window used one global registration and the same MCP process.
+Both agents made separate visible changes, ran frontend/backend/PostgreSQL, and applied a second update at their existing URLs.
+Brave confirmed separate database notes despite an intentionally shared secret reference and backend source repository.
+Each worktree required its own project and private-secret approval. Canceling one source request did not prevent the other from starting.
+The canceled agent stopped until explicitly asked to continue.
+
+Dashboard Stop/Start affected only the selected worktree and retained its note. Cursor and Claude owner recovery also retained database data.
+Claude restarted with its already approved backend source without another project-access call.
+Cursor called `preview_access` again after shutdown; its existing connection grant needed no new user approval.
+Both owners required private secret reapproval and reused the stored fake values. Cursor stopped after deliberate private-form cancellation,
+then recovered after an explicit continuation. Reconnecting MCP required fresh project approval while existing previews stayed available.
+
+The dashboard showed the actual sources and bindings for Claude's direct spec and Cursor's relative-path YAML.
+A controlled failed replacement and slow retry used the library; their failure and cancellation were checked in Brave.
+The dashboard distinguished the failed latest attempt from the serving app, hid the stale failure notice during retry,
+and canceled only that retry. These controlled failures are harness checks, not agent-generated mistakes.
+Malformed-YAML, delayed-entry and completed-turn continuation checks above remained applicable to the unchanged implementation.
+The focused real-stdio access suite passed three tests with no skips. No runtime changes were needed in this follow-up.
 
 ## September 14 agent-guidance check
 
@@ -108,7 +167,7 @@ Skill installation does not install previewhost, start its daemon, configure MCP
 
 ## Connect an MCP client
 
-Follow the [README MCP quick start](../README.md#use-mcp) to install previewhost and select the project. The registration supplies authority for automatic owner startup.
+Follow the [README MCP quick start](../README.md#use-mcp) for one global registration. The client confirms project access; registration supplies execution and database startup options.
 Use the client configuration below for your host.
 Each example starts the adapter with `previewhost` from PATH.
 previewhost 0.1.0-alpha.0 passed static and README frontend/backend workflows through the CLI and MCP protocol.
@@ -126,8 +185,9 @@ Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.
 
-Discovery exposes 14 `preview_*` tools without an owner. Inspection works offline.
-Start/replace and secret setup can start the project owner; read/status/cleanup tools never do.
+Global registration exposes 15 `preview_*` tools, including `preview_access`; explicit-root and fixed-owner modes expose 14.
+Inspection works offline after project approval.
+Global project approval, start/replace and secret setup can start the owner; read/status/cleanup tools never do.
 A client disconnect leaves owner previews active.
 Development servers require daemon execution permission through `--allow-exec`.
 Client approval does not grant that permission.
@@ -139,7 +199,7 @@ Add this server to your [Codex MCP configuration](https://developers.openai.com/
 ```toml
 [mcp_servers.previewhost]
 command = "previewhost"
-args = ["mcp", "--project", "/absolute/project", "--allow-exec"]
+args = ["mcp", "--allow-exec"]
 ```
 
 ### September 13 automatic-owner check
@@ -153,7 +213,7 @@ This was not a zero-error transcript or a manual human approval usability study.
 Separate Chrome checks exercised the private approval, entry, completion, cancellation and unavailable-link screens at desktop and mobile sizes.
 Separate SDK/CLI checks exercised automatic owner sharing, concurrency, worktree roots, disconnection and restart.
 The live check preapproved this disposable server's tools. It did not retest every host approval policy below or the desktop registration UI.
-Use an explicit project path until the selected host's launch context has been verified.
+This historical check predates client-native project approval. Use the current global setup above.
 
 ### MCP approvals
 
@@ -185,7 +245,7 @@ features.guardian_approval = true
 features.tool_call_mcp_elicitation = true
 [mcp_servers.previewhost]
 command = "previewhost"
-args = ["mcp", "--project", "/absolute/project", "--allow-exec"]
+args = ["mcp", "--allow-exec"]
 
 [mcp_servers.previewhost.tools.preview_start]
 approval_mode = "prompt"
@@ -222,7 +282,9 @@ This test access restriction does not establish a previewhost defect.
 ## Cursor and other MCP hosts
 
 In Cursor, use the [global registration in the README](../README.md#use-mcp).
-It authorizes repository roots once. Each chat supplies its worktree through the tool's `project` field.
+Each chat supplies its worktree through the tool's `project` field.
+Global registration uses `preview_access` to request client confirmation without repository lists.
+The dated checks below describe earlier implementations; they do not establish verification of the new access flow.
 A fixed `--project` remains a default for clients that serve one project.
 
 Use the host's approval controls to enable the server and its tools.
@@ -246,7 +308,7 @@ An absolute source path in a spec did not change that owner selection.
 
 Using `--project ${workspaceFolder}` did not reliably repair the global Agents path in this client.
 Some launches resolved the placeholder, while others passed it literally.
-The supported setup uses one authorized repository root and the tool's required `project` argument on every call.
+That check used one authorized repository root and the tool's required `project` argument on every call. The current global setup replaces manual root lists with client confirmation.
 Both agents supplied their own checkout paths, including on later turns, through the same MCP process.
 A first call without the newly required field failed; the agent corrected it without configuration coaching.
 

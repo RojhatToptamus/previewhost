@@ -69,6 +69,14 @@ test('dashboard authenticates browser access, discovers isolated owners, and con
   assert.ok(!JSON.stringify(list.body).includes('tokenFile'));
   assert.ok(!JSON.stringify(list.body).includes(capability));
   const first = fixtures[0];
+  await writeFile(join(first.projectDirectory, 'preview.yml'), 'name: app\nservices: [\n');
+  const invalidConfig = (await api({ action: 'list' })).body.result.find((owner: any) => owner.id === first.id);
+  assert.equal(invalidConfig.configuration.error.code, 'INVALID_INPUT');
+  assert.match(invalidConfig.configuration.error.message, /line 3/);
+  assert.equal(await (await fetch(first.url)).text(), 'worktree-one');
+  await rm(join(first.projectDirectory, 'preview.yml'));
+  const recoveredConfig = (await api({ action: 'list' })).body.result.find((owner: any) => owner.id === first.id);
+  assert.equal(recoveredConfig.configuration, undefined);
   const before = await first.runtime.get('app');
   const expected = { active: before.active!.id, candidate: null, latest: before.latest!.id };
   assert.equal((await api({ action: 'saveConfiguration', owner: first.id, name: 'app', attemptId: before.active!.id, projectDirectory: directory })).body.error?.code, 'INVALID_INPUT');

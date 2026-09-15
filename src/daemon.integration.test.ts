@@ -65,6 +65,7 @@ test('configuration saving requires owner project metadata', async t => {
   const status = await f.client.start({ name: 'page', type: 'static', directory: f.directory });
   await f.client.wait('page', status.candidate!.id);
   await assert.rejects(f.client.saveConfiguration('page', status.candidate!.id), { code: 'INVALID_INPUT' });
+  await assert.rejects(f.client.allowSources([f.directory]), { code: 'EXECUTION_DENIED' });
   await assert.rejects(readFile(join(f.directory, 'preview.yml')), { code: 'ENOENT' });
 });
 

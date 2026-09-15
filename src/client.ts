@@ -49,6 +49,7 @@ export async function readToken(path: string): Promise<string> {
 
 /** Connects on demand. Closing this client never stops daemon-owned previews. */
 export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & SecretSetupApi & PreviewManagementApi & {
+  allowSources(directories: string[], signal?: AbortSignal): Promise<void>;
   close(): Promise<void>; shutdown(): Promise<void>; info(): Promise<ProjectOwnerInfo | null>;
 } {
   let endpoint: URL;
@@ -138,6 +139,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
   }
 
   return {
+    allowSources: (directories, signal) => call('sources/allow', { directories }, signal),
     describe: (name, attemptId) => call('describe', { name, attemptId }),
     startAgain: (name, attemptId) => call('startAgain', { name, attemptId }),
     saveConfiguration: (name, attemptId) => call('saveConfiguration', { name, attemptId }),

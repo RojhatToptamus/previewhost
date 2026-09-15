@@ -1,13 +1,16 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
+import { loadPreviewSpec } from './config.js';
+import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
 import { connectPreviewDaemon } from './client.js';
 import { limits, requestSchemas } from './contracts.js';
 import { readBody } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
-import { discoverProjectOwners, ownerInfoSchema } from './project.js';
+import { discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
 import { dashboardPage, dashboardScript, dashboardStyle } from './dashboard-page.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
@@ -44,7 +47,7 @@ export async function startDashboard(options: {
   server.on('connect', (_request, socket) => socket.destroy());
   server.on('upgrade', (_request, socket) => socket.destroy());
 
-  async function withOwner<T>(owner: Awaited<ReturnType<typeof discover>>[number], operation: (client: ReturnType<typeof connectPreviewDaemon>) => Promise<T>, readBudget?: number): Promise<T> {
+  async function withOwner<T>(owner: Awaited<ReturnType<typeof discover>>[number], operation: (client: ReturnType<typeof connectPreviewDaemon>, info: ProjectOwnerInfo) => Promise<T>, readBudget?: number): Promise<T> {
     if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The dashboard is closed.');
     if (!owner.connection) throw new PreviewError('UNAUTHORIZED', 'The project owner record is unavailable or unsafe.');
     const client = connectPreviewDaemon({ endpoint: owner.connection.endpoint, tokenFile: owner.tokenFile });
@@ -56,7 +59,7 @@ export async function startDashboard(options: {
       if (!info.success || info.data.projectDirectory !== owner.connection.projectDirectory || info.data.pid !== owner.connection.pid) {
         throw new PreviewError('UNAUTHORIZED', 'The responding owner does not match its project record.');
       }
-      return await operation(client);
+      return await operation(client, info.data);
     } catch (error) {
       if (expired) throw new PreviewError('TIMEOUT', 'This owner did not respond. Other projects remain available.');
       throw error;
@@ -73,12 +76,21 @@ export async function startDashboard(options: {
         const identity = { id: owner.id, project: owner.connection?.projectDirectory };
         try {
           if (owner.error) return { ...identity, error: owner.error };
-          return await withOwner(owner, async client => {
+          return await withOwner(owner, async (client, info) => {
+            const file = join(info.projectDirectory, 'preview.yml');
+            let configuration: { file: string; error?: ReturnType<typeof failure> } | undefined;
+            try {
+              await lstat(file);
+              configuration = { file };
+              await normalizeSources(parseSpec(await loadPreviewSpec(file, { allowedRoots: info.allowedRoots, signal: controller.signal })), info.allowedRoots);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') configuration = { file, error: failure(error, 'INVALID_INPUT') };
+            }
             const previews = await client.list();
-            try { return { ...identity, previews, requests: await client.secretsList() }; }
+            try { return { ...identity, configuration, previews, requests: await client.secretsList() }; }
             catch (error) {
               if (!(error instanceof PreviewError) || error.code !== 'NOT_FOUND') throw error;
-              return { ...identity, previews, requests: [], legacy: true };
+              return { ...identity, configuration, previews, requests: [], legacy: true };
             }
           }, 3000);
         } catch (error) { return { ...identity, error: failure(error) }; }

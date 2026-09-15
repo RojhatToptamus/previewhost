@@ -6,7 +6,7 @@ import { checkTokenDirectory } from './client.js';
 import { startDaemon } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
 import { ownerInfoSchema, projectOwnerDirectory, type ProjectLaunch } from './project.js';
-import { createPreviewRuntime } from './runtime.js';
+import { createPreviewRuntime, needsExecution } from './runtime.js';
 
 // One detached owner owns this permanent kernel lock until all runtime cleanup finishes.
 async function run(launch: ProjectLaunch): Promise<void> {
@@ -37,7 +37,8 @@ async function run(launch: ProjectLaunch): Promise<void> {
     const previous = await lstat(connection).catch(error => { if (error.code !== 'ENOENT') throw error; return undefined; });
     if (previous) throw new PreviewError('CLEANUP_INCOMPLETE', `A previous owner left ${connection}. Verify application cleanup before removing that connection file and retrying.`);
     runtime = await createPreviewRuntime({ allowedRoots: info.allowedRoots, inputs, secretIds: info.secretIds,
-      dataDirectory: info.dataDirectory, dockerSocket: info.dockerSocket, ...(info.allowExec ? { authorize: () => true } : {}),
+      dataDirectory: info.dataDirectory, dockerSocket: info.dockerSocket, authorize: request => info.allowExec || request.operation === 'allow-sources' ||
+        ((request.operation === 'start' || request.operation === 'replace') && !needsExecution(request.spec)),
     });
     daemon = await startDaemon({ runtime, tokenFile: join(directory, 'token'), port: 0, owner: info });
     const stop = () => { void daemon!.close().catch(() => {}); };

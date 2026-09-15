@@ -45,6 +45,8 @@ Secrets:
 Clients use one persistent owner per Git worktree root (cwd outside Git), or
 --project DIR. Start/replace and secret setup/edit start it automatically.
 Inspection works offline. Read/status/cleanup commands never create an owner.
+Global MCP without --root/--project uses preview_access for client approval.
+Approval starts a project owner; each worktree and additional source needs approval.
 MCP, inspect/start/replace, and secrets setup/edit accept the owner launch options
 shown above. Incompatible options leave a living owner unchanged.
 Explicit --endpoint or --token-file selects connection-only mode. Its defaults

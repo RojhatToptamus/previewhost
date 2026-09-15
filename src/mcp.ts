@@ -6,24 +6,43 @@ import { connectProject, selectMcpProject, type ProjectOptions } from './project
 import { limits, requestSchemas, secretRequestSchemas } from './contracts.js';
 import { failure, PreviewError } from './errors.js';
 import { loadPreviewSpec, savePreviewSpec } from './config.js';
+import { McpAccess, accessSchema } from './mcp-access.js';
+import { canonicalDirectory, normalizeSources, parseSpec } from './spec.js';
 import { version } from './version.js';
 
 /** All tools call the same public API; the MCP host owns tool approval UI. */
 export function createMcpServer(options: ProjectOptions = {}): { server: McpServer; close(): Promise<void> } {
   const fixed = options.endpoint !== undefined || options.tokenFile !== undefined;
+  const access = !fixed && !options.projectDirectory && !options.allowedRoots ? new McpAccess(options) : undefined;
   const clients = new Set<ReturnType<typeof connectProject>>();
   let closed = false;
   const projectField = z.string().min(1).max(4096).describe(
-    'Absolute root of this chat’s actual checkout/worktree. Supply the same project on every call, including status, secrets, stop and restart. Never substitute the main checkout. Must be within a configured root or its registered Git worktrees.');
+    'Absolute root of this chat’s actual checkout/worktree. Supply the same project on every call, including status, secrets, stop and restart. Never substitute the main checkout. Request preview_access first when this project or a required backend source has not been approved. Explicitly configured roots remain restrictions.');
   const scope = { project: fixed ? z.never().optional() : options.projectDirectory ? projectField.optional() : projectField };
   const inputShape = { ...scope, spec: requestSchemas.start.shape.spec.optional()
     .describe('Direct spec: all cwd and directory paths must be absolute, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. Use file instead for JSON/YAML with file-relative paths.'), file: z.string().min(1).max(4096).optional()
     .describe('One regular JSON/YAML file within the project or an explicitly allowed root, relative to the project directory. Sources resolve relative to this file. Omit both file and spec to use root preview.yml.') };
   const exclusive = (input: { file?: string; spec?: unknown }) => !(input.file !== undefined && input.spec !== undefined);
   const inputSchema = z.strictObject(inputShape).refine(exclusive, 'Supply either file or spec, never both.');
-  const load = (input: z.output<typeof inputSchema>, project: string, signal?: AbortSignal) => input.spec ?? loadPreviewSpec(resolve(project, input.file ?? 'preview.yml'), {
-    allowedRoots: [project, ...(options.allowedRoots ?? [])], signal,
-  });
+  const rootsFor = (project: string) => access ? access.roots(project) : Promise.resolve([project, ...(options.allowedRoots ?? [])]);
+  const load = async (input: z.output<typeof inputSchema>, project: string, signal?: AbortSignal) => {
+    const allowedRoots = await rootsFor(project);
+    const spec = input.spec ?? await loadPreviewSpec(resolve(project, input.file ?? 'preview.yml'), { allowedRoots, signal });
+    if (access) {
+      try { return await normalizeSources(parseSpec(spec), allowedRoots); }
+      catch (error) {
+        if (error instanceof PreviewError && error.code === 'SOURCE_DENIED') throw new PreviewError('SOURCE_DENIED', 'A source needs approval. Request preview_access with this project and its required backend/source directories, then retry the original configuration. Never relocate sources to bypass approval.');
+        throw error;
+      }
+    }
+    return spec;
+  };
+  const loadForStartup = async (input: z.output<typeof inputSchema>, project: string, client: ReturnType<typeof connectProject>, signal: AbortSignal) => {
+    const spec = await load(input, project, signal);
+    // Owner shutdown ends runtime grants, but not this connection's source approval.
+    if (access) await client.allowSources(await access.roots(project), signal);
+    return spec;
+  };
   const server = new McpServer({ name: 'previewhost', version }, {
     instructions:
       (fixed ? 'This connection uses one fixed owner; do not supply project. ' :
@@ -32,13 +51,13 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
       'supply a spec directly. Start, then wait for the returned attempt ID. For secrets, supply {secret: ID}; ' +
       'request private setup, wait on status, then retry startup only after complete. Never request values in chat or inspect the private form. ' +
       'Save preview.yml only on an explicit user request, using the original spec. An active owner survives MCP disconnect. ' +
-      'On SOURCE_DENIED, keep the actual worktree and ask the user to correct the registration; never copy sources or substitute another project to bypass it. ' +
+      'Use preview_access for unapproved projects and backend source directories when available; do not edit registration or relocate sources. Denial or cancellation means stop until the user asks to continue. ' +
       'When the user wants to compare or manage local previews, suggest previewhost dashboard; it can inspect, stop, rerun, and explicitly save a retained configuration. Use preview_replace for replacement; the dashboard does not replace previews. ' +
       'If secret setup is canceled, stop and wait for an explicit user request before new setup or startup. Never assume accidental browser closure. ' +
       'Use absolute cwd/directory paths in direct specs, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. ' +
-      'For new secret bindings, choose project-specific stored references, distinct from environment-variable names. Preserve existing references; share exact references only intentionally. ' +
+      'For new secret bindings, choose project-specific stored references, distinct from environment-variable names. Preserve existing references; share exact references only intentionally. Required credential variables use private secret bindings even for dummy local values; never invent credential literals. ' +
       'Commands are argv without a shell; use {port} and 127.0.0.1 or injected PORT/HOST. Reuse current task sources, ' +
-      'including uncommitted changes. Prepare dependencies with existing project commands. Keep a stable preview name. ' +
+      'including uncommitted changes. Inspect imports, API calls, package scripts and existing configuration to identify required backend repositories, databases and migrations. Run the complete environment; a frontend alone is insufficient when it needs an API. Ask for a backend location only when you cannot determine it. Prepare dependencies with existing project commands. Keep a stable preview name. ' +
       'Preview wait timeout or interruption leaves startup running. After an uncertain mutation, check get/list before retrying. ' +
       'Replacement overlaps processes and cannot undo source edits or migrations. Stop affected previews before ' +
       'conflicting shared preparation or source removal. While cleanup is uncertain, retain sources and block conflicting retries. ' +
@@ -60,7 +79,10 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
       }
       active++; counted = true;
       if (kind === 'wait') waits++;
-      const selected = fixed ? options : await selectMcpProject(input.project, options);
+      if (access) await access.roots(input.project);
+      const selected = access
+        ? { ...options, projectDirectory: await canonicalDirectory(input.project!) }
+        : fixed ? options : await selectMcpProject(input.project, options);
       if (closed) throw new PreviewError('CLOSED', 'The MCP adapter is closed.');
       client = connectProject(selected); clients.add(client);
       const value = { result: await fn(client, resolve(selected.projectDirectory ?? process.cwd())) };
@@ -76,6 +98,10 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   const read = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
   const cleanup = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
+  if (access) server.registerTool('preview_access', {
+    description: 'Request user approval for this chat’s actual project and additional backend source directories. Call before using an unapproved project. Never supplies or approves secrets. Decline/cancel ends the workflow until the user explicitly asks to resume. No registration edits are needed.',
+    inputSchema: accessSchema, annotations: write,
+  }, (input, context) => access.request(input, context));
   server.registerTool('preview_inspect', {
     description: 'Validate one preview or environment spec and describe sources, commands, bindings, and cleanup. Does not install dependencies, check application health, start resources, or grant permission. Environment values and database credentials are omitted.',
     inputSchema, annotations: read,
@@ -83,15 +109,15 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   server.registerTool('preview_start', {
     description: 'Start a named preview or environment from existing source. Commands run as argv without shell expansion. Use {port} and 127.0.0.1 for explicit listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. Returns a starting attempt; use preview_wait with its id. An environment becomes ready only after all its services. Execution and managed databases require daemon owner permission.',
     inputSchema, annotations: write,
-  }, (input, context) => run('request', input, async (client, project) => client.start(await load(input, project, context.mcpReq.signal))));
+  }, (input, context) => run('request', input, async (client, project) => client.start(await loadForStartup(input, project, client, context.mcpReq.signal))));
   server.registerTool('preview_replace', {
     description: 'Prepare a replacement while keeping active routes. All environment services become ready before the routes change together. Shared database data stays in place. Wait for the returned candidate id. Candidate failure keeps the old preview.',
     inputSchema: z.strictObject({ name: requestSchemas.replace.shape.name, ...inputShape }).refine(exclusive, 'Supply either file or spec, never both.'), annotations: { ...write, destructiveHint: true },
-  }, (input, context) => run('request', input, async (client, project) => client.replace(input.name, await load(input, project, context.mcpReq.signal))));
+  }, (input, context) => run('request', input, async (client, project) => client.replace(input.name, await loadForStartup(input, project, client, context.mcpReq.signal))));
   server.registerTool('preview_save_config', {
     description: 'Only on an explicit user request, create project-root preview.yml from the original prepared spec, never an inspect result. Validates sources, schema and dependencies, and preserves declarative references without reading secrets or owner inputs. Does not start or health-test an application. Project-local paths become relative; externalSources identifies nonportable paths. Create-only: an existing file or symlink is left untouched. Use the host editor for explicitly requested updates. Credential values must never enter this tool; use {secret: ID}.',
     inputSchema: requestSchemas.start.extend(scope), annotations: { ...write, openWorldHint: false },
-  }, (input, context) => run('request', input, (_client, project) => savePreviewSpec(input.spec, { projectDirectory: project, allowedRoots: options.allowedRoots, signal: context.mcpReq.signal })));
+  }, (input, context) => run('request', input, async (_client, project) => savePreviewSpec(input.spec, { projectDirectory: project, allowedRoots: await rootsFor(project), signal: context.mcpReq.signal })));
   server.registerTool('preview_list', {
     description: 'List bounded preview observations, source directories and retained database data, including names restored after owner restart. Use after a lost mutation response before retrying.',
     inputSchema: requestSchemas.list.extend(scope), annotations: read,
@@ -123,7 +149,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   server.registerTool('preview_secrets_setup', {
     description: 'Request exact secret references through the owner’s private browser form. For new bindings, choose project-specific references, not generic environment-variable names such as API_SECRET. Preserve existing references; use the same exact reference only for intentional sharing. After a canceled result, do not call this tool again or retry startup until the user explicitly asks to resume. The owner approves runtime access to unselected names, then enters only missing values privately. Existing entries are reused, never overwritten. Any authorized preview on this owner can use approved names until shutdown. Returns public metadata only. Never supply values or inspect the private form. Requires owner setup authorization. Saving starts no code; check status, then retry ordinary start/replace with the current spec only after complete.',
     inputSchema, annotations: write,
-  }, (input, context) => run('request', input, async (client, project) => client.secretsSetup(await load(input, project, context.mcpReq.signal), { signal: context.mcpReq.signal })));
+  }, (input, context) => run('request', input, async (client, project) => client.secretsSetup(await loadForStartup(input, project, client, context.mcpReq.signal), { signal: context.mcpReq.signal })));
   server.registerTool('preview_secrets_status', {
     description: 'Read or wait up to 25000ms for the public result of private secret setup. canceled is terminal: stop and wait for an explicit user request before new setup or startup. Do not assume accidental closure or ask for values in the canceled form. pending or saving after a wait timeout means setup is still in progress; keep the same request ID. An interrupted status wait leaves the form available. expired is terminal; ask before new setup. browser: failed reports launch failure, not cancellation. No values are read or returned. Complete records access approval and observed presence, not credential validity or future Keychain access. Check current preview state before startup with the current spec. Partial is terminal: its private form cannot be reused. After the owner fixes the reported issue, request fresh setup; do not keep waiting on a partial result or ask the owner to resubmit the old form. Retain this request ID with its original project. If the turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue” to resume.',
     inputSchema: secretRequestSchemas.status.extend(scope), annotations: read,
@@ -132,7 +158,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     description: 'Shut down this project owner and stop every preview it owns. Preserves managed data and stored Keychain values. Ends runtime secret access approvals and private forms. Use only when the user requests owner teardown.',
     inputSchema: requestSchemas.list.extend(scope), annotations: cleanup,
   }, input => run('cleanup', input, async client => { await client.shutdown(); return { stopped: true }; }));
-  return { server, close: async () => { closed = true; await Promise.all([...clients].map(client => client.close())); } };
+  return { server, close: async () => { closed = true; access?.close(); await Promise.all([...clients].map(client => client.close())); } };
 }
 
 /** Stdio is an adapter lifetime; EOF closes requests, never daemon previews. */

@@ -247,43 +247,65 @@ previewhost shutdown
 
 ## Use MCP
 
-The MCP client starts the stdio adapter, which finds or starts the persistent project owner.
-A connection can serve multiple chats. Each agent supplies its actual worktree as `project` on every tool call.
+Register Previewhost once so your agent can run and manage local applications across projects and worktrees.
 
-For Cursor, add one server to `~/.cursor/mcp.json`.
-Replace `/absolute/repository` with an authorized repository root. Its registered Git worktrees need no additional registration:
+[Install Previewhost globally](#install), then choose your client. No repository paths or root lists are needed.
+
+### Codex
+
+Run in your terminal:
+
+```sh
+codex mcp add previewhost -- previewhost mcp --allow-exec
+```
+
+### Cursor
+
+Add Previewhost to `~/.cursor/mcp.json` without removing other servers:
 
 ```json
 {
   "mcpServers": {
     "previewhost": {
       "command": "previewhost",
-      "args": ["mcp", "--root", "/absolute/repository", "--allow-exec"]
+      "args": ["mcp", "--allow-exec"]
     }
   }
 }
 ```
 
-Keep any existing server entries. Enable the server in your MCP client.
-Repeat `--root` for other authorized repositories or source roots.
-For managed databases, add `--docker-socket /absolute/docker.sock`. Each project gets separate private data storage.
-Do not supply one shared `--data-dir` for independent project owners.
-See [Cursor worktrees and global registration](docs/integrations.md#global-registration-and-cursor-worktrees) for host limits.
-For other clients, see [client configurations](docs/integrations.md#codex).
-If the client cannot find `previewhost`, use the [PATH troubleshooting steps](docs/troubleshooting.md#the-client-cannot-find-previewhost).
+Enable Previewhost in Cursor’s MCP settings.
 
-Ask the agent:
+### Claude Code
 
-```text
-Use previewhost to inspect and start this project. Prefer root preview.yml if it exists; otherwise construct a spec from the application.
-Do not create configuration unless I ask you to save it.
-Wait for the returned attempt to become ready, then give me its URL.
+Run in your terminal:
+
+```sh
+claude mcp add --scope user previewhost -- previewhost mcp --allow-exec
 ```
 
-Open the URL in a browser. Verify that it shows **Hello from the backend.**
-After use, ask the agent to stop the preview named `hello`.
-A client disconnect leaves previews active.
-For owner teardown, use `previewhost shutdown` or ask the agent to call `preview_shutdown`. This stops every preview on that owner.
+### Preview your application
+
+Ask the agent in your project chat:
+
+```text
+Change this button and preview the application with Previewhost.
+```
+
+- **Execution:** `--allow-exec` permits trusted application commands, managed database operations, and private secret setup as your local user.
+- **Databases:** Managed PostgreSQL or Redis requires Docker, local database images, and [socket configuration](docs/api.md#managed-databases-with-mcp).
+- **Approvals:** Approve project and backend access in your client. Approve secret names and enter missing values only in the private browser form. Your client can also require individual tool approvals. MCP reconnection requires project approval again; existing previews keep running.
+
+`preview.yml` is optional. The agent reuses it when present and reports invalid YAML. Configuration is saved only when you ask.
+
+Open the dashboard to compare previews, inspect configuration and errors, or stop and restart an environment:
+
+```sh
+previewhost dashboard
+```
+
+See [advanced configuration](docs/api.md#http-and-mcp), [troubleshooting](docs/troubleshooting.md), and [tested clients and limitations](docs/integrations.md#september-15-global-onboarding-check).
+The [agent skill](#use-the-agent-skill) is optional and installed separately from MCP registration.
 
 ## Embed the library
 

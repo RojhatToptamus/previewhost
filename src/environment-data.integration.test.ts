@@ -139,7 +139,7 @@ test('persistent-data authorization reserves the name and stop cancels pending d
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket,
     authorize(request) {
       if (request.operation === 'start' || request.operation === 'replace') return request.spec.name === 'owned';
-      if (request.operation === 'secrets-setup') return false;
+      if (request.operation === 'secrets-setup' || request.operation === 'allow-sources') return false;
       assert.equal(request.name, 'owned');
       return allowData ? true : new Promise<boolean>(() => {});
     } });
