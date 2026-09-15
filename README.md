@@ -294,7 +294,7 @@ Change this button and preview the application with Previewhost.
 
 - **Execution:** `--allow-exec` permits trusted application commands, managed database operations, and private secret setup as your local user.
 - **Databases:** Managed PostgreSQL or Redis requires Docker, local database images, and [socket configuration](docs/api.md#managed-databases-with-mcp).
-- **Approvals:** Approve project and backend access in your client. Approve secret names and enter missing values only in the private browser form. Your client can also require individual tool approvals.
+- **Approvals:** Approve project and backend access in your client. Approve secret names and enter missing values only in the private browser form. Your client can also require individual tool approvals. MCP reconnection requires project approval again; existing previews keep running.
 
 `preview.yml` is optional. The agent reuses it when present and reports invalid YAML. Configuration is saved only when you ask.
 

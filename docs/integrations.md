@@ -63,11 +63,35 @@ In that live retry, the agent also called `preview_access` again; the no-repeat-
 Claude and both Cursor chats reconnected, reapproved their projects, and found their existing environments unchanged.
 
 These observations establish behavior for these trials, not guaranteed model compliance.
-Current-build Cursor-managed worktrees in the same window were not exercised; the older check below is separate evidence.
 Client-native keyboard/clipboard failures interrupted some follow-up trials. They are not Previewhost runtime failures.
 The automated release suite passed 126 tests without skips; focused MCP and package-consumer checks also passed.
 Automated tests covered both negotiated MCP protocol paths, forged/replayed approval rejection, cancellation, symlink escape rejection,
 reconnection, owner restart, fixed-daemon restrictions, and source approval without command-execution authority.
+
+### Final-build follow-up
+
+Cursor 3.20.21 and interactive Claude Code 2.1.272 used the final local build from this branch.
+Installed JavaScript matched the build; both clients loaded the same recorded bundle fingerprint.
+The earlier tests above were retained for unaffected workflows instead of being repeated.
+
+Two Cursor-managed worktrees in one Agents window used one global registration and the same MCP process.
+Both agents made separate visible changes, ran frontend/backend/PostgreSQL, and applied a second update at their existing URLs.
+Brave confirmed separate database notes despite an intentionally shared secret reference and backend source repository.
+Each worktree required its own project and private-secret approval. Canceling one source request did not prevent the other from starting.
+The canceled agent stopped until explicitly asked to continue.
+
+Dashboard Stop/Start affected only the selected worktree and retained its note. Cursor and Claude owner recovery also retained database data.
+Claude restarted with its already approved backend source without another project-access call.
+Cursor called `preview_access` again after shutdown; its existing connection grant needed no new user approval.
+Both owners required private secret reapproval and reused the stored fake values. Cursor stopped after deliberate private-form cancellation,
+then recovered after an explicit continuation. Reconnecting MCP required fresh project approval while existing previews stayed available.
+
+The dashboard showed the actual sources and bindings for Claude's direct spec and Cursor's relative-path YAML.
+A controlled failed replacement and slow retry used the library; their failure and cancellation were checked in Brave.
+The dashboard distinguished the failed latest attempt from the serving app, hid the stale failure notice during retry,
+and canceled only that retry. These controlled failures are harness checks, not agent-generated mistakes.
+Malformed-YAML, delayed-entry and completed-turn continuation checks above remained applicable to the unchanged implementation.
+The focused real-stdio access suite passed three tests with no skips. No runtime changes were needed in this follow-up.
 
 ## September 14 agent-guidance check
 
@@ -161,7 +185,8 @@ Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.
 
-Discovery exposes 14 `preview_*` tools without an owner. Inspection works offline.
+Global registration exposes 15 `preview_*` tools, including `preview_access`; explicit-root and fixed-owner modes expose 14.
+Inspection works offline after project approval.
 Global project approval, start/replace and secret setup can start the owner; read/status/cleanup tools never do.
 A client disconnect leaves owner previews active.
 Development servers require daemon execution permission through `--allow-exec`.
