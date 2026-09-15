@@ -26,8 +26,8 @@ export async function loadPreviewSpec(file: string, options: { allowedRoots?: st
       });
     } finally { await handle.close(); }
   } catch (error) {
-    if (error instanceof PreviewError) throw error;
-    throw new PreviewError('INVALID_INPUT', 'Cannot read the preview spec file.');
+    if (error instanceof PreviewError) throw new PreviewError(error.code, `${path}: ${error.message}`);
+    throw new PreviewError('INVALID_INPUT', `${path}: Cannot read the preview spec file.`);
   }
 }
 
@@ -126,13 +126,22 @@ async function parseYaml(text: string): Promise<unknown> {
       schema: 'core', version: '1.2', stringKeys: true, uniqueKeys: true,
       resolveKnownTags: false, merge: false, customTags: [], prettyErrors: false,
     });
-    if (document.errors.length || document.warnings.length || document.directives?.yaml.version !== '1.2') throw new Error('Invalid YAML');
+    const issue = document.errors[0] ?? document.warnings[0];
+    if (issue) {
+      const before = text.slice(0, issue.pos[0]);
+      const line = before.split('\n').length;
+      const column = before.length - before.lastIndexOf('\n');
+      // Location and parser code help repair the file without echoing credential-bearing lines.
+      throw new PreviewError('INVALID_INPUT', `Invalid YAML at line ${line}, column ${column} (${issue.code}). Use YAML 1.2 without duplicate keys, aliases, merge keys, or tags.`);
+    }
+    if (document.directives?.yaml.version !== '1.2') throw new Error('Invalid YAML');
     visit(document, {
       Node(_key, node) { if (isAlias(node) || node.tag) throw new Error('Aliases and tags are unsupported'); },
       Pair(_key, pair) { if (isScalar(pair.key) && pair.key.value === '<<') throw new Error('Merge keys are unsupported'); },
     });
     return document.toJS({ maxAliasCount: 0 });
-  } catch {
+  } catch (error) {
+    if (error instanceof PreviewError) throw error;
     throw new PreviewError('INVALID_INPUT', 'Use one YAML 1.2 object without duplicate keys, aliases, merge keys, or tags.');
   }
 }

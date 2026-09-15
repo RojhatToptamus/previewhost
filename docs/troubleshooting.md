@@ -13,7 +13,7 @@ From a terminal where previewhost works, find its executable:
 command -v previewhost
 ```
 
-Use the returned absolute path as the MCP `command`. Retain the project and startup options in `args`.
+Use the returned absolute path as the MCP `command`. Retain the startup options in `args`.
 For example:
 
 ```json
@@ -21,7 +21,7 @@ For example:
   "mcpServers": {
     "previewhost": {
       "command": "/absolute/npm-prefix/bin/previewhost",
-      "args": ["mcp", "--project", "/absolute/project", "--allow-exec"]
+      "args": ["mcp", "--allow-exec"]
     }
   }
 }
@@ -40,7 +40,7 @@ npm root -g
 ```
 
 Use the Node path as `command`.
-Set `args` to `["/absolute/global/node_modules/previewhost/dist/cli.js", "mcp", "--project", "/absolute/project", "--allow-exec"]`.
+Set `args` to `["/absolute/global/node_modules/previewhost/dist/cli.js", "mcp", "--allow-exec"]`.
 Replace `/absolute/global/node_modules` with the directory from `npm root -g`.
 For a local package, use its absolute `node_modules/previewhost/dist/cli.js` path instead.
 
@@ -60,8 +60,9 @@ Use its actual path and omit launch overrides such as `--root`.
 Shutdown stops that owner's previews and ends dynamic secret approvals. Stored values and managed data remain.
 Other project owners are unaffected. Restart with the corrected registration and reapprove secrets when prompted.
 
-For `SOURCE_DENIED` on a Cursor-managed worktree, check the global registration's `--root`.
-Register the repository itself, not its parent folder, to authorize its registered Git worktrees.
+For `SOURCE_DENIED` with global registration, ask the agent to call `preview_access` for its actual project and dependency directories.
+For explicitly restricted registrations, use a matching `--root` for the repository itself, not its parent folder.
+That restriction includes its registered Git worktrees.
 Do not copy sources into another directory or substitute another project to bypass the denial.
 
 After a crash, `CLEANUP_INCOMPLETE` names the retained connection file.

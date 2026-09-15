@@ -17,10 +17,10 @@ This report now describes the implemented design and its verified limits. The Se
 
 A paused agent does not need an idle-shutdown exception or a new background job. The owner remains alive across ordinary inactivity and MCP disconnection. If the agent turn ends during private entry, the page tells the user to send “Secrets saved—continue”. Saving cannot independently create a new agent turn.
 
-Example MCP registration command, from the intended project:
+Global MCP registration now uses client-native project approval (see [current setup](../README.md#use-mcp)):
 
 ```sh
-codex mcp add previewhost -- previewhost mcp --project "$PWD" --allow-exec
+codex mcp add previewhost -- previewhost mcp --allow-exec
 ```
 
 Example CLI startup with optional root configuration:
@@ -49,12 +49,12 @@ JSON
 | Automatic owners | CLI and MCP share a persistent owner per canonical project. MCP routes each call independently, even over a shared connection. A lifetime kernel lock serializes startup. Explicit connection mode remains supported. |
 | Configuration input | CLI supports file or JSON stdin. MCP inspect/start/replace/setup supports exclusive `file` or `spec`, with root `preview.yml` as the default. |
 | Configuration saving | `preview_save_config({project, spec})` and the library helper create root YAML from validated declarative input, without overwriting existing content. |
-| Discoverability | The first 512 MCP instruction characters cover the normal workflow. The catalog has 14 tools, including save and owner shutdown. |
+| Discoverability | The first 512 MCP instruction characters cover the normal workflow. The catalog has 14 operational tools plus `preview_access` in global mode. |
 | CLI guidance | The package includes the maintained skill and materialized references. `--help` describes project mode; `--version` reports the installed version. |
 | Continuing startup | CLI start/replace reads current state after a wait timeout and can return `starting`. It does not misreport a continuing attempt as a failed start. |
 | Source ownership | Attempt summaries and incomplete cleanup records expose source directories, including older attempts still retaining resources. |
 
-The dashboard remains out of scope. The existing inspect/start/replace/list/get/stop operations, secret workflow, file loader and save helper remain reusable. There is no new configuration database or dashboard-specific service layer.
+The dashboard shipped after this original research. It reuses runtime operations and retained attempt configuration; current root-YAML validation is derived from the file. No configuration database or separate configuration lifecycle was added.
 
 ## Secret access and privacy
 
@@ -123,7 +123,7 @@ The initial save operation is deliberately create-only. Requested updates use th
 - A live Claude check misread a terminal partial secret result as a reusable form. MCP guidance now explicitly requires fresh setup after repair.
 
 The September 14 Cursor investigation found shared MCP connections with a launch directory unrelated to the active worktree.
-MCP now selects the project for each call within configured roots and their registered Git worktrees.
+MCP selects the project on each call. The subsequent global-onboarding change added native approval for each project and dependency directory, while preserving explicit-root restrictions.
 Automatic owners with an explicit Docker socket use separate private data directories by default.
 The change reuses project owners, source validation, data locks, and private secret approval. It adds no chat registry or second lifecycle.
 

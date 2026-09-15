@@ -250,38 +250,59 @@ previewhost shutdown
 The MCP client starts the stdio adapter, which finds or starts the persistent project owner.
 A connection can serve multiple chats. Each agent supplies its actual worktree as `project` on every tool call.
 
-For Cursor, add one server to `~/.cursor/mcp.json`.
-Replace `/absolute/repository` with an authorized repository root. Its registered Git worktrees need no additional registration:
+Install Previewhost globally once, then register it in each client you use. No repository paths or root lists are needed.
+
+**Codex**
+
+```sh
+codex mcp add previewhost -- previewhost mcp --allow-exec
+```
+
+**Claude Code**
+
+```sh
+claude mcp add --scope user --transport stdio previewhost -- previewhost mcp --allow-exec
+```
+
+**Cursor** — add this entry to `~/.cursor/mcp.json`, preserving other servers:
 
 ```json
 {
   "mcpServers": {
     "previewhost": {
       "command": "previewhost",
-      "args": ["mcp", "--root", "/absolute/repository", "--allow-exec"]
+      "args": ["mcp", "--allow-exec"]
     }
   }
 }
 ```
 
-Keep any existing server entries. Enable the server in your MCP client.
-Repeat `--root` for other authorized repositories or source roots.
-For managed databases, add `--docker-socket /absolute/docker.sock`. Each project gets separate private data storage.
-Do not supply one shared `--data-dir` for independent project owners.
-See [Cursor worktrees and global registration](docs/integrations.md#global-registration-and-cursor-worktrees) for host limits.
-For other clients, see [client configurations](docs/integrations.md#codex).
-If the client cannot find `previewhost`, use the [PATH troubleshooting steps](docs/troubleshooting.md#the-client-cannot-find-previewhost).
+Enable the server in your client. On first use, approve the exact project and any separate backend source directories.
+Each worktree needs its own approval. Reconnection requires approval again; running previews remain available.
+An agent-supplied path never grants access. Clients must support MCP form confirmation; cancellation leaves access denied.
+Existing registrations with explicit `--root` or `--project` retain their restrictions.
+
+For managed PostgreSQL or Redis, start Docker and add `--docker-socket` with its local socket to the server arguments.
+For Docker Desktop on macOS, this is normally `$HOME/.docker/run/docker.sock`; expand `$HOME` before placing it in JSON.
+Each project gets separate private data storage. Do not use one shared `--data-dir` across projects.
+See [database prerequisites](examples/multi-repo/README.md) and [client verification](docs/integrations.md).
+If your client cannot find the executable, see [PATH troubleshooting](docs/troubleshooting.md#the-client-cannot-find-previewhost).
 
 Ask the agent:
 
 ```text
-Use previewhost to inspect and start this project. Prefer root preview.yml if it exists; otherwise construct a spec from the application.
-Do not create configuration unless I ask you to save it.
-Wait for the returned attempt to become ready, then give me its URL.
+Change this button and preview the app with Previewhost.
 ```
 
-Open the URL in a browser. Verify that it shows **Hello from the backend.**
-After use, ask the agent to stop the preview named `hello`.
+The agent inspects application dependencies, requests access where needed, and runs the frontend, backend, and required databases.
+It reuses root `preview.yml` when present. Invalid YAML must be repaired; it is never silently ignored.
+Without YAML, the agent submits a direct spec. To save it, ask “Save this setup as preview.yml.”
+Secret values belong only in the private browser form.
+
+Open `previewhost dashboard` to compare environments, inspect each attempt's configuration and errors, or stop and restart an environment.
+A broken root YAML file is shown separately from the configuration of an application that is already serving.
+
+Open the returned URL and check the application. After use, ask the agent to stop its preview.
 A client disconnect leaves previews active.
 For owner teardown, use `previewhost shutdown` or ask the agent to call `preview_shutdown`. This stops every preview on that owner.
 

@@ -77,12 +77,23 @@ and directory listings. They exclude the private data directory and its resolved
 Attachments connect only to IPv4 loopback.
 These checks do not isolate hostile filesystem changes by another same-user process.
 
-MCP configuration reads use regular files inside the selected project or explicitly configured roots.
-Each automatic MCP call selects its project within the registration's roots or their registered Git worktrees.
-The adapter resolves canonical paths before selection. An unrelated repository outside those roots is denied.
-Git worktree membership extends the registered repository's source authority to its linked checkouts.
-This selection creates no execution permission or secret approval. Native commands still run with the user's permissions, without a sandbox.
-The loader checks resolved targets to reject symlink escapes. Direct CLI/library file input retains the caller's filesystem authority.
+Global MCP registration requires client confirmation of each canonical project and its source directories through `preview_access`.
+An agent-supplied path is a request, never authorization. Your home directory and its parents are rejected.
+Confirmation is bound to the exact server-held request, expires after five minutes, and cannot be replayed after completion.
+Denial, cancellation, malformed confirmation, or disconnect grants no connection access.
+A new connection needs approval again; already running owners and their private-secret approvals remain active.
+
+Approved source extensions use the authenticated owner control API and its existing authorization callback.
+The runtime owns the current source-root set; extensions do not restart it or alter its secret grants.
+Fixed daemons cannot extend their configured roots through this API.
+Startup and private setup restore the approved connection’s source grants after a clean owner restart; secret access still needs reapproval.
+
+Registrations with explicit `--root` or `--project` retain the existing root and registered-Git-worktree restrictions.
+All automatic calls select a project independently; a shared connection has no trusted chat identity.
+Approval allows that connection to manage the selected project's previews, not only one chat's calls.
+Source checks do not sandbox authorized native commands or create new execution or secret authority.
+MCP configuration files and submitted sources must resolve within approved roots; symlink escapes are rejected.
+Direct CLI/library file input retains the caller's filesystem authority.
 
 ## Automatic project owners
 

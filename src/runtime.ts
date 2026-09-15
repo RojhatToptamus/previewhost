@@ -41,6 +41,8 @@ interface Slot {
 }
 
 export interface PreviewRuntime extends PreviewApi {
+  sourceRoots(): string[];
+  allowSources(directories: string[], signal: AbortSignal): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
   /** The serving owner supplies the destination; control callers cannot choose a path. */
@@ -99,6 +101,23 @@ class Runtime implements PreviewRuntime {
       throw new PreviewError('INVALID_INPUT', 'At most 32 private directories can be protected.');
     }
     this.privateDirectories.add(canonical);
+  }
+
+  sourceRoots(): string[] { return [...this.roots]; }
+
+  async allowSources(directories: string[], signal: AbortSignal): Promise<void> {
+    this.assertOpen();
+    const checked = await Promise.all(directories.map(canonicalDirectory));
+    if (!this.authorize || !await abortable(Promise.resolve(this.authorize({ operation: 'allow-sources', directories: checked, signal })), signal)) {
+      throw new PreviewError('EXECUTION_DENIED', 'The owner does not permit additional sources.');
+    }
+    const again = await Promise.all(directories.map(canonicalDirectory));
+    if (checked.some((path, i) => path !== again[i])) throw new PreviewError('SOURCE_DENIED', 'A source directory changed during approval.');
+    this.assertOpen();
+    throwIfAborted(signal);
+    const roots = [...new Set([...this.roots, ...checked])];
+    if (roots.length > 32) throw new PreviewError('BUSY', 'At most 32 source roots may be approved for one owner.');
+    this.roots.splice(0, this.roots.length, ...roots);
   }
 
   async inspect(input: PreviewSpec) {
@@ -600,7 +619,7 @@ class Runtime implements PreviewRuntime {
 function isLive(slot: Slot): boolean { return !!(slot.active || slot.candidate || slot.operation || slot.stopping || slot.gateway || slot.cleanup.size); }
 function copySummary(summary: AttemptSummary): AttemptSummary { return structuredClone(summary); }
 function nodeCost(spec: EffectiveSpec): number { return spec.type === 'environment' ? Object.keys(spec.services).length : 1; }
-function needsExecution(spec: EffectiveSpec): boolean {
+export function needsExecution(spec: EffectiveSpec): boolean {
   return spec.type === 'command' || spec.type === 'environment' && Object.values(spec.services).some((service) =>
     service.type === 'command' || service.type === 'postgres' || service.type === 'redis');
 }

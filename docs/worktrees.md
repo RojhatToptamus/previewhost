@@ -13,11 +13,11 @@ The daemon owns the preview's application processes, routes, and managed databas
 5. Read the project commands and the selected environment file.
 6. Check each service path and its command entrypoint.
 
-One global MCP registration can authorize a repository and its registered Git worktrees through `--root`.
-The agent supplies `project`; the user does not register each worktree or change the registration between chats.
+Use one global registration without repository lists. `preview_access` asks for approval of each worktree and its required source directories.
+The agent supplies `project`; the user does not edit registration between chats. Explicit `--root` restrictions remain supported.
 A new chat does not imply a new MCP connection. No operation relies on the previously selected project.
 With `--docker-socket` and no `--data-dir`, each automatic owner uses separate private data storage.
-See the [actual Cursor check](integrations.md#global-registration-and-cursor-worktrees).
+See the [current client checks](integrations.md#september-15-global-onboarding-check).
 
 Branches do not need matching names. One repository can supply several services.
 Paths in a configuration file resolve relative to that file.

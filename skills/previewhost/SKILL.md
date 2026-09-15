@@ -23,11 +23,15 @@ CLI automatically finds or starts one owner for the Git worktree root, or cwd ou
 Use CLI `--project DIR` to select an explicit project.
 For MCP, supply this chat's absolute worktree path as `project` on every tool call.
 Keep that project with its attempt and secret-request IDs. A shared MCP connection does not identify the current chat.
-Use one global registration with `--root /absolute/repository` for its authorized checkout and registered Git worktrees.
-On `SOURCE_DENIED`, keep the actual worktree and ask the user to correct the registration. Do not copy or relocate sources to bypass denial.
-A fixed `--project` is a default for a single-project client, not a replacement for worktree selection.
+Use one global registration: `previewhost mcp --allow-exec`.
+Before using an unapproved project, call `preview_access` with the actual project and any required backend source directories.
+The client asks the user to approve those directories. A path in tool arguments is not permission.
+After denial or cancellation, stop until the user explicitly asks to resume. Never change registration or relocate source to bypass denial.
+Reconnection needs new project approval; existing owners and their private-secret approvals keep running.
+Explicit `--root` or `--project` registrations retain their restrictions; `preview_access` is unavailable in those modes.
+Identify required APIs, database connections and migrations from application code and documentation.
+A frontend-only preview is incomplete when the application needs a backend. Ask for missing dependency locations only when evidence is insufficient.
 On a cold start, trusted commands need `--allow-exec`; selected inputs and names use `--env` and `--secret`.
-For example, register `previewhost mcp --root /absolute/repository --allow-exec`.
 An explicit `--endpoint` or `--token-file` selects connection-only mode for an existing manual daemon.
 Never print token contents. In explicit connection mode, omit the MCP `project` argument.
 That connection cannot change owner launch permissions.
@@ -109,6 +113,7 @@ Do not serialize inspection output: it omits literal environment bindings.
 - Existing task worktrees or shared preparation: [worktree guide](references/docs/worktrees.md).
 - Missing stored credentials: [private secret entry](references/docs/api.md#stored-secrets).
   Use `preview_secrets_setup` / `preview_secrets_status`, or CLI `secrets setup` / `secrets status` with the selected connection.
+  Use private secret bindings for required credential variables, including dummy local API keys. Never invent credential literals.
   Let the owner approve unselected names and enter missing values in the private browser form. Never request values in chat or tool arguments, or inspect the form.
   For new bindings, choose a project-specific stored reference, such as `API_SECRET: {secret: "my-project/dev/api"}`.
   `API_SECRET` is the application variable; `my-project/dev/api` is the stored reference. Preserve existing references.

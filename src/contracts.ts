@@ -48,7 +48,7 @@ const argv = z.array(z.string().max(8192).refine((value) => !value.includes('\0'
 const envSchema = z.record(envKey, scalarValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'Remove PORT, HOST and PREVIEW_URL from env; Previewhost injects them at runtime.')
-  .default({}).describe('Application bindings only. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and numeric public origin. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
+  .default({}).describe('Application bindings only. Use {secret: ID} for credentials, including dummy local API keys; never invent credential literals in tool arguments. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and numeric public origin. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
 
 export const environmentValueSchema = z.union([
   scalarValueSchema,
@@ -59,7 +59,7 @@ export const environmentValueSchema = z.union([
 const serviceEnvironment = z.record(envKey, environmentValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'Remove PORT, HOST and PREVIEW_URL from env; Previewhost injects them at runtime.')
-  .default({}).describe('Application bindings only. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
+  .default({}).describe('Application bindings only. Use {secret: ID} for credentials, including dummy local API keys; never invent credential literals in tool arguments. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
 export const environmentServiceSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('static'), directory, spa: z.boolean().default(false) }),
   z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs }),
@@ -212,6 +212,7 @@ export interface PreviewApi {
   deleteData(name: string): Promise<PreviewStatus>;
 }
 export type AuthorizationRequest = (
+  | { operation: 'allow-sources'; directories: string[] }
   | { operation: 'start'; spec: EffectiveSpec }
   | { operation: 'replace'; spec: EffectiveSpec }
   | { operation: 'delete-data'; name: string; resources: DataStatus['resources'] }

@@ -471,15 +471,18 @@ MCP tools use the names `preview_inspect`, `preview_start`, `preview_replace`,
 `preview_list`, `preview_get`, `preview_wait`, `preview_logs`, `preview_cancel`,
 `preview_stop`, `preview_delete_data`, `preview_secrets_setup`, `preview_secrets_status`,
 `preview_save_config`, and `preview_shutdown` (14 tools).
+Global registration without fixed project/root options adds `preview_access({project, sources?})` (15 tools).
+It requests native client confirmation of exact directories before connecting to that project.
+Approval may start the owner but never an application. Denial/cancellation stops the flow; reconnecting requires approval again.
 Automatic MCP tools require an absolute `project` on every call unless the registration supplies `--project` as a default.
 This includes reads, waits, secret status, stopping, and owner shutdown. The field selects the owner, file base, and default source root.
-Selection permits configured roots and registered Git worktrees of those repositories. It does not grant execution or select secret names.
+Global selection requires confirmed project access. Explicit root registrations permit configured roots and their registered Git worktrees. Neither grants execution or selects secret names.
 A shared connection retains no current-chat or last-project state. Equal preview names in different projects remain independent.
 Explicit endpoint/token mode keeps one fixed owner and rejects `project` tool arguments.
 MCP inspect/start/replace/setup accepts either `spec` or `file`, never both.
 If both are omitted, it reads project-root `preview.yml`. Invalid or unreadable files are errors.
 Explicit file paths resolve from the MCP project; source paths resolve relative to that file.
-MCP files must resolve inside that project or an explicitly configured `--root`; symlink escapes are rejected.
+MCP files and sources must resolve within the connection’s approved roots or explicit configured roots; symlink escapes are rejected.
 The HTTP/runtime API continues to accept spec objects only. `reopen` remains owner-only.
 There is no public name-approval, secret edit, set, remove, value-read, or export tool.
 
@@ -492,8 +495,11 @@ Existing files, directories and symlinks produce `ALREADY_EXISTS`. Use a normal 
 Complete-file publication permits one concurrent creator and exposes no partial file.
 The same operation is available as `savePreviewSpec(spec, {projectDirectory, allowedRoots?, signal?})` in the library.
 
-`info` reports a project owner's project, PID, launch roots, execution mode, input keys, initial secret IDs and data/socket paths.
+`info` reports a project owner's project, PID, current source roots, execution mode, input keys, initial secret IDs and data/socket paths.
 Manual owners return `null`. Values and dynamic browser grants are not copied into connection files.
+Authenticated automatic-owner clients can call `allowSources(directories, signal?)` (`POST /sources/allow`).
+The runtime requires `authorize` to accept `operation: "allow-sources"`, rechecks paths, and updates its existing root set.
+This is an owner operation, not an agent-controlled approval argument. Fixed daemons reject it.
 Attempt summaries and incomplete cleanup records include `sources` so callers can identify directories still in use.
 
 Data deletion uses `POST /deleteData` with `{ "name": "shop" }`.

@@ -230,6 +230,7 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
     finally { clients.delete(client); await client.close(); }
   }
   return {
+    allowSources: (directories, signal) => call(true, client => client.allowSources(directories, signal)),
     describe: (name, id) => call(false, client => client.describe(name, id)),
     startAgain: (name, id) => call(false, client => client.startAgain(name, id)),
     saveConfiguration: (name, id) => call(false, client => client.saveConfiguration(name, id)),

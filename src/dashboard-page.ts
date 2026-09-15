@@ -14,7 +14,7 @@ export const dashboardPage = `<!doctype html>
 <script src="/dashboard.js"></script></body></html>`;
 
 function mountDashboard() {
-  type Owner = { id: string; project?: string; previews?: PreviewStatus[]; requests?: SecretSetupSummary[]; legacy?: boolean; error?: { message: string } };
+  type Owner = { id: string; project?: string; previews?: PreviewStatus[]; requests?: SecretSetupSummary[]; legacy?: boolean; configuration?: { file: string; error?: { message: string } }; error?: { message: string } };
   type Entry = { owner: Owner; name?: string; preview?: PreviewStatus };
   type Action = { label: string; run: () => void; danger?: boolean };
   type Tab = 'activity' | 'logs' | 'configuration';
@@ -85,8 +85,9 @@ function mountDashboard() {
     if (pending(entry).length) return { label: 'Needs secrets', tone: 'warning', note: p?.active ? 'App still serving' : 'Private setup requested' };
     if (p?.candidate || p?.busy) return { label: 'Starting', tone: 'neutral', note: p.active ? 'Previous attempt serving' : p.busy ? 'Operation in progress' : 'Startup checks in progress' };
     if (p?.latest?.state === 'failed') return { label: p.active ? 'Update failed' : 'Startup failed', tone: 'error', note: p.active ? 'Previous attempt serving' : 'Startup failed · not serving' };
+    if (!p && entry.owner.configuration?.error) return { label: 'Configuration error', tone: 'error', note: 'Fix preview.yml before startup' };
     if (!p) return { label: 'Not started', tone: 'muted', note: requests(entry).some(r => r.state === 'canceled') ? 'Private setup canceled' : 'No preview started' };
-    if (p?.active) return { label: 'Ready', tone: 'ready', note: p.latest?.state === 'canceled' ? 'Update canceled · app serving' : 'Startup checks passed' };
+    if (p?.active) return { label: 'Ready', tone: 'ready', note: entry.owner.configuration?.error ? 'preview.yml needs attention · app serving' : p.latest?.state === 'canceled' ? 'Update canceled · app serving' : 'Startup checks passed' };
     return { label: 'Stopped', tone: 'muted', note: p?.latest?.state === 'canceled' ? 'Startup canceled' : p?.data ? 'Data retained' : 'Not running' };
   }
   function shortProject(owner: Owner) { return owner.project?.split('/').filter(Boolean).at(-1) ?? 'Unavailable owner'; }
@@ -149,7 +150,7 @@ function mountDashboard() {
   function renderList() {
     projects.replaceChildren();
     document.querySelector('#overview')!.setAttribute('aria-current', String(!selection));
-    const attention = owners.flatMap(entries).filter(e => e.owner.error || ['error', 'warning'].includes(state(e).tone)).length;
+    const attention = owners.flatMap(entries).filter(e => e.owner.error || e.owner.configuration?.error || ['error', 'warning'].includes(state(e).tone)).length;
     document.querySelector('#attention-count')!.textContent = attention ? String(attention) : '';
     for (const owner of owners) {
       const list = visibleEntries(owner); if (!list.length) continue;
@@ -175,14 +176,14 @@ function mountDashboard() {
     }
     const running = all.filter(e => e.preview?.active).length;
     const starting = all.filter(e => e.preview?.candidate).length;
-    const attention = list.filter(e => e.owner.error || ['error', 'warning'].includes(state(e).tone));
-    detail.append(el('p', `${running} running · ${starting} starting · ${all.filter(e => e.owner.error || ['error', 'warning'].includes(state(e).tone)).length} need attention`, 'summary'));
+    const attention = list.filter(e => e.owner.error || e.owner.configuration?.error || ['error', 'warning'].includes(state(e).tone));
+    detail.append(el('p', `${running} running · ${starting} starting · ${all.filter(e => e.owner.error || e.owner.configuration?.error || ['error', 'warning'].includes(state(e).tone)).length} need attention`, 'summary'));
     if (!list.length) { detail.append(el('p', 'No matching previews.', 'empty')); return; }
     if (attention.length) {
       const region = el('div', '', 'attention-list');
       attention.forEach((entry, i) => {
         const row = el('div', '', 'notice attention-row');
-        const text = el('div'); text.append(el('h2', `${shortProject(entry.owner)} — ${entry.owner.error ? 'status unavailable' : state(entry).note.toLowerCase()}`), el('p', entry.owner.error ? 'Other projects remain available.' : entry.preview?.active ? 'Keep using the running app, or review what needs attention.' : 'Review this worktree before continuing.'));
+        const text = el('div'); text.append(el('h2', `${shortProject(entry.owner)} — ${entry.owner.error ? 'status unavailable' : entry.owner.configuration?.error ? 'preview.yml needs attention' : state(entry).note.toLowerCase()}`), el('p', entry.owner.error ? 'Other projects remain available.' : entry.preview?.active ? 'Keep using the running app, or review what needs attention.' : 'Review this worktree before continuing.'));
         row.append(text, navButton('Review', () => select(entry), i === 0 ? 'primary' : '')); region.append(row);
       }); detail.append(region);
     }
@@ -387,8 +388,8 @@ function mountDashboard() {
     };
     if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
     else if (pending(entry).length) addNotice('Private setup requested', 'Approve access and enter any missing values in the separate private form. Cancellation stays in that form.', 'warning');
-    else if (p?.latest?.state === 'failed') addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
-    else if (p?.latest?.state === 'canceled') addNotice(p.active ? 'The update was canceled. Your previous version is still running.' : 'Startup was canceled.', 'Nothing was started again automatically. Ask your agent to continue only when you are ready.');
+    else if (!p?.candidate && p?.latest?.state === 'failed') addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
+    else if (!p?.candidate && p?.latest?.state === 'canceled') addNotice(p.active ? 'The update was canceled. Your previous version is still running.' : 'Startup was canceled.', 'Nothing was started again automatically. Ask your agent to continue only when you are ready.');
     if (owner.legacy) addNotice('Owner update needed', 'This owner runs an older build. New controls require an explicit owner upgrade; this page will not restart it.');
     const row = el('div', '', 'actions');
     const canOpen = !!(p?.active && p.url); let primaryTaken = canOpen;
@@ -405,6 +406,9 @@ function mountDashboard() {
     if (!canOpen && !primaryTaken && p?.candidate) { const waiting = el('button', 'Waiting for URL', 'hero'); waiting.disabled = true; row.append(waiting); }
     row.append(controls); detail.append(row, el('p', hint(entry), 'hint'));
     if (p) { renderAttempts(p); renderServices(p); }
+    if (owner.configuration?.error) addNotice('preview.yml needs attention', owner.configuration.error.message + (p?.active ? ' The running app is unchanged. Its Configuration tab shows the serving attempt.' : ' Ask your agent to resolve this configuration error before starting.'), 'error');
+    else if (owner.configuration) detail.append(el('p', 'preview.yml is available for the next agent startup. Start again uses the retained attempt configuration.', 'muted'));
+
     if (owner.legacy && p?.active) message('Stop through the CLI', `Run previewhost stop ${p.name} from the project directory shown above; this owner cannot guard a stale dashboard action.`);
     if (!p?.active && !p?.candidate && !availableActions.length && !pending(entry).length) detail.append(el('p', `Ask your agent to start ${entry.name ?? 'an application'} in this worktree.`, 'muted'));
     renderTabs(entry);

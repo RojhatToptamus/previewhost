@@ -145,6 +145,12 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
 
   async function dispatch(method: string, value: unknown, signal: AbortSignal): Promise<unknown> {
     switch (method) {
+      case 'sources/allow': {
+        if (!options.owner) throw new PreviewError('EXECUTION_DENIED', 'Fixed daemons cannot extend their configured roots.');
+        const p = parse(z.strictObject({ directories: z.array(z.string().min(1).max(4096)).max(32) }), value);
+        await runtime.allowSources(p.directories, signal);
+        return null;
+      }
       case 'describe': { const p = parse(requestSchemas.describe, value); return runtime.describe(p.name, p.attemptId); }
       case 'startAgain': { const p = parse(requestSchemas.startAgain, value); return runtime.startAgain(p.name, p.attemptId); }
       case 'saveConfiguration': {
@@ -218,7 +224,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         throw new PreviewError('INVALID_INPUT', 'Use POST with Content-Type: application/json.');
       }
       const method = req.url?.slice(1) ?? '';
-      if (!Object.hasOwn(requestSchemas, method) && !['secrets/setup', 'secrets/status', 'secrets/edit', 'secrets/list', 'secrets/open', 'info', 'shutdown'].includes(method) && !browser) throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
+      if (!Object.hasOwn(requestSchemas, method) && !['sources/allow', 'secrets/setup', 'secrets/status', 'secrets/edit', 'secrets/list', 'secrets/open', 'info', 'shutdown'].includes(method) && !browser) throw new PreviewError('NOT_FOUND', 'Unknown control operation.');
       const cleanup = ['stop', 'cancel', 'shutdown'].includes(method);
       const waiting = method === 'wait' || method === 'secrets/status';
       if (active >= limits.controlRequests - (cleanup ? 0 : 2) || (waiting && waits >= limits.controlWaits)) {
@@ -236,7 +242,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         send(res, 200, { result });
       } else if (method === 'info') {
         parse(requestSchemas.list, value);
-        send(res, 200, { result: options.owner ?? null });
+        send(res, 200, { result: options.owner ? { ...options.owner, allowedRoots: runtime.sourceRoots() } : null });
       } else if (method === 'shutdown') {
         parse(requestSchemas.list, value);
         try { await stopRuntime(); send(res, 200, { result: null }); }

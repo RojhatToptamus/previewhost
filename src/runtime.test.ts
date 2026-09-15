@@ -330,3 +330,26 @@ test('saving preserves unselected symbolic inputs without resolving values and e
   await assert.rejects(runtime.saveConfiguration('declaration', attempt.id, other, controller.signal), code('CLOSED'));
   await assert.rejects(fs.stat(path.join(other, 'preview.yml')), { code: 'ENOENT' });
 });
+
+test('additional source approval preserves roots on denial and cancellation', async t => {
+  const outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'previewhost-source-')));
+  t.after(() => fs.rm(outside, { recursive: true, force: true }));
+  let decision: 'deny' | 'cancel' | 'allow' = 'deny';
+  const controller = new AbortController();
+  const { runtime } = await fixture(t, request => {
+    if (request.operation !== 'allow-sources') return true;
+    if (decision === 'cancel') controller.abort();
+    return decision === 'allow';
+  });
+  const initial = runtime.sourceRoots();
+  await assert.rejects(runtime.allowSources([outside], controller.signal), code('EXECUTION_DENIED'));
+  assert.deepEqual(runtime.sourceRoots(), initial);
+  decision = 'cancel';
+  await assert.rejects(runtime.allowSources([outside], controller.signal));
+  assert.deepEqual(runtime.sourceRoots(), initial);
+  decision = 'allow';
+  await runtime.allowSources([outside], new AbortController().signal);
+  assert.deepEqual(runtime.sourceRoots(), [...initial, outside]);
+  await runtime.close();
+  await assert.rejects(runtime.allowSources([outside], new AbortController().signal), code('CLOSED'));
+});
