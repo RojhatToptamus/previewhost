@@ -1,5 +1,13 @@
 # previewhost
 
+## 0.1.0-alpha.3
+
+### Minor Changes
+
+- 64bb312: Add an optional local dashboard for comparing worktrees, opening applications, inspecting services and logs, canceling updates, and stopping or restarting previews with retained database data.
+  
+  Reuse owner authorization for private-form handoff, exact-attempt configuration saving, and failed-start recovery. Include light and dark themes, bundled fonts, and README product screenshots.
+
 ## 0.1.0-alpha.2
 
 ### Minor Changes
