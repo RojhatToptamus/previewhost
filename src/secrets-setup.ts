@@ -14,13 +14,13 @@ interface Entry {
   approve?: PreparedSecretSetup['approve'];
 }
 
-/** The host owns short-lived form grants and bounded public results. */
+/** The daemon owns short-lived form grants and bounded public results. */
 export class SecretSetup {
   private readonly entries = new Map<string, Entry>();
   private readonly preparing = new Map<AbortController, Promise<SecretSetupStatus>>();
   private lastLaunch = -Infinity;
   private closed = false;
-  constructor(private readonly runtime: Pick<PreviewRuntime, 'prepareSecretSetup'>, readonly origin: string) {}
+  constructor(private readonly runtime: PreviewRuntime, readonly origin: string) {}
 
   setup(input: PreviewSpec | string, signal: AbortSignal, reopen = false): Promise<SecretSetupStatus> {
     if (this.closed) return Promise.reject(new PreviewError('CLOSED', 'The daemon is shutting down.'));

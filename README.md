@@ -192,7 +192,7 @@ The overview shows what is ready and what needs attention.
 | Cancel an unfinished update | Select **Cancel update**. The previous application keeps running. |
 | Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
 | Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
-| Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the private form. |
+| Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the dialog and save. |
 | Supply a missing secret | Select **Open private form** to approve access and enter values outside the chat. |
 
 A failed replacement leaves the previous application available. **Open app** still points to that serving attempt.

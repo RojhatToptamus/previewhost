@@ -1,5 +1,5 @@
 import { uiStyle, themeScript } from './ui.js';
-import type { AttemptSummary, LogResult, PreviewDescription, PreviewStatus, SecretSetupStatus, SecretSetupSummary } from './contracts.js';
+import type { AttemptSummary, LogResult, PreviewDescription, PreviewStatus, SecretSetupSummary } from './contracts.js';
 
 export const dashboardPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -12,6 +12,15 @@ export const dashboardPage = `<!doctype html>
 <button id="secret-manager" class="nav-overview">Secret Manager</button>
 <nav id="projects" aria-label="Projects and previews"></nav><p class="scope">Closing this window leaves previews running.</p></aside>
 <main id="main"><article id="detail" aria-label="Preview details"><p class="muted">Connecting to local previews…</p></article></main></div>
+<dialog id="secret-edit" aria-labelledby="secret-edit-title" aria-describedby="secret-edit-hint">
+<form id="secret-edit-form" autocomplete="off">
+<h2 id="secret-edit-title">Edit secret</h2><p id="secret-edit-name" class="machine"></p>
+<p id="secret-edit-hint">Replace this value for future starts in every project that uses this reference. Running apps stay unchanged.</p>
+<label for="secret-value">New value</label><textarea id="secret-value" class="machine" required spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off"></textarea>
+<p class="muted">Stored values are never shown. Saved securely in macOS Keychain.</p>
+<p id="secret-edit-error" class="error" role="alert" hidden></p>
+<div class="actions"><button id="secret-edit-cancel" type="button">Cancel</button><button id="secret-edit-save" class="primary" type="submit">Save</button></div>
+</form></dialog>
 <script src="/dashboard.js"></script></body></html>`;
 
 function mountDashboard() {
@@ -74,7 +83,7 @@ function mountDashboard() {
     if (data.error?.code === 'NOT_FOUND' && data.error.message === 'Unknown control operation.' && 'action' in body && body.action === 'saveConfiguration') {
       throw new Error('This owner does not support configuration saving. Ask your agent to save preview.yml, or upgrade the owner when you are ready to stop its previews.');
     }
-    if (data.error) throw new Error(data.error.code === 'STALE_ATTEMPT' ? 'This preview changed. Review its current state and try again.' : data.error.message);
+    if (data.error) throw new Error(data.error.code === 'STALE_ATTEMPT' ? 'This preview changed. Review its current state and try again.' : data.error.message, { cause: data.error });
     return data.result;
   }
   function needsCleanup(preview?: PreviewStatus) {
@@ -377,6 +386,50 @@ function mountDashboard() {
       content.append(el('p', panel.logs.truncated ? 'Log tail · earlier output omitted' : 'Log tail', 'muted'), el('pre', panel.logs.text || 'No output captured.', 'logs'));
     } else if (panel.description) renderConfiguration(entry, selected, content, panel.description);
   }
+  const editDialog = document.querySelector<HTMLDialogElement>('#secret-edit')!;
+  const editForm = document.querySelector<HTMLFormElement>('#secret-edit-form')!;
+  const editValue = document.querySelector<HTMLTextAreaElement>('#secret-value')!;
+  const editError = document.querySelector<HTMLElement>('#secret-edit-error')!;
+  let editingId = '';
+  let savingSecret = false;
+  function openSecretEdit(id: string) {
+    announce(''); editingId = id; editValue.value = ''; editError.hidden = true;
+    document.querySelector('#secret-edit-name')!.textContent = id;
+    editDialog.showModal(); editValue.focus();
+  }
+  function closeSecretEdit() {
+    if (savingSecret) return;
+    editValue.value = ''; editingId = ''; editDialog.close();
+  }
+  document.querySelector('#secret-edit-cancel')!.addEventListener('click', closeSecretEdit);
+  editDialog.addEventListener('cancel', event => { event.preventDefault(); closeSecretEdit(); });
+  window.addEventListener('pagehide', () => { editValue.value = ''; editingId = ''; editDialog.close(); });
+  editForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (savingSecret) return;
+    if (!editValue.value.length || editValue.value.includes('\0') || new TextEncoder().encode(editValue.value).length > 4096) {
+      editError.textContent = 'Enter 1–4096 UTF-8 bytes without NUL.'; editError.hidden = false; editValue.focus(); return;
+    }
+    savingSecret = true; editError.hidden = true;
+    const controls = editForm.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>('button,textarea');
+    controls.forEach(control => { control.disabled = true; });
+    const save = document.querySelector<HTMLButtonElement>('#secret-edit-save')!; save.textContent = 'Saving…';
+    const input = { action: 'updateSecret', id: editingId, value: editValue.value };
+    editValue.value = '';
+    let saved = false;
+    try {
+      await call(input); saved = true;
+      announce('Secret updated. Future starts use the new value; running apps are unchanged.');
+    } catch (error) {
+      editError.textContent = error instanceof Error && error.cause ? error.message :
+        'The save could not be confirmed. It may have completed. Enter your intended value to retry.';
+      editError.hidden = false;
+    } finally {
+      input.value = ''; savingSecret = false; save.textContent = 'Save';
+      controls.forEach(control => { control.disabled = false; });
+      if (saved) closeSecretEdit(); else editValue.focus();
+    }
+  });
   function renderSecretManager() {
     detail.append(el('h1', 'Secret Manager'), el('p', 'Manage the secret references stored in your macOS Keychain. Values are never shown.', 'summary'));
     detail.append(el('p', 'Editing a shared reference changes its value for future starts in every project that uses it. Running apps and access approvals stay unchanged.', 'hint'));
@@ -388,17 +441,14 @@ function mountDashboard() {
       detail.append(empty); return;
     }
     const group = section('Stored references');
-    group.append(el('p', 'Reference names are separate from application environment-variable names. Edit opens a private form with a blank value.', 'muted'));
+    group.append(el('p', 'Reference names are separate from application environment-variable names. Select Edit to enter a replacement value.', 'muted'));
     if (secretList.truncated) group.append(el('p', 'Showing the first 128 references returned by Keychain. Additional entries are not listed.', 'warning'));
     const ids = secretList.ids.filter(id => id.toLowerCase().includes(search.value.trim().toLowerCase()));
     if (!ids.length) { group.append(el('p', 'No matching references.', 'empty')); return; }
     const rows = el('div', '', 'row-list');
     for (const id of ids) {
       const row = el('div', '', 'secret-row');
-      const edit = button('Edit', () => {
-        void mutate<SecretSetupStatus>({ action: 'editSecret', id }, result => result.browser === 'failed' ?
-          'The browser could not open the private form. Click Edit to try again.' : 'Private form opened in your system browser. Save or cancel there.');
-      }, '', 'edit-' + id);
+      const edit = button('Edit', () => openSecretEdit(id), '', 'edit-' + id);
       edit.setAttribute('aria-label', 'Edit ' + id);
       row.append(el('code', id), edit); rows.append(row);
     }
@@ -460,7 +510,7 @@ function mountDashboard() {
     for (const node of document.querySelectorAll<HTMLElement>('[data-elapsed]')) node.textContent = Math.max(0, Math.floor((Date.now() - Date.parse(node.dataset.elapsed!)) / 1000)) + 's elapsed';
   }
   async function refresh() {
-    if (loading || document.hidden) return;
+    if (loading || document.hidden || editDialog.open) return;
     loading = true;
     const showingSecrets = secretManager;
     try {
@@ -563,6 +613,15 @@ input::placeholder { color:var(--t5); }
 .attempt-split p:last-child { margin-top:10px; margin-bottom:0; }
 .row-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .row-list>div+div { border-top:1px solid var(--divider); }
+#secret-edit { width:min(520px,calc(100% - 32px)); max-height:calc(100dvh - 32px); overflow:auto; padding:26px; border:1px solid var(--border-2); border-radius:9px; background:var(--bg); color:var(--t1); }
+#secret-edit::backdrop { background:var(--bg); opacity:.72; }
+#secret-edit h2 { font-size:22px; margin-bottom:8px; }
+#secret-edit-name { overflow-wrap:anywhere; color:var(--t2); margin-bottom:18px; }
+#secret-edit-hint { color:var(--t4); font-size:13px; margin-bottom:22px; }
+#secret-edit label { display:block; font-weight:500; margin-bottom:8px; }
+#secret-value { width:100%; min-height:100px; padding:12px; border:1px solid var(--border-2); border-radius:6px; resize:vertical; background:var(--subtle); color:var(--t1); -webkit-text-security:disc; }
+#secret-edit .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-wrap:anywhere; }
+#secret-edit .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .secret-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:14px 16px; }
 .secret-row code { overflow-wrap:anywhere; color:var(--t2); }
 .service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 56px; align-items:center; gap:12px; padding:12px 16px; }

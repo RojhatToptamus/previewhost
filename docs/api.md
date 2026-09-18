@@ -575,9 +575,10 @@ authority. Private secret forms continue to keep their capabilities only in memo
 If session storage is unavailable, the initial launch works but reload needs a new launch.
 
 Secret Manager works without a running owner. It lists up to 128 user-secret references
-from Keychain and indicates when the list is truncated. Edit opens the existing private
-form with a blank field; values never enter the dashboard API. Cancel keeps the stored
-value. Save updates only an existing entry and never recreates one removed during editing.
+from Keychain and indicates when the list is truncated. Edit opens a dialog with a blank, masked
+field. Save sends the replacement to the authenticated local dashboard; the response
+contains only its reference name. Cancel clears the field without sending a value.
+Save updates only an existing entry and never recreates one removed during editing.
 The dashboard cannot change bindings or grant runtime access to references.
 
 The authenticated owner client also supports:

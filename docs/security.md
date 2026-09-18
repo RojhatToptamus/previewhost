@@ -326,13 +326,15 @@ It does not scan ports, launch owners, grant roots, or infer cleanup from an unr
 endpoint. One unresponsive owner has a bounded read deadline and does not hide others.
 
 The dashboard can reopen an owner’s pending private form. Secret Manager also lists
-user-reference names and opens a private edit form for an existing entry, without
+user-reference names and edits an existing entry in a dashboard dialog, without
 requiring a running owner. Internal database and migration entries are excluded.
-The management session cannot read values, submit replacement values, or grant a
-runtime access. Each edit uses the existing expiring, one-use form capability; it
-stays in memory and never enters dashboard session storage. Closing the dashboard
-revokes its pending forms. Editing changes future reads of the exact reference;
-it does not restart previews, change bindings, or extend their approvals.
+The authenticated dashboard session may submit a replacement value to Keychain;
+it cannot read stored values or grant runtime access. Values stay out of browser
+storage, URLs, and responses. Cancel clears the field without a write. Saving uses
+the existing Keychain update operation and never recreates a removed entry.
+Editing changes future reads of the exact reference; it does not restart previews,
+change bindings, or extend approvals. Agent setup still uses separate, expiring
+private-form capabilities; no MCP or owner-control value-write operation is added.
 
 Explicit configuration saving selects an exact retained attempt and writes only the
 automatic owner's root `preview.yml`. It reuses source validation and exclusive file
