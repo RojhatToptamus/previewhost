@@ -574,6 +574,13 @@ session restore may retain that storage; stopping the dashboard process ends its
 authority. Private secret forms continue to keep their capabilities only in memory.
 If session storage is unavailable, the initial launch works but reload needs a new launch.
 
+Secret Manager works without a running owner. It lists up to 128 user-secret references
+from Keychain and indicates when the list is truncated. Edit opens a dialog with a blank, masked
+field. Save sends the replacement to the authenticated local dashboard; the response
+contains only its reference name. Cancel clears the field without sending a value.
+Save updates only an existing entry and never recreates one removed during editing.
+The dashboard cannot change bindings or grant runtime access to references.
+
 The authenticated owner client also supports:
 
 - `describe(name, attemptId)`: redacted requested configuration for a retained attempt,

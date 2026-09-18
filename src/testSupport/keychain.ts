@@ -15,8 +15,8 @@ const fixture = fileURLToPath(new URL('../native/keychain-fixture', import.meta.
 
 /** Every operation still uses Security.framework, against this disposable Keychain only. */
 export async function testKeychain(t: TestContext) {
-  const directory = await mkdtemp(join(tmpdir(), 'previewd-test-keychain-'));
-  const path = join(directory, 'previewd-test-items.keychain');
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-test-keychain-'));
+  const path = join(directory, 'previewhost-test-items.keychain');
   async function control(operation: 'create' | 'lock' | 'unlock' | 'remove') {
     const result = await execute(fixture, [operation, path], { timeout: 10_000 });
     assert.equal(result.stdout.trim(), '0');

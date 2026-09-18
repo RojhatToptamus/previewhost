@@ -7,11 +7,11 @@ int main(int argc, const char *argv[]) {
         if (argc != 3) return 2;
         NSString *operation = @(argv[1]);
         NSString *path = @(argv[2]);
-        if (![path.lastPathComponent hasPrefix:@"previewd-test-"]) return 2;
+        if (![path.lastPathComponent hasPrefix:@"previewhost-test-"]) return 2;
         SecKeychainSetUserInteractionAllowed(false);
         SecKeychainRef keychain = NULL;
         OSStatus status;
-        const char *password = "previewd-disposable-fixture";
+        const char *password = "previewhost-disposable-fixture";
         if ([operation isEqualToString:@"create"]) {
             CFArrayRef before = NULL;
             status = SecKeychainCopySearchList(&before);

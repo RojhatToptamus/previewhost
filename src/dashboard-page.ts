@@ -9,8 +9,18 @@ export const dashboardPage = `<!doctype html>
 <div id="notice" role="status" hidden></div>
 <div class="workspace"><aside><label class="search"><span class="sr-only">Search projects and previews</span><input id="search" placeholder="Search" type="search"></label>
 <button id="overview" class="nav-overview">All previews<span id="attention-count"></span></button>
+<button id="secret-manager" class="nav-overview">Secret Manager</button>
 <nav id="projects" aria-label="Projects and previews"></nav><p class="scope">Closing this window leaves previews running.</p></aside>
 <main id="main"><article id="detail" aria-label="Preview details"><p class="muted">Connecting to local previews…</p></article></main></div>
+<dialog id="secret-edit" aria-labelledby="secret-edit-title" aria-describedby="secret-edit-hint">
+<form id="secret-edit-form" autocomplete="off">
+<h2 id="secret-edit-title">Edit secret</h2><p id="secret-edit-name" class="machine"></p>
+<p id="secret-edit-hint">Replace this value for future starts in every project that uses this reference. Running apps stay unchanged.</p>
+<label for="secret-value">New value</label><textarea id="secret-value" class="machine" required spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off"></textarea>
+<p class="muted">Stored values are never shown. Saved securely in macOS Keychain.</p>
+<p id="secret-edit-error" class="error" role="alert" hidden></p>
+<div class="actions"><button id="secret-edit-cancel" type="button">Cancel</button><button id="secret-edit-save" class="primary" type="submit">Save</button></div>
+</form></dialog>
 <script src="/dashboard.js"></script></body></html>`;
 
 function mountDashboard() {
@@ -25,6 +35,9 @@ function mountDashboard() {
     else capability = sessionStorage.getItem('previewhost-dashboard') ?? '';
   } catch { /* Initial launch still works when browser storage is unavailable. */ }
   let owners: Owner[] = [];
+  let secretManager = false;
+  let secretList: { ids: string[]; truncated: boolean } | undefined;
+  let secretError: string | undefined;
   let selection: { owner: string; name?: string } | undefined;
   let snapshot = '';
   let loading = false;
@@ -70,7 +83,7 @@ function mountDashboard() {
     if (data.error?.code === 'NOT_FOUND' && data.error.message === 'Unknown control operation.' && 'action' in body && body.action === 'saveConfiguration') {
       throw new Error('This owner does not support configuration saving. Ask your agent to save preview.yml, or upgrade the owner when you are ready to stop its previews.');
     }
-    if (data.error) throw new Error(data.error.code === 'STALE_ATTEMPT' ? 'This preview changed. Review its current state and try again.' : data.error.message);
+    if (data.error) throw new Error(data.error.code === 'STALE_ATTEMPT' ? 'This preview changed. Review its current state and try again.' : data.error.message, { cause: data.error });
     return data.result;
   }
   function needsCleanup(preview?: PreviewStatus) {
@@ -96,13 +109,15 @@ function mountDashboard() {
     return names.length ? names.map(name => ({ owner, name, preview: owner.previews?.find(p => p.name === name) })) : [{ owner }];
   }
   function visibleEntries(owner: Owner) {
-    const q = search.value.trim().toLowerCase();
+    const q = secretManager ? '' : search.value.trim().toLowerCase();
     return entries(owner).filter(e => `${owner.project ?? ''} ${e.name ?? ''}`.toLowerCase().includes(q));
   }
   function attempts(p?: PreviewStatus) {
     return [p?.candidate, p?.latest, p?.active].filter((a, i, all): a is AttemptSummary => !!a && all.findIndex(other => other?.id === a.id) === i);
   }
   function select(entry?: Entry) {
+    if (secretManager) search.value = '';
+    secretManager = false;
     announce(''); selection = entry ? { owner: entry.owner.id, name: entry.name } : undefined; panel = { tab: 'activity' };
     document.body.classList.toggle('show-detail', !!entry); render();
     document.querySelector('#main')!.scrollTop = 0;
@@ -149,7 +164,10 @@ function mountDashboard() {
   }
   function renderList() {
     projects.replaceChildren();
-    document.querySelector('#overview')!.setAttribute('aria-current', String(!selection));
+    document.querySelector('#overview')!.setAttribute('aria-current', String(!secretManager && !selection));
+    document.querySelector('#secret-manager')!.setAttribute('aria-current', String(secretManager));
+    search.placeholder = secretManager ? 'Search references' : 'Search';
+    document.querySelector('.search .sr-only')!.textContent = secretManager ? 'Search secret references' : 'Search projects and previews';
     const attention = owners.flatMap(entries).filter(e => e.owner.error || e.owner.configuration?.error || ['error', 'warning'].includes(state(e).tone)).length;
     document.querySelector('#attention-count')!.textContent = attention ? String(attention) : '';
     for (const owner of owners) {
@@ -157,14 +175,14 @@ function mountDashboard() {
       const group = el('section', '', 'project'); group.append(el('h2', shortProject(owner), 'section-label'));
       for (const entry of list) {
         const row = navButton('', () => select(entry), 'preview-row', owner.id + (entry.name ?? ''));
-        row.setAttribute('aria-current', String(selection?.owner === owner.id && selection.name === entry.name));
+        row.setAttribute('aria-current', String(!secretManager && selection?.owner === owner.id && selection.name === entry.name));
         const text = el('span', '', 'nav-identity'); text.append(el('strong', entry.name ?? 'Project'), pathText(owner.project ?? 'Unverified record'));
         row.append(text, el('span', owner.error ? 'Unavailable' : state(entry).label, 'status ' + (owner.error ? 'error' : state(entry).tone)));
         group.append(row);
       }
       projects.append(group);
     }
-    if (!projects.children.length) projects.append(el('p', search.value ? 'No matching previews.' : 'No previews found.', 'empty-list'));
+    if (!projects.children.length) projects.append(el('p', !secretManager && search.value ? 'No matching previews.' : 'No previews found.', 'empty-list'));
   }
   function renderOverview() {
     detail.classList.add('overview');
@@ -368,9 +386,78 @@ function mountDashboard() {
       content.append(el('p', panel.logs.truncated ? 'Log tail · earlier output omitted' : 'Log tail', 'muted'), el('pre', panel.logs.text || 'No output captured.', 'logs'));
     } else if (panel.description) renderConfiguration(entry, selected, content, panel.description);
   }
+  const editDialog = document.querySelector<HTMLDialogElement>('#secret-edit')!;
+  const editForm = document.querySelector<HTMLFormElement>('#secret-edit-form')!;
+  const editValue = document.querySelector<HTMLTextAreaElement>('#secret-value')!;
+  const editError = document.querySelector<HTMLElement>('#secret-edit-error')!;
+  let editingId = '';
+  let savingSecret = false;
+  function openSecretEdit(id: string) {
+    announce(''); editingId = id; editValue.value = ''; editError.hidden = true;
+    document.querySelector('#secret-edit-name')!.textContent = id;
+    editDialog.showModal(); editValue.focus();
+  }
+  function closeSecretEdit() {
+    if (savingSecret) return;
+    editValue.value = ''; editingId = ''; editDialog.close();
+  }
+  document.querySelector('#secret-edit-cancel')!.addEventListener('click', closeSecretEdit);
+  editDialog.addEventListener('cancel', event => { event.preventDefault(); closeSecretEdit(); });
+  window.addEventListener('pagehide', () => { editValue.value = ''; editingId = ''; editDialog.close(); });
+  editForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (savingSecret) return;
+    if (!editValue.value.length || editValue.value.includes('\0') || new TextEncoder().encode(editValue.value).length > 4096) {
+      editError.textContent = 'Enter 1–4096 UTF-8 bytes without NUL.'; editError.hidden = false; editValue.focus(); return;
+    }
+    savingSecret = true; editError.hidden = true;
+    const controls = editForm.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>('button,textarea');
+    controls.forEach(control => { control.disabled = true; });
+    const save = document.querySelector<HTMLButtonElement>('#secret-edit-save')!; save.textContent = 'Saving…';
+    const input = { action: 'updateSecret', id: editingId, value: editValue.value };
+    editValue.value = '';
+    let saved = false;
+    try {
+      await call(input); saved = true;
+      announce('Secret updated. Future starts use the new value; running apps are unchanged.');
+    } catch (error) {
+      editError.textContent = error instanceof Error && error.cause ? error.message :
+        'The save could not be confirmed. It may have completed. Enter your intended value to retry.';
+      editError.hidden = false;
+    } finally {
+      input.value = ''; savingSecret = false; save.textContent = 'Save';
+      controls.forEach(control => { control.disabled = false; });
+      if (saved) closeSecretEdit(); else editValue.focus();
+    }
+  });
+  function renderSecretManager() {
+    detail.append(el('h1', 'Secret Manager'), el('p', 'Manage the secret references stored in your macOS Keychain. Values are never shown.', 'summary'));
+    detail.append(el('p', 'Editing a shared reference changes its value for future starts in every project that uses it. Running apps and access approvals stay unchanged.', 'hint'));
+    if (secretError) { message('Secrets unavailable', secretError + ' Use Refresh to try again.', 'error'); return; }
+    if (!secretList) { detail.append(el('p', 'Loading secret references…', 'empty')); return; }
+    if (!secretList.ids.length) {
+      const empty = el('div', '', 'empty');
+      empty.append(el('h2', 'No stored secrets'), el('p', 'Ask your agent to preview an application. When it needs a secret, enter the value in private setup. Its reference will appear here.'));
+      detail.append(empty); return;
+    }
+    const group = section('Stored references');
+    group.append(el('p', 'Reference names are separate from application environment-variable names. Select Edit to enter a replacement value.', 'muted'));
+    if (secretList.truncated) group.append(el('p', 'Showing the first 128 references returned by Keychain. Additional entries are not listed.', 'warning'));
+    const ids = secretList.ids.filter(id => id.toLowerCase().includes(search.value.trim().toLowerCase()));
+    if (!ids.length) { group.append(el('p', 'No matching references.', 'empty')); return; }
+    const rows = el('div', '', 'row-list');
+    for (const id of ids) {
+      const row = el('div', '', 'secret-row');
+      const edit = button('Edit', () => openSecretEdit(id), '', 'edit-' + id);
+      edit.setAttribute('aria-label', 'Edit ' + id);
+      row.append(el('code', id), edit); rows.append(row);
+    }
+    group.append(rows);
+  }
   function renderDetail() {
     detail.replaceChildren(); detail.classList.remove('overview');
-    document.querySelector('#crumb')!.textContent = selection ? 'Preview details' : 'All previews';
+    document.querySelector('#crumb')!.textContent = secretManager ? 'Secret Manager' : selection ? 'Preview details' : 'All previews';
+    if (secretManager) { renderSecretManager(); return; }
     if (!selection) { renderOverview(); return; }
     const owner = owners.find(o => o.id === selection!.owner);
     if (!owner) { message('Project no longer listed', 'Its owner may have shut down. Stored database data remains separate; start through your agent or CLI to reconnect.'); return; }
@@ -415,6 +502,7 @@ function mountDashboard() {
   }
   function render() {
     const focus = (document.activeElement as HTMLElement)?.dataset.focus;
+    document.body.classList.toggle('show-secrets', secretManager);
     renderList(); renderDetail(); updateElapsed();
     if (focus) document.querySelector<HTMLElement>('[data-focus="' + CSS.escape(focus) + '"]')?.focus({ preventScroll: true });
   }
@@ -422,14 +510,31 @@ function mountDashboard() {
     for (const node of document.querySelectorAll<HTMLElement>('[data-elapsed]')) node.textContent = Math.max(0, Math.floor((Date.now() - Date.parse(node.dataset.elapsed!)) / 1000)) + 's elapsed';
   }
   async function refresh() {
-    if (loading || document.hidden) return;
+    if (loading || document.hidden || editDialog.open) return;
     loading = true;
+    const showingSecrets = secretManager;
     try {
+      if (showingSecrets) {
+        const result = await call<{ ids: string[]; truncated: boolean }>({ action: 'listSecrets' });
+        connection.textContent = 'Running locally';
+        if (connectionNotice) announce('');
+        const next = JSON.stringify(result);
+        if (secretError || next !== snapshot || !secretList) {
+          secretList = result; secretError = undefined; snapshot = next;
+          if (secretManager) render();
+        }
+        return;
+      }
       const result = await call<Owner[]>({ action: 'list' }); connection.textContent = 'Running locally';
       if (connectionNotice) announce('');
       const next = JSON.stringify(result); if (next !== snapshot) { owners = result; snapshot = next; render(); }
       updateElapsed();
     } catch (error) {
+      if (showingSecrets && capability) {
+        secretList = undefined; secretError = error instanceof Error ? error.message : 'Keychain could not be reached.';
+        if (secretManager) render();
+        return;
+      }
       connection.textContent = 'Disconnected';
       announce(capability ? 'Dashboard disconnected. Your previews may still be running. Run previewhost dashboard to reopen it.' : 'Run previewhost dashboard to open an authenticated session. This tab has no usable private session.', true);
       if (!capability) { document.body.classList.add('show-detail'); detail.replaceChildren(el('h1', 'Open from your terminal'), el('pre', 'previewhost dashboard'), el('p', 'The launcher opens a private local session. No account is needed.', 'muted')); }
@@ -439,6 +544,11 @@ function mountDashboard() {
   search.addEventListener('input', render);
   document.querySelector('#home')!.addEventListener('click', () => select());
   document.querySelector('#overview')!.addEventListener('click', () => select());
+  document.querySelector('#secret-manager')!.addEventListener('click', () => {
+    announce(''); secretManager = true; selection = undefined; search.value = '';
+    document.body.classList.add('show-detail'); render(); void refresh();
+    const heading = detail.querySelector('h1'); if (heading) { heading.tabIndex = -1; heading.focus(); }
+  });
   document.querySelector('#refresh')!.addEventListener('click', () => { snapshot = ''; void refresh(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
   void refresh(); setInterval(() => { if (capability) void refresh(); }, 2500);
@@ -503,6 +613,17 @@ input::placeholder { color:var(--t5); }
 .attempt-split p:last-child { margin-top:10px; margin-bottom:0; }
 .row-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .row-list>div+div { border-top:1px solid var(--divider); }
+#secret-edit { width:min(520px,calc(100% - 32px)); max-height:calc(100dvh - 32px); overflow:auto; padding:26px; border:1px solid var(--border-2); border-radius:9px; background:var(--bg); color:var(--t1); }
+#secret-edit::backdrop { background:var(--bg); opacity:.72; }
+#secret-edit h2 { font-size:22px; margin-bottom:8px; }
+#secret-edit-name { overflow-wrap:anywhere; color:var(--t2); margin-bottom:18px; }
+#secret-edit-hint { color:var(--t4); font-size:13px; margin-bottom:22px; }
+#secret-edit label { display:block; font-weight:500; margin-bottom:8px; }
+#secret-value { width:100%; min-height:100px; padding:12px; border:1px solid var(--border-2); border-radius:6px; resize:vertical; background:var(--subtle); color:var(--t1); -webkit-text-security:disc; }
+#secret-edit .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-wrap:anywhere; }
+#secret-edit .actions { justify-content:flex-end; padding:0; margin-top:24px; }
+.secret-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:14px 16px; }
+.secret-row code { overflow-wrap:anywhere; color:var(--t2); }
 .service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 56px; align-items:center; gap:12px; padding:12px 16px; }
 .service-row>strong { overflow-wrap:anywhere; font-size:13.5px; }
 .service-row .status { font-size:12.5px; }
@@ -572,7 +693,7 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   aside { border-right:0; max-height:45%; flex:none; border-bottom:1px solid var(--border); }
   .scope { display:none; }
   #projects { display:none; }
-  .show-detail aside .search { display:none; }
+  .show-detail:not(.show-secrets) aside .search { display:none; }
   .show-detail .nav-overview { margin:8px 14px; }
   #main { flex:1; }
   #detail { padding:24px 20px 40px; }

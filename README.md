@@ -192,6 +192,7 @@ The overview shows what is ready and what needs attention.
 | Cancel an unfinished update | Select **Cancel update**. The previous application keeps running. |
 | Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
 | Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
+| Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the dialog and save. |
 | Supply a missing secret | Select **Open private form** to approve access and enter values outside the chat. |
 
 A failed replacement leaves the previous application available. **Open app** still points to that serving attempt.
@@ -208,6 +209,8 @@ After you fix an initial startup failure, **Retry start** reruns that attempt.
 Saving a recipe does not change the running preview. Stored secret values are not included in the dashboard's configuration view.
 If your agent ends its turn before private setup finishes, send it a short continuation message after saving.
 Canceled private requests stay canceled.
+
+Secret Manager lists reference names, never values. Updating a shared reference affects future starts in every project that uses it. Running apps and access approvals stay unchanged.
 
 The dashboard lists live automatic project owners created through the CLI or MCP.
 Standalone `serve` instances and embedded library runtimes are not automatically listed.

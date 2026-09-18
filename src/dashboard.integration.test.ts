@@ -138,3 +138,97 @@ test('a hung owner is bounded without blocking healthy-owner results', { timeout
   assert.equal(result.result[1].error, undefined);
   assert.ok(performance.now() - start < 6000);
 });
+
+test('Secret Manager updates existing references through the authenticated dashboard without reading values or changing approvals', { skip: process.platform !== 'darwin', timeout: 15_000 }, async t => {
+  const { testKeychain } = await import('./testSupport/keychain.js');
+  const fixture = await testKeychain(t);
+  const opened: string[] = [];
+  const dashboard = await startDashboard({
+    discover: async () => { throw new Error('Secret Manager must not need a project owner.'); },
+    openBrowser: async url => { opened.push(url); },
+  });
+  t.after(() => dashboard.close());
+  await dashboard.open();
+  const token = new URL(opened.pop()!).hash.slice(1);
+  const responses: string[] = [];
+  const post = async (body: object, authorization = token, origin = dashboard.endpoint) => {
+    const response = await fetch(dashboard.endpoint + '/api', { method: 'POST', headers: {
+      'content-type': 'application/json', origin, authorization: 'Bearer ' + authorization,
+    }, body: JSON.stringify(body) });
+    const text = await response.text(); responses.push(text);
+    return { status: response.status, ...JSON.parse(text) };
+  };
+  const list = () => post({ action: 'listSecrets' });
+  const update = (id: string, value: string) => post({ action: 'updateSecret', id, value });
+  assert.deepEqual((await list()).result, { ids: [], truncated: false });
+  await fixture.store.add('user', 'shop/dev/api', 'FAKE_original');
+  await fixture.store.add('user', 'another/dev/api', 'FAKE_other');
+  await fixture.store.add('database', 'private-database', 'FAKE_internal');
+  await fixture.store.add('migration', 'private-migration', 'FAKE_internal');
+  assert.deepEqual((await list()).result, { ids: ['another/dev/api', 'shop/dev/api'], truncated: false });
+  const change = { action: 'updateSecret', id: 'shop/dev/api', value: 'FAKE_forbidden' };
+  assert.equal((await post(change, 'invalid')).status, 401);
+  assert.equal((await post(change, token, 'http://evil.example')).status, 401);
+  assert.equal((await update('missing', 'FAKE_missing')).error.code, 'SECRET_REQUIRED');
+  assert.equal((await update('private-database', 'FAKE_internal')).error.code, 'SECRET_REQUIRED');
+  assert.equal((await update('invalid space', 'FAKE_invalid')).error.code, 'INVALID_INPUT');
+  for (const value of ['', 'FAKE_\0', '🙂'.repeat(1025)]) {
+    assert.equal((await update('shop/dev/api', value)).error.code, 'INVALID_INPUT');
+  }
+  assert.equal((await post({ ...change, namespace: 'database' })).error.code, 'INVALID_INPUT');
+  assert.equal(await fixture.store.get('user', 'shop/dev/api'), 'FAKE_original');
+  const saved = await update('shop/dev/api', 'FAKE_replacement\nline two');
+  assert.deepEqual(saved.result, { id: 'shop/dev/api' });
+  assert.equal(await fixture.store.get('user', 'shop/dev/api'), 'FAKE_replacement\nline two');
+  assert.equal(await fixture.store.get('user', 'another/dev/api'), 'FAKE_other');
+  const writes = await Promise.all([
+    update('shop/dev/api', 'FAKE_shop'), update('another/dev/api', 'FAKE_another'),
+  ]);
+  assert.ok(writes.every(result => result.status === 200));
+  assert.equal(await fixture.store.get('user', 'shop/dev/api'), 'FAKE_shop');
+  assert.equal(await fixture.store.get('user', 'another/dev/api'), 'FAKE_another');
+  const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
+  t.after(() => runtime.close());
+  const description = await runtime.inspect({ name: 'shop', type: 'command', cwd: fixture.directory, command: [process.execPath, 'app.mjs'], env: { API_SECRET: { secret: 'shop/dev/api' } } });
+  assert.equal(description.secrets![0].selected, false);
+  await fixture.store.remove('user', 'shop/dev/api');
+  assert.equal((await update('shop/dev/api', 'FAKE_not_recreated')).error.code, 'SECRET_REQUIRED');
+  assert.equal(await fixture.store.has('user', 'shop/dev/api'), false);
+  assert.ok(responses.every(text => !text.includes('FAKE_') && !text.includes(token)));
+  assert.equal(opened.length, 0, 'Editing never launches another browser page');
+  await fixture.control('lock');
+  assert.equal((await list()).error.code, 'SECRET_STORE_UNAVAILABLE');
+  await fixture.control('unlock');
+  assert.deepEqual((await list()).result.ids, ['another/dev/api']);
+  await dashboard.close();
+  await assert.rejects(update('another/dev/api', 'FAKE_after_close'));
+  assert.equal(await fixture.store.get('user', 'another/dev/api'), 'FAKE_another');
+});
+
+test('dashboard shutdown cancels and joins an in-flight Keychain update', async t => {
+  const { keychain } = await import('./keychain.js');
+  let launch = '';
+  const dashboard = await startDashboard({ openBrowser: async url => { launch = url; } });
+  t.after(() => dashboard.close());
+  await dashboard.open();
+  let enter!: () => void; let cancel!: () => void; let complete!: (value: boolean) => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const canceled = new Promise<void>(resolve => { cancel = resolve; });
+  const completed = new Promise<boolean>(resolve => { complete = resolve; });
+  t.mock.method(keychain, 'update', (...args: Parameters<typeof keychain.update>) => {
+    args[3]!.signal!.addEventListener('abort', cancel, { once: true });
+    enter();
+    return completed;
+  });
+  const request = fetch(dashboard.endpoint + '/api', { method: 'POST', headers: {
+    origin: dashboard.endpoint, authorization: 'Bearer ' + new URL(launch).hash.slice(1), 'content-type': 'application/json',
+  }, body: JSON.stringify({ action: 'updateSecret', id: 'shop/api', value: 'FAKE_inflight' }) }).catch(() => undefined);
+  await entered;
+  let closed = false;
+  const closing = dashboard.close().then(() => { closed = true; });
+  await canceled;
+  assert.equal(closed, false);
+  complete(true);
+  await closing; await request;
+  assert.equal(closed, true);
+});

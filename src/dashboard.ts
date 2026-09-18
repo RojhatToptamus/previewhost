@@ -6,16 +6,20 @@ import { loadPreviewSpec } from './config.js';
 import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
 import { connectPreviewDaemon } from './client.js';
-import { limits, requestSchemas } from './contracts.js';
+import { limits, requestSchemas, secretIdSchema } from './contracts.js';
 import { readBody } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
 import { discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
+import { listSecrets } from './secrets.js';
+import { keychain } from './keychain.js';
 import { dashboardPage, dashboardScript, dashboardStyle } from './dashboard-page.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('list') }),
+  z.strictObject({ action: z.literal('listSecrets') }),
+  z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
   requestSchemas.cancel.extend({ action: z.literal('cancel'), owner: ownerId }),
   requestSchemas.startAgain.extend({ action: z.literal('startAgain'), owner: ownerId }),
@@ -35,6 +39,7 @@ export async function startDashboard(options: {
   const capability = randomBytes(32).toString('hex');
   const clients = new Set<ReturnType<typeof connectPreviewDaemon>>();
   const controller = new AbortController();
+  const updates = new Set<Promise<boolean>>();
   const server = createServer({ connectionsCheckingInterval: 1000 });
   server.maxConnections = 32;
   server.headersTimeout = limits.headerTimeoutMs;
@@ -66,10 +71,19 @@ export async function startDashboard(options: {
     } finally { clearTimeout(timer); clients.delete(client); await client.close(); }
   }
 
-  async function dispatch(input: unknown) {
+  async function dispatch(input: unknown, signal: AbortSignal) {
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
     const p = parsed.data;
+    if (p.action === 'listSecrets') return listSecrets({ signal });
+    if (p.action === 'updateSecret') {
+      const update = keychain.update('user', p.id, p.value, { signal, interactive: true });
+      updates.add(update);
+      try {
+        if (!await update) throw new PreviewError('SECRET_REQUIRED', 'This reference was removed. Refresh the list; its value was not recreated.');
+        return { id: p.id };
+      } finally { updates.delete(update); }
+    }
     const owners = await discover();
     if (p.action === 'list') {
       return Promise.all(owners.map(async owner => {
@@ -151,7 +165,8 @@ export async function startDashboard(options: {
       }
       if (active >= 8) throw new PreviewError('BUSY', 'The dashboard is busy. Try again shortly.');
       active++;
-      try { send(res, 200, { result: await dispatch(await readBody(req, AbortSignal.any([abort.signal, controller.signal]))) }); }
+      const signal = AbortSignal.any([abort.signal, controller.signal]);
+      try { send(res, 200, { result: await dispatch(await readBody(req, signal), signal) }); }
       finally { active--; }
     })().catch(error => send(res, error instanceof PreviewError && error.code === 'UNAUTHORIZED' ? 401 : 400, { error: failure(error) }));
   });
@@ -165,7 +180,7 @@ export async function startDashboard(options: {
     open: () => (options.openBrowser ?? openLocalBrowser)(`${origin}/#${capability}`, controller.signal),
     close: () => closing ??= (async () => {
       controller.abort();
-      await Promise.all([...clients].map(client => client.close()));
+      await Promise.all([Promise.allSettled(updates), ...[...clients].map(client => client.close())]);
       await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
     })(),
   };

@@ -22,15 +22,20 @@ test('real Keychain preserves exact values, atomic creation, private namespaces,
   assert.equal(await store.has('user', 'missing'), false);
   await setSecret('shared/sample', value);
   assert.equal(await store.get('user', 'shared/sample'), value);
-  // Existing entries must remain under the same Keychain service after a package rename.
-  await execute('/usr/bin/security', ['find-generic-password', '-s', 'dev.previewd.user', '-a', 'shared/sample', fixture.path]);
+  const attributes = await execute('/usr/bin/security', ['find-generic-password', '-s', 'dev.previewhost.user', '-a', 'shared/sample', fixture.path]);
+  assert.match(attributes.stdout, /previewhost: shared\/sample/);
   assert.deepEqual(await listSecrets(), { ids: ['shared/sample'], truncated: false });
   assert.equal(await store.update('user', 'missing', 'FAKE_other'), false);
   const race = await Promise.all([store.add('user', 'race', 'FAKE_A'), store.add('user', 'race', 'FAKE_B')]);
   assert.deepEqual(race.sort(), [false, true]);
   assert.ok(['FAKE_A', 'FAKE_B'].includes((await store.get('user', 'race'))!));
   await store.add('database', 'internal', 'FAKE_internal');
+  await store.add('migration', 'migration-item', 'FAKE_migration');
+  for (const [namespace, id] of [['database', 'internal'], ['migration', 'migration-item']]) {
+    await execute('/usr/bin/security', ['find-generic-password', '-s', `dev.previewhost.${namespace}`, '-a', id, fixture.path]);
+  }
   assert.ok(!(await listSecrets()).ids.includes('internal'));
+  assert.ok(!(await listSecrets()).ids.includes('migration-item'));
   await removeSecret('internal');
   assert.equal(await store.get('database', 'internal'), 'FAKE_internal');
   for (const invalid of ['', 'a\0b', '\ud800', '🙂'.repeat(1025)]) assert.throws(() => validateSecretValue(invalid), { code: 'INVALID_INPUT' });
@@ -45,7 +50,7 @@ test('real Keychain preserves exact values, atomic creation, private namespaces,
   await copyFile(fixture.helper, copied);
   const copiedStore = new Keychain(copied, [fixture.path]);
   assert.equal((await invoke.call(copiedStore, { operation: 'get', namespace: 'user', id: 'shared/sample' })).data, Buffer.from(value).toString('base64'));
-  await execute('/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', 'dev.previewd.denied-fixture', copied]);
+  await execute('/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', 'dev.previewhost.denied-fixture', copied]);
   const denied = await invoke.call(copiedStore, { operation: 'get', namespace: 'user', id: 'shared/sample' });
   assert.ok([-25293, -25308, -25315].includes(denied.status));
   assert.equal(denied.data, undefined);

@@ -53,6 +53,7 @@ export const secretsScript = "'use strict';" + themeScript + `
   const message = document.getElementById('message');
   const result = document.getElementById('result');
   let needsApproval = false;
+  let editing = false;
   const controls = () => form.querySelectorAll('button,textarea,input');
   const clear = () => { fields.querySelectorAll('textarea').forEach(field => { field.value = ''; }); };
   async function call(route, body) {
@@ -70,6 +71,12 @@ export const secretsScript = "'use strict';" + themeScript + `
     result.replaceChildren(copy); result.focus();
   }
   function completion(request) {
+    if (editing) {
+      finish(request.state === 'complete' ? 'Secret updated' : 'Secret update needs attention', request.state === 'complete' ?
+        'Saved to Keychain. Future starts using this reference receive the new value. Running applications keep their current value. You can close this tab.' :
+        (request.error?.message || 'The update did not finish.') + ' Open a new edit form when you are ready to retry.', request.state === 'complete' ? '' : 'warning');
+      return;
+    }
     const saved = request.saved.length ? 'Saved: ' + request.saved.join(', ') + '. ' : '';
     const reused = request.alreadyPresent.length ? 'Reused existing entries: ' + request.alreadyPresent.join(', ') + '. Those values were kept; any input for them was not applied. ' : '';
     finish(request.state === 'complete' ? 'Secret setup complete' : 'Some entries still need attention', saved + reused + (request.state === 'complete' ?
@@ -93,8 +100,8 @@ export const secretsScript = "'use strict';" + themeScript + `
   document.getElementById('reveal').addEventListener('change', event => form.classList.toggle('show', event.target.checked));
   document.getElementById('cancel').addEventListener('click', async () => {
     controls().forEach(control => { control.disabled = true; });
-    try { await call('cancel', {}); finish('Secret setup canceled', 'No application was started. Earlier approvals and saved values remain. Return to your agent only when you want to resume setup.'); }
-    catch (error) { finish('Could not cancel setup', error.message + ' Check setup status in your client before retrying.', 'warning'); }
+    try { await call('cancel', {}); finish(editing ? 'Secret edit canceled' : 'Secret setup canceled', editing ? 'The stored value was not changed. You can close this tab.' : 'No application was started. Earlier approvals and saved values remain. Return to your agent only when you want to resume setup.'); }
+    catch (error) { finish('Could not cancel setup', error.message + (editing ? ' Close this tab; the private form expires automatically.' : ' Check setup status in your client before retrying.'), 'warning'); }
   });
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -119,12 +126,15 @@ export const secretsScript = "'use strict';" + themeScript + `
       const saved = await call('save', { values });
       completion(saved);
     } catch (error) {
-      finish('Check the save result in your client', 'The response was lost or rejected. A write may have completed. Check secret setup status before retrying. ' + error.message, 'warning');
+      finish(editing ? 'Save could not be confirmed' : 'Check the save result in your client',
+        'The response was lost or rejected. A write may have completed. ' + (editing ? 'Open a new edit form to save your intended value. ' : 'Check secret setup status before retrying. ') + error.message, 'warning');
     } finally { for (const id of Object.keys(values)) delete values[id]; }
   });
   window.addEventListener('pagehide', () => { clear(); capability = ''; });
   function render(request) {
     clear(); fields.replaceChildren(); document.getElementById('context').replaceChildren();
+    editing = request.mode === 'edit';
+    document.getElementById('crumb').textContent = editing ? 'Edit secret' : 'Private setup';
     needsApproval = request.requirements.some(item => !item.selected);
     document.getElementById('title').textContent = needsApproval ? 'Allow these secret names?' : request.mode === 'edit' ? 'Replace a stored secret' : 'Add missing secrets';
     message.textContent = needsApproval ? 'These exact Keychain names are shared across projects that select them. Existing values will be reused, never shown or overwritten.' :
@@ -132,10 +142,11 @@ export const secretsScript = "'use strict';" + themeScript + `
       'Enter only the missing values below. An entry created elsewhere while this form is open keeps its value.';
     document.getElementById('scope').textContent = needsApproval ?
       'Allow this runtime to use these names until it shuts down. Any execution-authorized preview on this runtime can bind an allowed name. This does not start an application.' :
+      editing ? 'Save replaces this exact reference in macOS Keychain. Running applications and access approvals stay unchanged.' :
       'Save stores values in macOS Keychain without starting an application. Earlier access approvals last until this runtime shuts down.';
     document.getElementById('submit').textContent = needsApproval ? 'Allow names' : 'Save to Keychain';
-    document.getElementById('reveal-label').hidden = needsApproval;
-    describe('Runtime', location.origin, true);
+    document.getElementById('reveal-label').hidden = needsApproval || editing;
+    describe(editing ? 'Local address' : 'Runtime', location.origin, true);
     if (request.name) describe('Preview', request.name);
     for (const source of request.sources) describe('Source directory', source);
     describe('Expires', new Date(request.expiresAt).toLocaleTimeString(), true);

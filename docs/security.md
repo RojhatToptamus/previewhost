@@ -117,17 +117,13 @@ Never kill a process based only on the recorded PID; it can have been reused. Se
 
 ## Retained storage identifiers
 
-The package rename preserves existing storage and credentials:
+The following storage identifiers are unchanged:
 
 - The default token remains at `~/.local/share/previewd/token`.
 - `--data-dir` and `dataDirectory` still select the exact directory supplied by the owner.
 - Docker names retain `previewd-`. Ownership labels retain `io.previewd.*`.
 - Managed PostgreSQL retains its `previewd` user and database.
-- Keychain services retain `dev.previewd.user`, `dev.previewd.database`, and `dev.previewd.migration`.
-- The native helper retains its signing identifier and the `previewd: ` item label.
 
-Existing records and credential references remain in place.
-The rename creates no second storage namespace and rotates no credentials.
 The [Keychain access rules](#stored-secrets-and-private-entry) still apply to package updates.
 The internal `x-previewd-hops` header also remains unchanged so old and new gateways detect loops together.
 
@@ -259,6 +255,9 @@ Keep secrets out of command arguments. Read logs only in trusted local clients.
 ## Stored secrets and private entry
 
 User entries use individual, nonsynchronizing items in the default user Keychain.
+Their service is `dev.previewhost.user`; internal database and migration entries use
+`dev.previewhost.database` and `dev.previewhost.migration`. Item labels start with
+`previewhost: `. Entries under the former service names are not read or migrated.
 The packaged helper uses macOS Security.framework to access each entry by its service and account names.
 It supports metadata, read, atomic add-if-absent, update-in-place, and exact deletion.
 It does not grant access to all applications.
@@ -268,7 +267,7 @@ Explicit owner writes can request an OS access decision.
 There is no plaintext fallback or decrypted value cache.
 
 The helper contains arm64 and x86_64 code for macOS 13 or later.
-It has an ad hoc signature with identifier `dev.previewd.keychain`.
+It has an ad hoc signature with identifier `dev.previewhost.keychain`.
 Package updates or architecture changes can require approval for that helper
 again in Keychain Access. The signing identifier alone does not preserve access.
 Moving an unchanged helper file preserves its signature.
@@ -326,10 +325,16 @@ Discovery validates private connection records and authenticates each owner iden
 It does not scan ports, launch owners, grant roots, or infer cleanup from an unreachable
 endpoint. One unresponsive owner has a bounded read deadline and does not hide others.
 
-The dashboard can request native reopening of an existing pending secret form. It
-cannot approve or write secrets through its management session. The owner-private
-form remains the only browser channel for those actions. Its capability stays in memory
-and is never placed in dashboard session storage.
+The dashboard can reopen an owner’s pending private form. Secret Manager also lists
+user-reference names and edits an existing entry in a dashboard dialog, without
+requiring a running owner. Internal database and migration entries are excluded.
+The authenticated dashboard session may submit a replacement value to Keychain;
+it cannot read stored values or grant runtime access. Values stay out of browser
+storage, URLs, and responses. Cancel clears the field without a write. Saving uses
+the existing Keychain update operation and never recreates a removed entry.
+Editing changes future reads of the exact reference; it does not restart previews,
+change bindings, or extend approvals. Agent setup still uses separate, expiring
+private-form capabilities; no MCP or owner-control value-write operation is added.
 
 Explicit configuration saving selects an exact retained attempt and writes only the
 automatic owner's root `preview.yml`. It reuses source validation and exclusive file
