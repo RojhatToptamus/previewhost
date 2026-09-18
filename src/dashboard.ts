@@ -6,16 +6,21 @@ import { loadPreviewSpec } from './config.js';
 import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
 import { connectPreviewDaemon } from './client.js';
-import { limits, requestSchemas } from './contracts.js';
+import { limits, requestSchemas, secretIdSchema } from './contracts.js';
 import { readBody } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
 import { discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
+import { listSecrets } from './secrets.js';
+import { SecretSetup } from './secrets-setup.js';
+import { secretsPage, secretsScript, secretsStyle } from './secrets-page.js';
 import { dashboardPage, dashboardScript, dashboardStyle } from './dashboard-page.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('list') }),
+  z.strictObject({ action: z.literal('listSecrets') }),
+  z.strictObject({ action: z.literal('editSecret'), id: secretIdSchema }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
   requestSchemas.cancel.extend({ action: z.literal('cancel'), owner: ownerId }),
   requestSchemas.startAgain.extend({ action: z.literal('startAgain'), owner: ownerId }),
@@ -42,6 +47,7 @@ export async function startDashboard(options: {
   server.keepAliveTimeout = 1000;
   let active = 0;
   let origin = '';
+  let secrets: SecretSetup;
   let closing: Promise<void> | undefined;
   server.on('clientError', (_error, socket) => socket.destroy());
   server.on('connect', (_request, socket) => socket.destroy());
@@ -66,10 +72,12 @@ export async function startDashboard(options: {
     } finally { clearTimeout(timer); clients.delete(client); await client.close(); }
   }
 
-  async function dispatch(input: unknown) {
+  async function dispatch(input: unknown, signal: AbortSignal) {
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
     const p = parsed.data;
+    if (p.action === 'listSecrets') return listSecrets({ signal });
+    if (p.action === 'editSecret') return secrets.setup(p.id, signal, true);
     const owners = await discover();
     if (p.action === 'list') {
       return Promise.all(owners.map(async owner => {
@@ -130,6 +138,9 @@ export async function startDashboard(options: {
       const count = (name: string) => req.rawHeaders.filter((value, i) => i % 2 === 0 && value.toLowerCase() === name).length;
       if (req.headers.host !== new URL(origin).host || count('host') !== 1) throw new PreviewError('UNAUTHORIZED', 'Use the numeric dashboard address.');
       const asset: [string | Buffer, string] | undefined = req.url === '/' ? [dashboardPage, 'text/html; charset=utf-8'] :
+        req.url === '/secrets' ? [secretsPage, 'text/html; charset=utf-8'] :
+        req.url === '/secrets.js' ? [secretsScript, 'text/javascript; charset=utf-8'] :
+        req.url === '/secrets.css' ? [secretsStyle, 'text/css; charset=utf-8'] :
         req.url === '/dashboard.js' ? [dashboardScript, 'text/javascript; charset=utf-8'] :
         req.url === '/dashboard.css' ? [dashboardStyle, 'text/css; charset=utf-8'] :
         req.url === '/fonts/geist.woff2' ? [geist, 'font/woff2'] : req.url === '/fonts/geist-mono.woff2' ? [geistMono, 'font/woff2'] : undefined;
@@ -140,18 +151,32 @@ export async function startDashboard(options: {
           'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
         res.end(asset[0]); return;
       }
+      const privateForm = ['/secrets/form', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
       const supplied = req.headers.authorization ?? '';
       const expected = `Bearer ${capability}`;
       if (req.headers.origin !== origin || count('origin') !== 1 || count('authorization') !== 1 ||
-          Buffer.byteLength(supplied) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+          (!privateForm && (Buffer.byteLength(supplied) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))))) {
         throw new PreviewError('UNAUTHORIZED', 'Open the dashboard through previewhost dashboard.');
       }
-      if (req.url !== '/api' || req.method !== 'POST' || count('content-type') !== 1 || req.headers['content-type'] !== 'application/json') {
+      if ((!privateForm && req.url !== '/api') || req.method !== 'POST' || count('content-type') !== 1 || req.headers['content-type'] !== 'application/json') {
         throw new PreviewError('INVALID_INPUT', 'Use the dashboard JSON API.');
       }
       if (active >= 8) throw new PreviewError('BUSY', 'The dashboard is busy. Try again shortly.');
       active++;
-      try { send(res, 200, { result: await dispatch(await readBody(req, AbortSignal.any([abort.signal, controller.signal]))) }); }
+      try {
+        // Authenticate private grants before reading a body that may contain a replacement value.
+        if (privateForm) secrets.form(supplied);
+        const signal = AbortSignal.any([abort.signal, controller.signal]);
+        const input = await readBody(req, signal);
+        let result;
+        if (!privateForm) result = await dispatch(input, signal);
+        else if (req.url === '/secrets/save') result = await secrets.save(supplied, input);
+        else {
+          if (!requestSchemas.list.safeParse(input).success) throw new PreviewError('INVALID_INPUT', 'Use an empty request.');
+          result = req.url === '/secrets/cancel' ? secrets.cancel(supplied) : secrets.form(supplied);
+        }
+        send(res, 200, { result });
+      }
       finally { active--; }
     })().catch(error => send(res, error instanceof PreviewError && error.code === 'UNAUTHORIZED' ? 401 : 400, { error: failure(error) }));
   });
@@ -160,12 +185,19 @@ export async function startDashboard(options: {
     server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); });
   });
   origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  // The dashboard's human session may edit stored references, but never grants a runtime access.
+  secrets = new SecretSetup({ prepareSecretSetup: async input => {
+    const parsed = secretIdSchema.safeParse(input);
+    if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Choose an existing secret reference.');
+    return { context: { mode: 'edit', sources: [], requirements: [{ id: parsed.data, selected: true, bindings: [] }] } };
+  } }, origin);
+  if (options.openBrowser) secrets.openBrowser = options.openBrowser;
   return {
     endpoint: origin,
     open: () => (options.openBrowser ?? openLocalBrowser)(`${origin}/#${capability}`, controller.signal),
     close: () => closing ??= (async () => {
       controller.abort();
-      await Promise.all([...clients].map(client => client.close()));
+      await Promise.all([secrets.close(), ...[...clients].map(client => client.close())]);
       await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
     })(),
   };

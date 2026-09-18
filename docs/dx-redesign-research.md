@@ -44,7 +44,7 @@ JSON
 | Area | Behavior |
 | --- | --- |
 | Private secret workflow | One existing private channel handles name approval and missing-value entry. No public approval tool or `approved: true` field exists. |
-| Shared values | An exact ID uses the existing `dev.previewd.user` Keychain entry across projects/worktrees that approve it. A distinct ID expresses a different value. |
+| Shared values | An exact ID uses the existing `dev.previewhost.user` Keychain entry across projects/worktrees that approve it. A distinct ID expresses a different value. |
 | Status continuation | Immediate reads or waits up to 25,000 ms use the existing bounded request map. Canceling a wait leaves setup open. |
 | Automatic owners | CLI and MCP share a persistent owner per canonical project. MCP routes each call independently, even over a shared connection. A lifetime kernel lock serializes startup. Explicit connection mode remains supported. |
 | Configuration input | CLI supports file or JSON stdin. MCP inspect/start/replace/setup supports exclusive `file` or `spec`, with root `preview.yml` as the default. |

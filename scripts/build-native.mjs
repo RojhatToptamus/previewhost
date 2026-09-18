@@ -14,12 +14,11 @@ function build(source, filename, definitions = []) {
     '-framework', 'Foundation', '-framework', 'Security', source, '-o', output];
   for (const [command, commandArgs] of [
     ['/usr/bin/clang', args],
-    // Existing Keychain access depends on the helper's signature, not the package name.
-    ['/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', `dev.previewd.${filename}`, output]],
+    ['/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', `dev.previewhost.${filename}`, output]],
   ]) {
     const result = spawnSync(command, commandArgs, { stdio: 'inherit' });
     if (result.error || result.status !== 0) process.exit(result.status || 1);
   }
 }
-build('native/keychain.m', 'keychain', testing ? ['-DPREVIEWD_KEYCHAIN_TEST'] : []);
+build('native/keychain.m', 'keychain', testing ? ['-DPREVIEWHOST_KEYCHAIN_TEST'] : []);
 if (testing) build('native/keychain-fixture.m', 'keychain-fixture');

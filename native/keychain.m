@@ -24,7 +24,7 @@ static NSDictionary *perform(NSDictionary *input, SecKeychainRef keychain) {
     status = SecKeychainGetStatus(keychain, &state);
     if (status) return result(status);
     if (!interactive && !(state & kSecUnlockStateStatus)) return result(errSecInteractionNotAllowed);
-    NSString *service = [@"dev.previewd." stringByAppendingString:space];
+    NSString *service = [@"dev.previewhost." stringByAppendingString:space];
     NSMutableDictionary *query = [@{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrService: service, (__bridge id)kSecMatchSearchList: @[(__bridge id)keychain] } mutableCopy];
     if (!listing) query[(__bridge id)kSecAttrAccount] = account;
@@ -41,7 +41,7 @@ static NSDictionary *perform(NSDictionary *input, SecKeychainRef keychain) {
         [query removeObjectForKey:(__bridge id)kSecMatchSearchList];
         query[(__bridge id)kSecUseKeychain] = (__bridge id)keychain;
         query[(__bridge id)kSecValueData] = bytes;
-        query[(__bridge id)kSecAttrLabel] = [@"previewd: " stringByAppendingString:account];
+        query[(__bridge id)kSecAttrLabel] = [@"previewhost: " stringByAppendingString:account];
         return result(SecItemAdd((__bridge CFDictionaryRef)query, NULL));
     }
     query[(__bridge id)kSecMatchLimit] = listing ? @129 : (__bridge id)kSecMatchLimitOne;
@@ -83,7 +83,7 @@ int main(int argc, const char *argv[]) {
                 if ([input isKindOfClass:NSDictionary.class]) {
                     SecKeychainRef keychain = NULL;
                     OSStatus status = SecKeychainSetUserInteractionAllowed(false);
-#ifdef PREVIEWD_KEYCHAIN_TEST
+#ifdef PREVIEWHOST_KEYCHAIN_TEST
                     if (!status && argc == 2) status = SecKeychainOpen(argv[1], &keychain);
                     else if (!status) status = errSecParam;
 #else
