@@ -91,6 +91,10 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
   const rejected = (await call('preview_wait', backend, { name: 'denied', attemptId: command.candidate.id }, staticOnly)).result;
   assert.equal(rejected.state, 'failed');
   assert.equal(rejected.error.code, 'EXECUTION_DENIED');
+  const database = (await call('preview_start', backend, { spec: { name: 'denied-database', type: 'environment', primary: 'web',
+    services: { web: { type: 'static', directory: backend }, db: { type: 'postgres' } } } }, staticOnly)).result;
+  const databaseDenied = (await call('preview_wait', backend, { name: 'denied-database', attemptId: database.candidate.id }, staticOnly)).result;
+  assert.equal(databaseDenied.error.code, 'EXECUTION_DENIED');
 });
 
 test('access confirmation cannot authorize changed paths, forged state, or a closed connection', async t => {

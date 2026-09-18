@@ -120,11 +120,11 @@ async function readConnection(directory: string): Promise<{ endpoint: string; pi
 
 async function launchOptions(options: ProjectOptions, project: string): Promise<ProjectLaunch> {
   const inputKeys = [...new Set(options.inputKeys ?? [])].sort();
-  const dataDirectory = options.dataDirectory ?? (options.dockerSocket ? join(projectOwnerDirectory(project), 'data') : undefined);
+  const dataDirectory = resolve(options.dataDirectory ?? join(projectOwnerDirectory(project), 'data'));
   const info = { projectDirectory: project, pid: process.pid,
     allowedRoots: [...new Set(await Promise.all((options.allowedRoots ?? [project]).map(root => canonicalDirectory(resolve(root)))))].sort(),
     allowExec: options.allowExec ?? false, inputKeys, secretIds: [...new Set(options.secretIds ?? [])].sort(),
-    ...(dataDirectory ? { dataDirectory: resolve(dataDirectory) } : {}),
+    dataDirectory,
     ...(options.dockerSocket ? { dockerSocket: resolve(options.dockerSocket) } : {}),
   };
   if (!ownerInfoSchema.safeParse(info).success) {

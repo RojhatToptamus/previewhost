@@ -168,7 +168,9 @@ previewhost does not load `.env` files.
 YAML files require one document without aliases, tags, or merge keys.
 
 Managed databases require private data storage and cached local Docker images.
-Automatic owners with `--docker-socket` default to separate private storage per project. Foreground `serve` requires `--data-dir`.
+Automatic owners default to separate private storage per project. Foreground `serve` requires `--data-dir`.
+If an existing automatic owner reports missing `dataDirectory`, upgrade Previewhost and explicitly shut down that project owner before retrying.
+Restarting the MCP client alone does not restart its owner. See [owner restart instructions](#the-client-cannot-find-the-daemon).
 See the [database example](../examples/multi-repo/README.md).
 External database URLs require `127.0.0.1`, an explicit port, and a valid database path.
 A reachable TCP port does not prove successful authentication.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -62,6 +62,7 @@ test('CLI and real stdio MCP share an automatically started owner, optional root
     }
   }
   await client.inspect(spec);
+  await assert.rejects(stat(projectOwnerDirectory(directory)), { code: 'ENOENT' });
   await assert.rejects(client.info(), { code: 'DAEMON_UNAVAILABLE' });
   const started = (await mcp.callTool({ name: 'preview_start', arguments: { spec } })).structuredContent as { result: PreviewStatus };
   const ready = (await mcp.callTool({ name: 'preview_wait', arguments: { name: 'site', attemptId: started.result.candidate!.id } })).structuredContent as { result: AttemptResult };
@@ -70,6 +71,8 @@ test('CLI and real stdio MCP share an automatically started owner, optional root
   assert.equal(await (await fetch(ready.result.url!)).text(), 'project preview');
   await assert.rejects(readFile(join(directory, 'preview.yml')), { code: 'ENOENT' });
   const info = await client.info(); assert.equal(info?.allowExec, true); assert.equal(info?.projectDirectory, directory);
+  assert.equal(info?.dataDirectory, join(projectOwnerDirectory(directory), 'data'));
+  assert.equal((await stat(info!.dataDirectory!)).mode & 0o777, 0o700);
   const listed = JSON.parse((await execute(process.execPath, [cli, 'list', '--project', directory])).stdout);
   assert.equal(listed[0].active.id, ready.result.id);
   const saved = (await mcp.callTool({ name: 'preview_save_config', arguments: { spec } })).structuredContent as { result: { file: string } };
@@ -160,6 +163,9 @@ test('real Git worktrees and an unrelated project share exact Keychain names wit
       const ready = await call<AttemptResult>('preview_wait', { name: 'tree', attemptId: started.candidate!.id });
       assert.equal(ready.state, 'ready'); assert.equal(await (await fetch(ready.url!)).text(), 'FAKE_SHARED');
       if (root === directory) {
+        const owner = connectProject({ projectDirectory: root });
+        try { assert.equal((await owner.info())?.dataDirectory, dataDirectory); }
+        finally { await owner.close(); }
         const conflict = await execute(process.execPath, [cli, 'start', '--project', worktree, '--allow-exec', '--data-dir', dataDirectory,
           '--file', join(worktree, 'preview.yml')], { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } }).catch(error => error);
         assert.equal(JSON.parse(conflict.stderr).error.code, 'BUSY');
@@ -307,4 +313,33 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   assert.equal(await (await fetch(ready[1].url!)).text(), 'other worktree');
   const restarted = await first<PreviewStatus>('preview_start');
   assert.equal((await first<AttemptResult>('preview_wait', { name: 'notes', attemptId: restarted.candidate!.id })).state, 'ready');
+});
+
+for (const customData of [false, true]) test(`automatic storage keeps explicit options and static previews usable without Docker (custom data: ${customData})`, enabled, async t => {
+  const { directory, client } = await fixture(t);
+  const dataDirectory = customData ? join(projectOwnerDirectory(directory), 'custom-data') : undefined;
+  const dockerSocket = join(directory, 'absent.sock');
+  const owner = connectProject({ projectDirectory: directory, allowExec: true, dataDirectory, dockerSocket });
+  t.after(() => owner.close());
+  const site: PreviewSpec = { name: 'site', type: 'environment', primary: 'web', services: { web: { type: 'static', directory } } };
+  const started = await owner.start(site);
+  const ready = await owner.wait('site', started.candidate!.id);
+  assert.equal(ready.state, 'ready');
+  const info = (await owner.info())!;
+  assert.equal(info.dataDirectory, dataDirectory ?? join(projectOwnerDirectory(directory), 'data'));
+  assert.equal(info.dockerSocket, dockerSocket);
+  assert.equal((await client.info())?.pid, info.pid, 'omitted launch options must reuse the existing owner');
+  for (const override of [{ dataDirectory: join(directory, 'different') }, { dockerSocket: join(directory, 'other.sock') }]) {
+    const mismatch = connectProject({ projectDirectory: directory, ...override });
+    try { await assert.rejects(mismatch.start(site), { code: 'INVALID_INPUT' }); }
+    finally { await mismatch.close(); }
+  }
+  const update = await owner.replace('site', { name: 'site', type: 'environment', primary: 'web',
+    services: { web: { type: 'static', directory }, db: { type: 'postgres' } } });
+  const failed = await owner.wait('site', update.candidate!.id);
+  assert.equal(failed.error?.code, 'START_FAILED');
+  assert.match(failed.error!.message, /Docker socket is unavailable/);
+  assert.equal(await (await fetch(ready.url!)).text(), 'project preview');
+  assert.deepEqual(await owner.info(), info, 'failed updates and conflicting options must not reconfigure or restart the owner');
+  assert.equal((await client.get('site')).active?.id, ready.id);
 });
