@@ -348,7 +348,7 @@ port, which the startup JSON reports.
 `--env NAME` selects the current value once at owner startup. Missing selected
 keys are errors. Startup JSON reports selected key names without their values.
 `--data-dir` selects an exact private directory for managed databases.
-Automatic owners with `--docker-socket` default to `data` inside their private project-owner directory.
+Automatic owners default to `data` inside their private project-owner directory, with or without `--docker-socket`.
 Explicit data directories retain their existing behavior. A shared directory permits only one owner at a time.
 Foreground `serve` still requires `--data-dir` for managed databases.
 
@@ -359,14 +359,15 @@ requests recovery after a Docker Engine restart, as described above. It never im
 ### Managed databases with MCP
 
 Start your local Docker Engine and [download the required database images](../examples/multi-repo/README.md#install-the-dependencies).
-For Docker Desktop on macOS, append this argument to the MCP registration command after `--allow-exec`:
+Docker Desktop on macOS uses `~/.docker/run/docker.sock` by default. No additional MCP flags are needed.
+For another local Engine, append its socket path to the MCP registration command after `--allow-exec`:
 
 ```sh
---docker-socket "$HOME/.docker/run/docker.sock"
+--docker-socket /absolute/path/to/docker.sock
 ```
 
 In Cursor, add `"--docker-socket"` and the expanded absolute socket path as two entries in `args`.
-JSON does not expand `$HOME`. For another local Engine, use its Unix socket path. Docker CLI context selection does not configure Previewhost.
+JSON does not expand `$HOME`. Docker CLI context selection does not configure Previewhost.
 Each automatic project owner uses separate private data storage. Do not supply one shared `--data-dir` across projects.
 If an owner already runs with different settings, follow the [owner restart instructions](troubleshooting.md#the-client-cannot-find-the-daemon).
 

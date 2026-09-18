@@ -53,7 +53,8 @@ test('the task recipe rejects missing paths and a different application recipe w
 });
 
 test('CLI and MCP run dirty task worktrees, retain task data, and release every consumer before source removal', {
-  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000,
+  // Five sequential attempts have independent 60-second startup deadlines, plus fixture setup and cleanup.
+  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 360_000,
 }, async (t) => {
   await testKeychain(t);
   const root = await mkdtemp(join(tmpdir(), 'previewhost-task-worktrees-'));
@@ -112,9 +113,20 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
     daemon = await startDaemon({ runtime, tokenFile, port: 0 });
     const common = ['--endpoint', daemon.endpoint, '--token-file', tokenFile];
     const runCli = async (args, input) => {
-      const pending = execute(process.execPath, [cli, ...args, ...common], { cwd: root, timeout: 40_000, maxBuffer: 1_048_576 });
+      const pending = execute(process.execPath, [cli, ...args, ...common], { cwd: root, timeout: 40_000, maxBuffer: 1_048_576, signal: t.signal });
       pending.child.stdin.end(input);
       return JSON.parse((await pending).stdout);
+    };
+    const waitCli = async (name, attemptId) => {
+      for (;;) {
+        t.signal.throwIfAborted();
+        try { return await runCli(['wait', name, attemptId]); }
+        catch (error) {
+          t.signal.throwIfAborted();
+          // Only observe the same pending attempt again; never repeat its start request.
+          assert.equal(JSON.parse(error.stderr).error.code, 'TIMEOUT');
+        }
+      }
     };
     const connectMcp = async () => {
       const client = new Client({ name: 'task-worktree-test', version: '1.0.0' });
@@ -124,9 +136,13 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
       return client;
     };
     const tool = async (name, args) => {
-      const result = await mcp.callTool({ name, arguments: args });
-      assert.ok(!result.isError, JSON.stringify(result));
-      return result.structuredContent.result;
+      for (;;) {
+        t.signal.throwIfAborted();
+        const result = await mcp.callTool({ name, arguments: args }, { signal: t.signal });
+        if (name === 'preview_wait' && result.isError && result.structuredContent?.error?.code === 'TIMEOUT') continue;
+        assert.ok(!result.isError, JSON.stringify(result));
+        return result.structuredContent.result;
+      }
     };
     const description = await runCli(['inspect', '--file', '-'], stdout);
     assert.equal(description.spec.services.frontend.cwd, await realpath(frontend));
@@ -135,15 +151,7 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
 
     // A task worktree can lack packages. Starting does not install them implicitly.
     const missingStart = await runCli(['start', '--no-wait', '--file', '-'], stdout);
-    let missingResult;
-    while (!missingResult) {
-      t.signal.throwIfAborted();
-      try { missingResult = await runCli(['wait', spec.name, missingStart.candidate.id]); }
-      catch (error) {
-        // A wait timeout leaves startup running, including cold database preparation.
-        assert.equal(JSON.parse(error.stderr).error.code, 'TIMEOUT');
-      }
-    }
+    const missingResult = await waitCli(spec.name, missingStart.candidate.id);
     assert.equal(missingResult.state, 'failed');
     assert.equal(missingResult.error.code, 'START_FAILED');
     await assert.rejects(readFile(join(backend, 'node_modules/pg/package.json')), { code: 'ENOENT' });
@@ -151,8 +159,9 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
     // The synthetic caller supplies an independent installed tree without registry traffic.
     await cp(join(project, 'node_modules'), join(backend, 'node_modules'), { recursive: true });
     const installed = await readFile(join(backend, 'node_modules/pg/package.json'));
-    const first = await runCli(['start', '--file', '-'], stdout);
-    assert.equal(first.state, 'ready');
+    const firstStart = await runCli(['start', '--no-wait', '--file', '-'], stdout);
+    const first = await waitCli(spec.name, firstStart.candidate.id);
+    assert.equal(first.state, 'ready', JSON.stringify(first.error));
     assert.match(await (await fetch(first.url)).text(), /Current task notes/);
     const getNotes = async (url) => (await request(url, '/notes')).body;
     const apiUrl = first.services.api.browserUrl;
@@ -168,7 +177,7 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
     const neighborSpec = { ...spec, name: 'other-task' };
     const neighborStart = await tool('preview_start', { spec: neighborSpec });
     const neighbor = await tool('preview_wait', { name: neighborSpec.name, attemptId: neighborStart.candidate.id });
-    assert.equal(neighbor.state, 'ready');
+    assert.equal(neighbor.state, 'ready', JSON.stringify(neighbor.error));
     assert.deepEqual((await getNotes(neighbor.services.api.browserUrl)).notes, []);
     await mcp.close();
     assert.equal((await getNotes(apiUrl)).notes.length, 1);
@@ -194,7 +203,9 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
     await assert.rejects(fetch(first.url));
     assert.equal((await getNotes(neighbor.services.api.browserUrl)).notes.length, 0);
     assert.deepEqual(await sourceState(), afterEdit);
-    const resumed = await runCli(['start', '--file', '-'], stdout);
+    const resumedStart = await runCli(['start', '--no-wait', '--file', '-'], stdout);
+    const resumed = await waitCli(spec.name, resumedStart.candidate.id);
+    assert.equal(resumed.state, 'ready', JSON.stringify(resumed.error));
     assert.equal((await getNotes(resumed.services.api.browserUrl)).notes[0].text, 'Retain this task note');
     assert.deepEqual(await sourceState(), afterEdit);
     assert.deepEqual(await readFile(join(backend, 'node_modules/pg/package.json')), installed);
