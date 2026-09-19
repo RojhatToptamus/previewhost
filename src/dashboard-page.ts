@@ -90,6 +90,10 @@ function mountDashboard() {
     return !!(preview?.cleanup?.length || preview?.data?.cleanup ||
       [preview?.active, preview?.candidate, preview?.latest].some(attempt => attempt?.state === 'cleanup-incomplete'));
   }
+  function deletionNeedsRetry(p?: PreviewStatus) {
+    return p?.data?.cleanup?.operation === 'remove-credential' && !p.cleanup?.length &&
+      !attempts(p).some(attempt => attempt.state === 'cleanup-incomplete');
+  }
   function requests(entry: Entry) { return entry.owner.requests?.filter(r => r.name === entry.name) ?? []; }
   function pending(entry: Entry) { return requests(entry).filter(r => r.state === 'pending' || r.state === 'saving'); }
   function state(entry: Entry) {
@@ -153,7 +157,7 @@ function mountDashboard() {
     if (p.candidate) result.push({ label: p.active ? 'Cancel update' : 'Cancel startup', danger: true, run: () => {
       void mutate({ action: 'cancel', owner: owner.id, name, attemptId: p.candidate!.id }, 'The selected attempt was canceled.');
     } });
-    if ((p.active || needsCleanup(p) || p.url) && !p.busy && !owner.legacy) result.push({ label: needsCleanup(p) ? 'Retry cleanup' : 'Stop', danger: !needsCleanup(p), run: () => {
+    if ((p.active || needsCleanup(p) || p.url) && !deletionNeedsRetry(p) && !p.busy && !owner.legacy) result.push({ label: needsCleanup(p) ? 'Retry cleanup' : 'Stop', danger: !needsCleanup(p), run: () => {
       void mutate({ action: 'stop', owner: owner.id, name, expected: { active: p.active?.id ?? null, candidate: p.candidate?.id ?? null, latest: p.latest?.id ?? null } }, 'Preview stopped. Your database data is retained.');
     } });
     if (!p.active && !p.busy && !p.candidate && ['stopped', 'failed'].includes(p.latest?.state ?? '') && !owner.legacy && !needsCleanup(p)) result.push({ label: p.latest?.state === 'failed' ? 'Retry start' : 'Start preview', run: () => {
@@ -223,6 +227,7 @@ function mountDashboard() {
   }
   function hint(entry: Entry) {
     const p = entry.preview;
+    if (deletionNeedsRetry(p)) return 'Nothing restarts until you explicitly retry Reset data.';
     if (needsCleanup(p)) return 'Cleanup is incomplete; keep the source directories and retry cleanup before starting again.';
     if (pending(entry).length) return 'Values go to the macOS Keychain. Saving them does not start the app on its own.';
     if (p?.candidate) return p.active ? 'Your app is still available; canceling affects only the pending update in this worktree.' : 'The URL appears once startup checks pass. Cancelling affects only this worktree.';
@@ -278,6 +283,7 @@ function mountDashboard() {
     if (p.active && p.candidate) node.append(el('p', 'Serving services are shown below; the update is still starting.', 'muted'));
     const table = el('div', '', 'row-list');
     const managed = new Set(p.data?.resources.map(r => r.name) ?? []);
+    const dataLabel = p.data?.cleanup?.operation === 'remove-credential' ? 'Data deleted' : p.data?.cleanup ? 'Check data' : 'Data retained';
     const typeLabels = { command: 'HTTP', static: 'Static', attach: 'Attached HTTP', postgres: 'PostgreSQL', redis: 'Redis', 'external-postgres': 'PostgreSQL', 'external-redis': 'Redis' };
     const services = Object.entries(attempt?.services ?? {}).sort(([a], [b]) => Number(managed.has(a)) - Number(managed.has(b)));
     if (!services.length && attempt && attempt.type !== 'environment') services.push([p.name, { type: attempt.type, state: attempt.state === 'ready' ? 'ready' : attempt.state === 'starting' ? 'starting' : attempt.state === 'failed' ? 'failed' : 'stopped' }]);
@@ -286,7 +292,7 @@ function mountDashboard() {
       const row = el('div', '', 'service-row' + (managed.has(name) ? ' managed' : ''));
       const url = attempt?.id === p.active?.id ? service.browserUrl : undefined;
       row.append(el('strong', name), el('span', typeLabels[service.type], 'muted'), el('span', service.state[0].toUpperCase() + service.state.slice(1), 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
-      const meta = el('span', managed.has(name) ? 'Data retained' : '', 'service-meta muted');
+      const meta = el('span', managed.has(name) ? dataLabel : '', 'service-meta muted');
       if (url) { try { meta.textContent = ':' + new URL(url).port; meta.classList.add('machine'); } catch { /* Invalid links are omitted below. */ } }
       const controls = el('div', '', 'row-actions service-action');
       if (service.type === 'command') controls.append(button('Logs', () => openLogs(entry, attempt!, name), 'small', 'logs-' + name));
@@ -298,15 +304,13 @@ function mountDashboard() {
     for (const resource of p.data?.resources ?? []) {
       if (services.some(([name]) => name === resource.name)) continue;
       const row = el('div', '', 'service-row managed');
-      row.append(el('strong', resource.name), el('span', typeLabels[resource.type], 'muted'), el('span', 'Retained', 'muted'), el('span', 'Data retained', 'service-meta muted'), el('span'));
+      row.append(el('strong', resource.name), el('span', typeLabels[resource.type], 'muted'), el('span', p.data?.cleanup ? 'Needs cleanup' : 'Retained', 'muted'), el('span', dataLabel, 'service-meta muted'), el('span'));
       table.append(row);
     }
     if (!table.children.length) table.append(el('p', 'Service status is not available yet.', 'muted'));
     node.append(table);
-    const deletionPending = p.data?.cleanup?.operation === 'remove-credential' && !p.cleanup?.length &&
-      !attempts(p).some(attempt => attempt.state === 'cleanup-incomplete');
     if (p.data?.resources.length && p.latest && (p.active || ['stopped', 'failed'].includes(p.latest.state)) &&
-        !p.busy && !p.candidate && (!needsCleanup(p) || deletionPending) && !entry.owner.legacy) {
+        !p.busy && !p.candidate && (!needsCleanup(p) || deletionNeedsRetry(p)) && !entry.owner.legacy) {
       const reset = el('div', '', 'reset-row');
       reset.append(el('p', 'Reset managed data and run setup again.', 'muted'), button('Reset data', () => confirmReset(entry), 'danger small'));
       node.append(reset);
@@ -449,7 +453,7 @@ function mountDashboard() {
       }
       if (!retained.length) content.append(el('p', 'No retained attempts. Start through your agent or CLI.', 'muted'));
       if (p?.cleanup?.length || p?.data?.cleanup) {
-        const cleanup = message('Cleanup needs attention', 'Keep these source directories until cleanup succeeds.', 'error', content);
+        const cleanup = message('Cleanup needs attention', deletionNeedsRetry(p) ? 'Database credential removal is incomplete.' : 'Keep these source directories until cleanup succeeds.', 'error', content);
         for (const item of p.cleanup ?? []) cleanup.append(el('p', item.error.message), ...item.sources.map(pathText));
         if (p.data?.cleanup) cleanup.append(el('p', p.data.cleanup.message));
       }
@@ -569,7 +573,8 @@ function mountDashboard() {
       const node = message(heading, body, tone);
       if (extra && !taken.has(extra.label)) { node.append(button(extra.label, extra.run)); taken.add(extra.label); }
     };
-    if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
+    if (deletionNeedsRetry(p)) addNotice('Data reset incomplete', 'Managed data was deleted, but its database credential could not be removed. Resolve the Keychain error, then choose Reset data to finish and start again.', 'error');
+    else if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
     else if (pending(entry).length) addNotice('Private setup requested', 'Approve access and enter any missing values in the separate private form. Cancellation stays in that form.', 'warning');
     else if (!p?.candidate && p?.latest?.state === 'failed' && !Object.values(p.latest.services ?? {}).some(service => service.type === 'job' && service.state === 'failed')) addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
     else if (!p?.candidate && p?.latest?.state === 'canceled') addNotice(p.active ? 'The update was canceled. Your previous version is still running.' : 'Startup was canceled.', 'Nothing was started again automatically. Ask your agent to continue only when you are ready.');
@@ -593,7 +598,7 @@ function mountDashboard() {
     else if (owner.configuration) detail.append(el('p', 'preview.yml is available for the next agent startup. Start again uses the retained attempt configuration.', 'muted'));
 
     if (owner.legacy && p?.active) message('Stop through the CLI', `Run previewhost stop ${p.name} from the project directory shown above; this owner cannot guard a stale dashboard action.`);
-    if (!p?.active && !p?.candidate && !availableActions.length && !pending(entry).length) detail.append(el('p', `Ask your agent to start ${entry.name ?? 'an application'} in this worktree.`, 'muted'));
+    if (!p?.active && !p?.candidate && !availableActions.length && !pending(entry).length && !needsCleanup(p)) detail.append(el('p', `Ask your agent to start ${entry.name ?? 'an application'} in this worktree.`, 'muted'));
     renderTabs(entry);
   }
   function render() {
