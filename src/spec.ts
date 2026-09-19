@@ -26,7 +26,7 @@ export function isWithin(root: string, filename: string): boolean {
 
 export function sourceDirectories(spec: EffectiveSpec): string[] {
   const services = spec.type === 'environment' ? Object.values(spec.services) : [spec];
-  return [...new Set(services.flatMap(service => service.type === 'command' ? [service.cwd] : service.type === 'static' ? [service.directory] : []))].sort();
+  return [...new Set(services.flatMap(service => (service.type === 'command' || service.type === 'job') ? [service.cwd] : service.type === 'static' ? [service.directory] : []))].sort();
 }
 
 export async function canonicalDirectory(directory: string): Promise<string> {
@@ -43,7 +43,7 @@ export async function canonicalDirectory(directory: string): Promise<string> {
 export async function normalizeSpec(spec: EffectiveSpec, roots: string[], inputs: Readonly<Record<string, string>> = {}, privateDirectories: ReadonlySet<string> = new Set()): Promise<EffectiveSpec> {
   const services = spec.type === 'environment' ? Object.values(spec.services) : [spec];
   for (const service of services) {
-    if (service.type === 'command') {
+    if (service.type === 'command' || service.type === 'job') {
       for (const value of Object.values(service.env)) {
         if (typeof value === 'object' && 'fromEnv' in value) resolveInput(value, inputs);
       }
@@ -62,7 +62,7 @@ export async function normalizeSources(spec: EffectiveSpec, roots: string[], pri
       if ((service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'string') {
         validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', service.url);
       }
-      if (service.type !== 'static' && service.type !== 'command') return [id, service];
+      if (service.type !== 'static' && service.type !== 'command' && service.type !== 'job') return [id, service];
       const directory = await allowedDirectory(service.type === 'static' ? service.directory : service.cwd, roots);
       if (service.type === 'static') checkStaticSource(directory, privateDirectories);
       return [id, service.type === 'static' ? { ...service, directory } : { ...service, cwd: directory }];
@@ -92,7 +92,7 @@ export function describeSpec(spec: EffectiveSpec): PreviewDescription {
   if (spec.type === 'environment') {
     const envKeys: string[] = [];
     const services = Object.fromEntries(Object.entries(spec.services).map(([id, service]) => {
-      if (service.type === 'command') {
+      if (service.type === 'command' || service.type === 'job') {
         const { env, ...publicService } = service;
         const keys = Object.keys(env).sort();
         envKeys.push(...keys.map((key) => `${id}.${key}`));
@@ -142,13 +142,19 @@ export function environmentDependencies(spec: EnvironmentSpec): Map<string, stri
   for (const [id, service] of Object.entries(spec.services)) {
     if (isHttpService(service)) browserHostname(spec.name, id);
     if (service.type === 'attach') attachmentTarget(service.url);
-    const dependencies = new Set<string>();
-    if (service.type === 'command') {
+    const dependencies = new Set<string>('dependsOn' in service ? service.dependsOn : []);
+    for (const dependency of dependencies) {
+      if (!Object.hasOwn(spec.services, dependency)) throw new PreviewError('INVALID_INPUT', `Node ${id} depends on missing node ${dependency}.`);
+    }
+    if (service.type === 'command' || service.type === 'job') {
       for (const value of Object.values(service.env)) {
         if (typeof value === 'string' || 'fromEnv' in value || 'secret' in value) continue;
         const target = 'service' in value ? value.service : 'publicUrl' in value ? value.publicUrl : value.browserUrl;
         if (!Object.hasOwn(spec.services, target)) throw new PreviewError('INVALID_INPUT', `Service ${id} refers to missing service ${target}.`);
-        if ('service' in value) dependencies.add(target);
+        if ('service' in value) {
+          if (spec.services[target].type === 'job') throw new PreviewError('INVALID_INPUT', `Job ${target} has no connection URL. Use dependsOn to wait for its completion.`);
+          dependencies.add(target);
+        }
         else if (!isHttpService(spec.services[target])) throw new PreviewError('INVALID_INPUT', `Service ${target} has no public HTTP URL.`);
         else if ('publicUrl' in value && target !== spec.primary) {
           throw new PreviewError('INVALID_INPUT', 'Only the primary service has a numeric public URL. Use browserUrl for another public service.');
@@ -167,6 +173,14 @@ export function environmentDependencies(spec: EnvironmentSpec): Map<string, stri
     visiting.delete(id); visited.add(id);
   }
   for (const id of graph.keys()) visit(id);
+  function hasDatabase(id: string): boolean {
+    return graph.get(id)!.some(dep => ['postgres', 'redis'].includes(spec.services[dep].type) || hasDatabase(dep));
+  }
+  for (const [id, service] of Object.entries(spec.services)) {
+    if (service.type === 'job' && service.run === 'once' && !hasDatabase(id)) {
+      throw new PreviewError('INVALID_INPUT', `Once-only job ${id} needs a managed database dependency so completion belongs to retained data.`);
+    }
+  }
   return graph;
 }
 
@@ -185,7 +199,7 @@ export function validateResolvedInputs(spec: EffectiveSpec, inputs: Readonly<Rec
   if (spec.type === 'environment') for (const service of Object.values(spec.services)) {
     if (service.type === 'external-postgres' || service.type === 'external-redis') {
       validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', resolveInput(service.url, inputs, secrets));
-    } else if (service.type === 'command') {
+    } else if (service.type === 'command' || service.type === 'job') {
       const values = Object.fromEntries(Object.entries(service.env).map(([key, value]) => [key,
         typeof value === 'string' || 'fromEnv' in value || 'secret' in value ? resolveInput(value, inputs, secrets) : '']));
       validateEnvironmentSize(values);
@@ -204,7 +218,7 @@ export function sameSources(before: EffectiveSpec, after: EffectiveSpec): boolea
   if (before.type === 'environment' && after.type === 'environment') {
     return Object.entries(before.services).every(([id, service]) => {
       const checked = after.services[id];
-      return service.type === 'command' ? checked?.type === 'command' && service.cwd === checked.cwd :
+      return (service.type === 'command' || service.type === 'job') ? checked?.type === service.type && service.cwd === checked.cwd :
         service.type === 'static' ? checked?.type === 'static' && service.directory === checked.directory : true;
     });
   }

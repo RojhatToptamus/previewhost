@@ -22,6 +22,7 @@ const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
   requestSchemas.cancel.extend({ action: z.literal('cancel'), owner: ownerId }),
+  requestSchemas.rerunJob.extend({ action: z.literal('rerunJob'), owner: ownerId }),
   requestSchemas.startAgain.extend({ action: z.literal('startAgain'), owner: ownerId }),
   requestSchemas.saveConfiguration.extend({ action: z.literal('saveConfiguration'), owner: ownerId }),
   requestSchemas.describe.extend({ action: z.literal('describe'), owner: ownerId }),
@@ -116,6 +117,7 @@ export async function startDashboard(options: {
       switch (p.action) {
         case 'stop': return client.stop(p.name, { expected: p.expected });
         case 'cancel': return client.cancel(p.name, p.attemptId);
+        case 'rerunJob': return client.rerunJob(p.name, p.attemptId, p.job);
         case 'startAgain': return client.startAgain(p.name, p.attemptId);
         case 'saveConfiguration': return client.saveConfiguration(p.name, p.attemptId);
         case 'describe': return client.describe(p.name, p.attemptId);

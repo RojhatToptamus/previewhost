@@ -15,7 +15,8 @@ Use previewhost when several coding agents or worktrees need separate running co
 Each task gets its own service ports and connections, without manual port assignments or changes to service URLs.
 
 Define services, commands, and connections in optional root `preview.yml`, or supply a spec directly through MCP or JSON stdin.
-previewhost starts services in dependency order and waits for them to become ready.
+previewhost runs setup jobs, then starts dependent services and waits for readiness.
+Use explicit [migration and seed jobs](docs/jobs.md) instead of embedding setup in server commands.
 
 When you replace a preview, its local URL stays the same.
 New requests switch to the replacement services only after they pass readiness checks.

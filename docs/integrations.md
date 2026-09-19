@@ -185,7 +185,7 @@ Use absolute source paths in MCP specs. The [API reference](api.md#http-and-mcp)
 lists tool arguments. For a custom daemon, add `--endpoint` and `--token-file`
 to the MCP arguments. Keep token values out of configuration files.
 
-Global registration exposes 15 `preview_*` tools, including `preview_access`; explicit-root and fixed-owner modes expose 14.
+Global registration exposes 16 `preview_*` tools, including `preview_access`; explicit-root and fixed-owner modes expose 15. Both include `preview_rerun_job`.
 Inspection works offline after project approval.
 Global project approval, start/replace and secret setup can start the owner; read/status/cleanup tools never do.
 A client disconnect leaves owner previews active.

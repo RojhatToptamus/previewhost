@@ -296,7 +296,7 @@ For executable lookup errors, use the [PATH troubleshooting steps](#the-client-c
 Verify the project context and current launch authority. Only explicit endpoint/token mode needs a separately running daemon.
 MCP stdout must contain only protocol messages.
 Remove shell wrappers that print banners to stdout.
-Check the tool list for 14 `preview_*` tools, including secret setup/status, configuration saving and owner shutdown.
+Check for `preview_start`, `preview_secrets_setup`, `preview_save_config`, and `preview_rerun_job`. Global mode also exposes `preview_access`.
 Read the tool's error envelope before a retry.
 After changing a registration's command or environment, reload the client workspace and reconnect the server.
 In Cursor 3.20.7, an edited registration showed connected tools while agent calls timed out; a new server name after reload restored calls.

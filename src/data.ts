@@ -19,6 +19,8 @@ export interface DataOwner {
   open(name: string, resources: Record<string, OwnedDatabaseSpec>, options: { signal: AbortSignal; onFailure(error: Error): void }): Promise<Record<string, DatabaseBinding>>;
   stop(name: string, options?: StopOptions): Promise<void>;
   deleteData(name: string): Promise<void>;
+  beginJob(name: string, job: string, rerun: boolean): Promise<boolean>;
+  completeJob(name: string, job: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -36,6 +38,7 @@ const credentialRefSchema = z.string().regex(/^(?:[a-f0-9]{32}|[a-f0-9]{32}\/[a-
 const resourceSchema = z.strictObject({ ...resourceFields, credentialRef: credentialRefSchema });
 const recordFields = {
   name: nameSchema, owner: token,
+  jobs: z.record(nameSchema, z.enum(['started', 'succeeded'])).refine(value => Object.keys(value).length <= limits.terminalRecords).optional(),
   engine: z.strictObject({ id: z.string().min(1).max(128), socket: z.string().min(1).max(4096) }),
   pending: z.strictObject({ operation: z.enum(['create-volume', 'create-container', 'start-container', 'remove-container', 'remove-volume', 'remove-credential']), resource: nameSchema }).optional(),
 };
@@ -377,6 +380,30 @@ export async function createDataOwner(options: { directory: string; dockerSocket
     stop(name, stopOptions) {
       if (closed) return Promise.resolve();
       return serial(name, async () => { const entry = entries.get(name); if (entry) await stopEntry(entry, stopOptions); });
+    },
+    beginJob(name, job, rerun) {
+      return serial(name, async () => {
+        const record = entries.get(name)?.record;
+        if (!record || !live.has(name)) throw new PreviewError('START_FAILED', 'Once-only jobs require running owned data.');
+        const jobs = record.jobs ?? {};
+        if (!rerun && jobs[job] === 'succeeded') return false;
+        if (!rerun && jobs[job] === 'started') throw new PreviewError('START_FAILED', `Job ${job} previously failed or was interrupted. Inspect its writes, then explicitly rerun the job or stop and delete data. No writes were rolled back.`);
+        if (!Object.hasOwn(jobs, job) && Object.keys(jobs).length >= limits.terminalRecords) throw new PreviewError('BUSY', 'The retained job limit was reached. Delete this disposable data before adding more jobs.');
+        record.jobs = { ...jobs, [job]: 'started' };
+        // Durable intent precedes execution. An uncertain write or owner exit cannot silently rerun a seed.
+        await save(record);
+        return true;
+      });
+    },
+    completeJob(name, job) {
+      return serial(name, async () => {
+        const record = entries.get(name)?.record;
+        if (!record || record.jobs?.[job] !== 'started') throw cleanupError('The job completion has no retained execution record.');
+        // Publish before changing memory, so a failed save cannot make a retry skip uncertain work.
+        const completed = { ...record, jobs: { ...record.jobs, [job]: 'succeeded' as const } };
+        await save(completed);
+        entries.get(name)!.record = completed;
+      });
     },
     deleteData(name) {
       return serial(name, async () => {

@@ -65,7 +65,7 @@ export async function readPreviewSpec(input: Readable, options: {
   const spec = parsed.data;
   const source = (service: { type: string; directory?: string; cwd?: string }) => {
     if (service.type === 'static' && service.directory !== undefined) service.directory = resolve(options.baseDirectory, service.directory);
-    if (service.type === 'command' && service.cwd !== undefined) service.cwd = resolve(options.baseDirectory, service.cwd);
+    if ((service.type === 'command' || service.type === 'job') && service.cwd !== undefined) service.cwd = resolve(options.baseDirectory, service.cwd);
   };
   if (spec.type === 'environment') Object.values(spec.services).forEach(source);
   else source(spec);
@@ -89,11 +89,11 @@ export async function savePreviewSpec(input: PreviewSpec, options: {
     const portable = structuredClone(spec);
     const externalSources = new Set<string>();
     for (const service of portable.type === 'environment' ? Object.values(portable.services) : [portable]) {
-      if (service.type !== 'command' && service.type !== 'static') continue;
-      const source = service.type === 'command' ? service.cwd : service.directory;
+      if (service.type !== 'command' && service.type !== 'job' && service.type !== 'static') continue;
+      const source = (service.type === 'command' || service.type === 'job') ? service.cwd : service.directory;
       if (!isWithin(project, source)) { externalSources.add(source); continue; }
       const local = relative(project, source) || '.';
-      if (service.type === 'command') service.cwd = local; else service.directory = local;
+      if (service.type === 'command' || service.type === 'job') service.cwd = local; else service.directory = local;
     }
     const { stringify } = await import('yaml');
     const text = stringify(portable, { aliasDuplicateObjects: false });

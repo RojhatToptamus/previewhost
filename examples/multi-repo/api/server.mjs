@@ -42,7 +42,7 @@ async function handle(request, response) {
   }
   try {
     if (request.method === 'GET' && request.url === '/ready') {
-      await Promise.all([pool.query('SELECT 1'), redis().ping()]);
+      await Promise.all([pool.query('SELECT id FROM previewd_demo_notes LIMIT 0'), redis().ping()]);
       json(response, 200, { ready: true, service: 'api', revision });
     } else if (request.method === 'GET' && request.url === '/notes') {
       const notes = await pool.query('SELECT id, text, revision, created_at AS "createdAt" FROM previewd_demo_notes ORDER BY created_at DESC, id DESC LIMIT 20');
@@ -86,8 +86,6 @@ process.once('SIGINT', () => { void stop(); });
 
 try {
   await cache.connect();
-  // This demo application owns its table. previewhost does not run migrations.
-  await pool.query('CREATE TABLE IF NOT EXISTS previewd_demo_notes (id uuid PRIMARY KEY, text text NOT NULL CHECK (char_length(text) BETWEEN 1 AND 160), revision text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())');
   if (!stopping) {
     await new Promise((resolve, reject) => {
       server.once('error', reject);

@@ -1,13 +1,13 @@
 import type { EnvironmentSpec, EnvironmentValue, ServiceStatus } from './contracts.js';
 import { limits } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
-import { startNative, type NativeResource } from './native.js';
+import { runNativeJob, startNative, type NativeResource } from './native.js';
 import { startStatic } from './static.js';
 import { createGateway } from './gateway.js';
 import { waitForHttp } from './readiness.js';
 import { attachmentTarget, browserHostname, environmentDependencies, isHttpService, resolveInput } from './spec.js';
 import { databaseRedactions, probeDatabase } from './database-connections.js';
-import type { DatabaseBinding } from './data.js';
+import type { DatabaseBinding, DataOwner } from './data.js';
 import type { HttpTarget, Resource } from './resources.js';
 
 /** One attempt owns this application graph. Database handles belong to its slot. */
@@ -18,6 +18,8 @@ export async function startEnvironment(input: {
   secrets?: Readonly<Record<string, string>>;
   databases: Readonly<Record<string, DatabaseBinding>>;
   privateDirectories?: ReadonlySet<string>;
+  data?: DataOwner;
+  rerunJob?: string;
   signal: AbortSignal;
   appendLog(text: string): void;
   serviceStatus(id: string, status: ServiceStatus): void;
@@ -27,6 +29,7 @@ export async function startEnvironment(input: {
   const graph = environmentDependencies(spec);
   const controller = new AbortController();
   const running = new Map<string, Resource>();
+  const jobs = new Map<string, Pick<Resource, 'stop'>>();
   const connections = new Map<string, DatabaseBinding>();
   const starts = new Map<string, Promise<void>>();
   const failures = new Map<string, Error>();
@@ -101,6 +104,17 @@ export async function startEnvironment(input: {
     return resolved;
   }
 
+  function commandBindings(values: Record<string, EnvironmentValue>) {
+    const env: Record<string, string> = {};
+    const redactions: string[] = [];
+    for (const [key, value] of Object.entries(values)) {
+      const resolved = environmentValue(value);
+      env[key] = resolved.url;
+      redactions.push(...resolved.redactions);
+    }
+    return { env, redactions };
+  }
+
   function start(id: string): Promise<void> {
     const existing = starts.get(id);
     if (existing) return existing;
@@ -121,6 +135,24 @@ export async function startEnvironment(input: {
             signal: controller.signal, timeoutMs: service.timeoutMs,
           });
           connections.set(id, { url, redactions: databaseRedactions(url) });
+        } else if (service.type === 'job') {
+          if (service.run === 'once' && !await input.data!.beginJob(spec.name, id, input.rerunJob === id)) {
+            status(id, 'skipped');
+            input.appendLog(`[${id}] Skipped: already succeeded for retained data.\n`);
+            return;
+          }
+          const { env, redactions } = commandBindings(service.env);
+          input.appendLog(`[${id}] Running job.\n`);
+          await runNativeJob({ spec: { ...service, env }, url: input.url, signal: controller.signal,
+            timeoutMs: service.timeoutMs, redactions, appendLog: text => input.appendLog(`[${id}] ${text}`),
+            onResource: resource => jobs.set(id, resource),
+          });
+          jobs.delete(id);
+          assertRunning();
+          if (service.run === 'once') await input.data!.completeJob(spec.name, id);
+          status(id, 'succeeded');
+          input.appendLog(`[${id}] Succeeded.\n`);
+          return;
         } else {
           let native: NativeResource | undefined;
           if (service.type === 'static') {
@@ -133,15 +165,9 @@ export async function startEnvironment(input: {
             own(id, { target: { port: Number(new URL(proxy.url).port), hostHeader: new URL(proxy.url).host }, stop: () => proxy.close() });
             proxy.setTarget(target);
           } else {
-            const env: Record<string, string> = {};
-            const redactions: string[] = [];
-            for (const [key, value] of Object.entries(service.env)) {
-              const resolved = environmentValue(value);
-              env[key] = resolved.url;
-              redactions.push(...resolved.redactions);
-            }
+            const { env, redactions } = commandBindings(service.env);
             native = await startNative({
-              spec: { ...service, name: spec.name, env }, url: browserUrl(id), signal: controller.signal,
+              spec: { ...service, env }, url: browserUrl(id), signal: controller.signal,
               appendLog: (text) => input.appendLog(`[${id}] ${text}`), redactions,
               onResource: (value) => own(id, value),
             });
@@ -161,8 +187,9 @@ export async function startEnvironment(input: {
       });
     })().catch((error: unknown) => {
       if (!stopping && !controller.signal.aborted) {
-        status(id, 'failed', error instanceof Error ? error : new Error('Service startup failed.'));
-      }
+        status(id, 'failed', error instanceof Error ? error : new Error('Node startup failed.'));
+      } else if (spec.services[id].type === 'job') status(id, 'canceled');
+      input.appendLog(`[${id}] ${controller.signal.aborted ? 'Canceled' : failure(error).message}\n`);
       controller.abort();
       throw error;
     });
@@ -179,13 +206,13 @@ export async function startEnvironment(input: {
       await Promise.allSettled([...starts.values()]);
       let incomplete = false;
       for (const id of reverseOrder(graph)) {
-        const value = running.get(id);
+        const value = running.get(id) ?? jobs.get(id);
         if (!value) continue;
         try {
           await value.stop();
-          running.delete(id);
+          running.delete(id); jobs.delete(id);
           const failed = failures.get(id);
-          status(id, failed ? 'failed' : 'stopped', failed);
+          status(id, failed ? 'failed' : spec.services[id].type === 'job' ? 'canceled' : 'stopped', failed);
         } catch {
           incomplete = true;
           status(id, 'failed', new PreviewError('CLEANUP_INCOMPLETE', 'Owned service cleanup is incomplete.'));

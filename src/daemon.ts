@@ -152,6 +152,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         return null;
       }
       case 'describe': { const p = parse(requestSchemas.describe, value); return runtime.describe(p.name, p.attemptId); }
+      case 'rerunJob': { const p = parse(requestSchemas.rerunJob, value); return runtime.rerunJob(p.name, p.attemptId, p.job); }
       case 'startAgain': { const p = parse(requestSchemas.startAgain, value); return runtime.startAgain(p.name, p.attemptId); }
       case 'saveConfiguration': {
         const p = parse(requestSchemas.saveConfiguration, value);

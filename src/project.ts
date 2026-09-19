@@ -232,6 +232,7 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
   return {
     allowSources: (directories, signal) => call(true, client => client.allowSources(directories, signal)),
     describe: (name, id) => call(false, client => client.describe(name, id)),
+    rerunJob: (name, id, job) => call(false, client => client.rerunJob(name, id, job)),
     startAgain: (name, id) => call(false, client => client.startAgain(name, id)),
     saveConfiguration: (name, id) => call(false, client => client.saveConfiguration(name, id)),
     secretsList: () => call(false, client => client.secretsList()),

@@ -219,6 +219,22 @@ class Runtime implements PreviewRuntime {
     return this.start(attempt.declaration);
   }
 
+  async rerunJob(name: string, attemptId: string, job: string): Promise<PreviewStatus> {
+    this.assertOpen();
+    const slot = this.slot(name);
+    const attempt = this.attempt(slot, attemptId);
+    if (slot.latest !== attempt) throw new PreviewError('STALE_ATTEMPT', 'Select the latest attempt before rerunning a job.');
+    if (slot.active || slot.gateway || slot.operation || slot.stopping || slot.cleanup.size || this.data?.status(name)?.cleanup) {
+      throw new PreviewError('BUSY', 'Stop this preview and complete cleanup before rerunning a job. Database writes are not rolled back.');
+    }
+    const spec = attempt.declaration;
+    if (spec.type !== 'environment' || spec.services[job]?.type !== 'job') throw new PreviewError('INVALID_INPUT', 'Select a job in this configuration.');
+    if ([...this.slots.values()].filter(isLive).length >= limits.livePreviews) throw new PreviewError('BUSY', 'The live preview limit was reached.');
+    this.checkNodeCapacity(spec);
+    // Normal start authorization, source checks and secret approvals apply again.
+    return this.begin(slot, spec, 'start', job);
+  }
+
   async saveConfiguration(name: string, attemptId: string, projectDirectory: string, signal?: AbortSignal) {
     this.assertOpen();
     const spec = this.attempt(this.slot(name), attemptId).declaration;
@@ -321,14 +337,14 @@ class Runtime implements PreviewRuntime {
     catch (error) { this.closing = undefined; throw error; }
   }
 
-  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace'): PreviewStatus {
+  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace', rerunJob?: string): PreviewStatus {
     const attempt: Attempt = {
       summary: { id: randomUUID(), type: spec.type, state: 'starting', startedAt: new Date().toISOString(), sources: sourceDirectories(spec) },
       declaration: structuredClone(spec), controller: new AbortController(), completed: false, waiters: new Set(),
       log: Buffer.alloc(0), truncated: false, nodes: nodeCost(spec),
     };
     slot.candidate = attempt;
-    slot.operation = this.runCandidate(slot, attempt, spec, operation).finally(() => {
+    slot.operation = this.runCandidate(slot, attempt, spec, operation, rerunJob).finally(() => {
       slot.operation = undefined;
       attempt.completed = true;
       for (const waiter of attempt.waiters) waiter();
@@ -338,7 +354,7 @@ class Runtime implements PreviewRuntime {
     return this.status(slot);
   }
 
-  private async runCandidate(slot: Slot, attempt: Attempt, input: EffectiveSpec, operation: 'start' | 'replace'): Promise<void> {
+  private async runCandidate(slot: Slot, attempt: Attempt, input: EffectiveSpec, operation: 'start' | 'replace', rerunJob?: string): Promise<void> {
     const signal = attempt.controller.signal;
     let committed = false;
     let timedOut = false;
@@ -352,7 +368,7 @@ class Runtime implements PreviewRuntime {
       attempt.summary.sources = sourceDirectories(spec);
       this.admitted(slot, attempt);
       if (this.authorize) {
-        const approved = await abortable(Promise.resolve(this.authorize({ operation, spec: structuredClone(spec), signal })), signal);
+        const approved = await abortable(Promise.resolve(this.authorize({ operation, spec: structuredClone(spec), ...(rerunJob ? { rerunJob } : {}), signal })), signal);
         if (!approved) throw new PreviewError('EXECUTION_DENIED', 'The host denied this preview operation.');
       } else if (needsExecution(spec)) {
         throw new PreviewError('EXECUTION_DENIED', 'Commands and managed databases require host authorization. Start the daemon with --allow-exec only for trusted code.');
@@ -396,7 +412,7 @@ class Runtime implements PreviewRuntime {
         this.admitted(slot, attempt);
         attempt.summary.services = {};
         attempt.resource = await startEnvironment({
-          spec, url: slot.gateway.url, inputs: this.inputs, secrets, databases: bindings, signal, privateDirectories: this.privateDirectories,
+          spec, url: slot.gateway.url, inputs: this.inputs, secrets, databases: bindings, signal, privateDirectories: this.privateDirectories, data: this.data, rerunJob,
           appendLog: (text) => appendLog(attempt, text),
           serviceStatus: (id, status) => { attempt.summary.services![id] = status; },
           onResource: (resource) => { attempt.resource = resource; },
@@ -621,7 +637,7 @@ function copySummary(summary: AttemptSummary): AttemptSummary { return structure
 function nodeCost(spec: EffectiveSpec): number { return spec.type === 'environment' ? Object.keys(spec.services).length : 1; }
 export function needsExecution(spec: EffectiveSpec): boolean {
   return spec.type === 'command' || spec.type === 'environment' && Object.values(spec.services).some((service) =>
-    service.type === 'command' || service.type === 'postgres' || service.type === 'redis');
+    (service.type === 'command' || service.type === 'job') || service.type === 'postgres' || service.type === 'redis');
 }
 function appendLog(attempt: Attempt, text: string): void {
   const bytes = Buffer.from(text);
@@ -632,7 +648,7 @@ function appendLog(attempt: Attempt, text: string): void {
 function redactedFailure(error: unknown, spec: EffectiveSpec, inputs: Readonly<Record<string, string>> = {}, secrets: Readonly<Record<string, string>> = {}) {
   const result = failure(error);
   const values = spec.type === 'command' ? Object.values(spec.env).filter((value): value is string => typeof value === 'string') : spec.type === 'environment'
-    ? Object.values(spec.services).flatMap((service) => service.type === 'command' ? Object.values(service.env).filter((value): value is string => typeof value === 'string') :
+    ? Object.values(spec.services).flatMap((service) => (service.type === 'command' || service.type === 'job') ? Object.values(service.env).filter((value): value is string => typeof value === 'string') :
       (service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'string' ? [service.url] : []) : [];
     for (const value of [...values, ...Object.values(inputs), ...Object.values(secrets)].filter(Boolean).sort((a, b) => b.length - a.length)) {
       const utf8 = Buffer.from(value).toString('utf8');

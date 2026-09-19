@@ -27,7 +27,7 @@ test('MCP discovers with no daemon in both protocol eras and returns actionable 
     try {
       await client.connect(transport);
       const { tools } = await client.listTools();
-      assert.equal(tools.length, 14);
+      assert.equal(tools.length, 15);
       assert.deepEqual(tools.filter((tool) => tool.name.startsWith('preview_secrets_')).map((tool) => tool.name).sort(), ['preview_secrets_setup', 'preview_secrets_status']);
       assert.ok(!tools.some((tool) => /approve|permission/.test(tool.name)));
       assert.equal(tools.find((tool) => tool.name === 'preview_wait')?.annotations?.readOnlyHint, true);

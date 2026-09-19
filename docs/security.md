@@ -347,3 +347,12 @@ Retry start reuses normal source, execution, and secret-access checks for the ex
 current failed attempt. It neither retries canceled attempts nor opens private setup.
 
 Logs retain existing best-effort redaction limits and are shown on request, never treated as HTML.
+
+## Setup jobs
+
+Jobs use the same source authorization, secret bindings, redacted logs, supervisor, and process-group cleanup as command services.
+Once-only job intent and success are stored in the existing private owned-data record.
+Failure or owner interruption cannot silently retry that job; an explicit rerun or data deletion is required.
+Reruns require a stopped environment, its latest attempt ID, and normal start authorization.
+The authorization callback receives `rerunJob` on that start request.
+No process cleanup rolls back database writes. See [job lifecycle and recovery](jobs.md).

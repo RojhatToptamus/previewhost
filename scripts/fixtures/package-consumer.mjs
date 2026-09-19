@@ -160,7 +160,7 @@ try {
   assert.equal(initialization.serverInfo.version, manifest.version);
   rpcChild.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
   const tools = await rpc('tools/list');
-  assert.equal(tools.tools.length, 14);
+  assert.equal(tools.tools.length, 15);
   async function call(name, args) { const reply = await rpc('tools/call', { name, arguments: args }); assert.equal(reply.isError, undefined, JSON.stringify(reply)); return reply.structuredContent.result; }
   command.name = 'mcp-command';
   await call('preview_inspect', { spec: command });

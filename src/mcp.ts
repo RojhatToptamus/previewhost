@@ -107,11 +107,11 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     inputSchema, annotations: read,
   }, (input, context) => run('request', input, async (client, project) => client.inspect(await load(input, project, context.mcpReq.signal))));
   server.registerTool('preview_start', {
-    description: 'Start a named preview or environment from existing source. Commands run as argv without shell expansion. Use {port} and 127.0.0.1 for explicit listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. Returns a starting attempt; use preview_wait with its id. An environment becomes ready only after all its services. Execution and managed databases require daemon owner permission.',
+    description: 'Start a named preview or environment from existing source. Commands run as argv without shell expansion. Use {port} and 127.0.0.1 for explicit listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. Returns a starting attempt; use preview_wait with its id. An environment becomes ready only after all services are ready and finite type: job nodes succeed. Use dependsOn for migrations and seeds; run: once retains successful seeds with managed data. Use a database-querying readyPath, not /openapi.json. Execution and managed databases require daemon owner permission.',
     inputSchema, annotations: write,
   }, (input, context) => run('request', input, async (client, project) => client.start(await loadForStartup(input, project, client, context.mcpReq.signal))));
   server.registerTool('preview_replace', {
-    description: 'Prepare a replacement while keeping active routes. All environment services become ready before the routes change together. Shared database data stays in place. Wait for the returned candidate id. Candidate failure keeps the old preview.',
+    description: 'Prepare a replacement while keeping active routes. All environment services become ready before the routes change together. Shared database data stays in place. Wait for the returned candidate id. Candidate failure keeps the old preview, but jobs may have changed its shared database; writes are not rolled back. Always jobs run again, successful once jobs are skipped.',
     inputSchema: z.strictObject({ name: requestSchemas.replace.shape.name, ...inputShape }).refine(exclusive, 'Supply either file or spec, never both.'), annotations: { ...write, destructiveHint: true },
   }, (input, context) => run('request', input, async (client, project) => client.replace(input.name, await loadForStartup(input, project, client, context.mcpReq.signal))));
   server.registerTool('preview_save_config', {
@@ -142,6 +142,10 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     description: 'Stop the named preview and join owned application/container cleanup. Preserves database data, attached services, and source files. Set afterEngineRestart only after the operator confirms an actual local Engine restart. This resolves an absent indeterminate creation and requires recovery authorization. It never restarts Docker.',
     inputSchema: requestSchemas.stop.extend(scope), annotations: cleanup,
   }, input => run('cleanup', input, client => client.stop(input.name, { afterEngineRestart: input.afterEngineRestart, expected: input.expected })));
+  server.registerTool('preview_rerun_job', {
+    description: 'Only after an explicit user request: rerun a job and start the stopped environment from its latest configuration. Supply its latest attemptId. Runs normal startup dependencies and always jobs; permits this named once job to run again. Stop first. Inspect partial writes and make the command safe to repeat; no rollback is implied. Never automatically retry a once job after failure or cancellation.',
+    inputSchema: requestSchemas.rerunJob.extend(scope), annotations: { ...write, destructiveHint: true },
+  }, input => run('request', input, client => client.rerunJob(input.name, input.attemptId, input.job)));
   server.registerTool('preview_delete_data', {
     description: 'Permanently delete a stopped environment\'s verified owned database data. Requires an explicit user request and daemon owner authorization. Rejects live applications or unresolved cleanup. Never deletes attached databases or source directories. Stop alone preserves data.',
     inputSchema: requestSchemas.deleteData.extend(scope), annotations: cleanup,

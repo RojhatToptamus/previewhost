@@ -278,6 +278,7 @@ function mountDashboard() {
     const services = Object.entries(attempt?.services ?? {}).sort(([a], [b]) => Number(managed.has(a)) - Number(managed.has(b)));
     if (!services.length && attempt && attempt.type !== 'environment') services.push([p.name, { type: attempt.type, state: attempt.state === 'ready' ? 'ready' : attempt.state === 'starting' ? 'starting' : attempt.state === 'failed' ? 'failed' : 'stopped' }]);
     for (const [name, service] of services) {
+      if (service.type === 'job') continue;
       const row = el('div', '', 'service-row' + (managed.has(name) ? ' managed' : ''));
       const url = attempt?.id === p.active?.id ? service.browserUrl : undefined;
       row.append(el('strong', name), el('span', service.type, 'machine muted'), el('span', service.state, 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
@@ -298,6 +299,41 @@ function mountDashboard() {
     if (p.candidate) { const elapsed = el('p', '', 'machine muted'); elapsed.dataset.elapsed = p.candidate.startedAt; node.append(elapsed); }
     if (p.data) node.append(el('p', 'Stopping keeps your database data. Deletion is a separate explicit CLI operation.', 'muted'));
     for (const source of attempt?.sources ?? []) node.append(pathText(source));
+  }
+  function renderJobs(entry: Entry) {
+    const p = entry.preview!; const attempt = p.candidate ?? p.latest ?? p.active;
+    const jobs = Object.entries(attempt?.services ?? {}).filter(([, s]) => s.type === 'job');
+    if (!jobs.length || !attempt) return;
+    const node = section('Setup jobs'); const list = el('div', '', 'row-list');
+    node.append(el('p', 'Latest attempt. Skipped jobs already succeeded for retained data. Completed writes remain after failure, cancellation, or Stop.', 'muted'));
+    for (const [name, job] of jobs) {
+      const row = el('div', '', 'service-row');
+      const label = job.state === 'skipped' ? 'Skipped' : job.state === 'starting' ? 'Running' : job.state[0].toUpperCase() + job.state.slice(1);
+      row.append(el('strong', name), el('span', 'job', 'muted'), el('span', label, 'status ' + (job.state === 'failed' ? 'error' : ['succeeded', 'skipped'].includes(job.state) ? 'ready' : 'muted')));
+      const controls = el('div', '', 'row-actions');
+      controls.append(button('Logs', () => { void loadPanel(entry, 'logs', attempt); }, 'small'));
+      if (!p.active && !p.busy && !p.candidate && !needsCleanup(p)) controls.append(button('Run again', () => {
+        const dialog = el('dialog');
+        dialog.setAttribute('aria-labelledby', 'rerun-title');
+        dialog.setAttribute('aria-describedby', 'rerun-hint');
+        const title = el('h2', 'Run ' + name + ' again?'); title.id = 'rerun-title';
+        const hint = el('p', 'This starts the environment and its startup dependencies. Existing writes are not rolled back; rerunning can duplicate data.', 'muted'); hint.id = 'rerun-hint';
+        const actions = el('div', '', 'actions');
+        const cancel = button('Cancel', () => dialog.close()); cancel.autofocus = true;
+        actions.append(cancel, button('Run job and start', () => {
+          dialog.close();
+          void mutate({ action: 'rerunJob', owner: entry.owner.id, name: p.name, attemptId: attempt.id, job: name }, 'Job rerun and startup requested.');
+        }, 'primary'));
+        dialog.append(title, hint, actions);
+        dialog.addEventListener('close', () => dialog.remove(), { once: true });
+        document.body.append(dialog); dialog.showModal();
+      }, 'small'));
+      row.append(controls);
+      if (job.error) row.append(el('p', job.error.message, 'error service-error'));
+      list.append(row);
+    }
+    node.append(list);
+    if (p.active) node.append(el('p', 'Stop this environment before rerunning a job. Other previews keep running.', 'muted'));
   }
   async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary) {
     const current = panel = { tab, attemptId: attempt?.id, loading: tab !== 'activity' };
@@ -328,6 +364,8 @@ function mountDashboard() {
       for (const [name, service] of Object.entries(spec.services)) {
         const row = el('div', '', 'definition-row'); row.append(el('strong', name), el('span', service.type, 'machine muted'));
         if (service.command) row.append(el('pre', JSON.stringify(service.command)));
+        if (service.dependsOn?.length) row.append(el('p', 'After: ' + service.dependsOn.join(', '), 'muted'));
+        if (service.run) row.append(el('p', service.run === 'once' ? 'Once per retained environment; explicit rerun required after failure.' : 'Runs on every start and replacement.', 'muted'));
         if (service.cwd || service.directory) row.append(pathText(service.cwd ?? service.directory!));
         list.append(row);
       }
@@ -492,7 +530,7 @@ function mountDashboard() {
     }
     if (!canOpen && !primaryTaken && p?.candidate) { const waiting = el('button', 'Waiting for URL', 'hero'); waiting.disabled = true; row.append(waiting); }
     row.append(controls); detail.append(row, el('p', hint(entry), 'hint'));
-    if (p) { renderAttempts(p); renderServices(p); }
+    if (p) { renderAttempts(p); renderServices(p); renderJobs(entry); }
     if (owner.configuration?.error) addNotice('preview.yml needs attention', owner.configuration.error.message + (p?.active ? ' The running app is unchanged. Its Configuration tab shows the serving attempt.' : ' Ask your agent to resolve this configuration error before starting.'), 'error');
     else if (owner.configuration) detail.append(el('p', 'preview.yml is available for the next agent startup. Start again uses the retained attempt configuration.', 'muted'));
 
@@ -613,19 +651,20 @@ input::placeholder { color:var(--t5); }
 .attempt-split p:last-child { margin-top:10px; margin-bottom:0; }
 .row-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .row-list>div+div { border-top:1px solid var(--divider); }
-#secret-edit { width:min(520px,calc(100% - 32px)); max-height:calc(100dvh - 32px); overflow:auto; padding:26px; border:1px solid var(--border-2); border-radius:9px; background:var(--bg); color:var(--t1); }
-#secret-edit::backdrop { background:var(--bg); opacity:.72; }
-#secret-edit h2 { font-size:22px; margin-bottom:8px; }
+dialog { width:min(520px,calc(100% - 32px)); max-height:calc(100dvh - 32px); overflow:auto; padding:26px; border:1px solid var(--border-2); border-radius:9px; background:var(--bg); color:var(--t1); }
+dialog::backdrop { background:var(--bg); opacity:.72; }
+dialog h2 { font-size:22px; margin-bottom:8px; }
 #secret-edit-name { overflow-wrap:anywhere; color:var(--t2); margin-bottom:18px; }
 #secret-edit-hint { color:var(--t4); font-size:13px; margin-bottom:22px; }
 #secret-edit label { display:block; font-weight:500; margin-bottom:8px; }
 #secret-value { width:100%; min-height:100px; padding:12px; border:1px solid var(--border-2); border-radius:6px; resize:vertical; background:var(--subtle); color:var(--t1); -webkit-text-security:disc; }
-#secret-edit .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-wrap:anywhere; }
-#secret-edit .actions { justify-content:flex-end; padding:0; margin-top:24px; }
+dialog .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-wrap:anywhere; }
+dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .secret-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:14px 16px; }
 .secret-row code { overflow-wrap:anywhere; color:var(--t2); }
 .service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 56px; align-items:center; gap:12px; padding:12px 16px; }
 .service-row>strong { overflow-wrap:anywhere; font-size:13.5px; }
+.service-row .row-actions { grid-column:4/-1; }
 .service-row .status { font-size:12.5px; }
 .service-row .ready { font-weight:400; }
 .service-row.managed { background:var(--subtle); }
@@ -713,6 +752,7 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   .service-row { grid-template-columns:72px 66px minmax(0,1fr) 48px; }
   .service-meta { grid-column:1/4; grid-row:auto; text-align:left; }
   .service-row>.button,.service-action { grid-column:4; }
+  .service-row .row-actions { grid-column:1/-1; }
   .service-row>.status { text-align:right; }
   .env-row { grid-template-columns:minmax(0,1fr) 90px; }
   .env-row>:last-child { grid-column:1/-1; }

@@ -141,6 +141,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
   return {
     allowSources: (directories, signal) => call('sources/allow', { directories }, signal),
     describe: (name, attemptId) => call('describe', { name, attemptId }),
+    rerunJob: (name, attemptId, job) => call('rerunJob', { name, attemptId, job }),
     startAgain: (name, attemptId) => call('startAgain', { name, attemptId }),
     saveConfiguration: (name, attemptId) => call('saveConfiguration', { name, attemptId }),
     secretsList: () => call('secrets/list', {}),

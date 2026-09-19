@@ -30,7 +30,7 @@ export const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
 const readyPath = z.string().max(2048).refine(
   (value) => value.startsWith('/') && !value.startsWith('//') && /^[\x21-\x7e]+$/.test(value) && !value.includes('#'),
   'Use a URL-encoded origin-relative readiness path without whitespace or a fragment.',
-).default('/').describe('URL-encoded origin-relative readiness path. HTTP 200–399 headers count as ready; redirects are not followed and bodies are not checked.');
+).default('/').describe('URL-encoded origin-relative readiness path. HTTP 200–399 headers count as ready; redirects are not followed and bodies are not checked. For database-backed apps, use a health endpoint that queries required tables and returns 503 on failure; /openapi.json does not prove database readiness.');
 const timeoutMs = z.number().int().min(100).max(120_000).default(30_000)
   .describe('Service readiness deadline in milliseconds, including any startup preparation. Default 30000; maximum 120000.');
 const directory = z.string().min(1).max(4096)
@@ -42,6 +42,8 @@ export const secretIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,12
 const inputReferenceSchema = z.strictObject({ fromEnv: envKey.describe('Environment input explicitly selected by the daemon owner; not an arbitrary client or shell variable.') });
 export const scalarValueSchema = z.union([literal, inputReferenceSchema, z.strictObject({ secret: secretIdSchema })]);
 export type ScalarValue = z.output<typeof scalarValueSchema>;
+const dependsOn = z.array(nameSchema).max(limits.environmentServices).optional()
+  .describe('Wait for these nodes: jobs must exit zero; HTTP services and databases must be ready. Cycles are invalid.');
 const argv = z.array(z.string().max(8192).refine((value) => !value.includes('\0'), 'Arguments cannot contain NUL.')).min(1).max(128)
   .refine((value) => value[0].length > 0, 'The executable cannot be empty.')
   .describe('Executable and argv, with no implicit shell: no $PORT expansion, pipes, redirects, or &&. Literal {port} is replaced with the allocated private port. Honor injected PORT and HOST=127.0.0.1 or pass explicit loopback/port flags; disable port fallback. Dependencies must exist or come from explicit project preparation. A command must stay running and serve HTTP, not only exit successfully.');
@@ -60,10 +62,15 @@ const serviceEnvironment = z.record(envKey, environmentValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'Remove PORT, HOST and PREVIEW_URL from env; Previewhost injects them at runtime.')
   .default({}).describe('Application bindings only. Use {secret: ID} for credentials, including dummy local API keys; never invent credential literals in tool arguments. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
+const jobArgv = argv.describe('Finite executable and argv, without shell expansion. Exit zero means success; nonzero exit, signal or timeout fails startup. No port is allocated. Report internal errors with a nonzero exit; Previewhost cannot detect swallowed errors.');
 export const environmentServiceSchema = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('static'), directory, spa: z.boolean().default(false) }),
-  z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs }),
-  z.strictObject({ type: z.literal('attach'), url: z.string().max(4096), readyPath, timeoutMs }),
+  z.strictObject({ type: z.literal('static'), directory, spa: z.boolean().default(false), dependsOn }),
+  z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs, dependsOn }),
+  z.strictObject({ type: z.literal('job'), cwd: directory, command: jobArgv, env: serviceEnvironment.describe('Job bindings use the same secret, input, service and public URL references as command services. PORT and HOST are reserved but are not injected into jobs. PREVIEW_URL is the environment numeric public origin; it may still serve the old application during replacement.'), dependsOn,
+    timeoutMs: z.number().int().min(100).max(600_000).default(60_000),
+    run: z.enum(['always', 'once']).default('always').describe('always: run on each start/replacement; use repeatable migrations. once: run once per retained environment, requiring a managed database dependency. Success is retained by job name. Failed or interrupted runs require an explicit rerun or data deletion; writes are never rolled back by Previewhost.'),
+  }),
+  z.strictObject({ type: z.literal('attach'), url: z.string().max(4096), readyPath, timeoutMs, dependsOn }),
   z.strictObject({ type: z.literal('postgres') }),
   z.strictObject({ type: z.literal('redis') }),
   z.strictObject({ type: z.literal('external-postgres'), url: scalarValueSchema, timeoutMs }),
@@ -76,8 +83,8 @@ const environmentSpecSchema = z.strictObject({
       `An environment needs between 1 and ${limits.environmentServices} services.`)
     .refine((services) => Object.values(services).filter((service) => service.type === 'postgres' || service.type === 'redis').length <= limits.environmentDatabases,
       `An environment supports at most ${limits.environmentDatabases} owned databases.`),
-  timeoutMs: timeoutMs.removeDefault().default(60_000)
-    .describe('Overall environment startup deadline in milliseconds, across dependencies and service startup. Default 60000; maximum 120000. Individual service deadlines also apply.'),
+  timeoutMs: z.number().int().min(100).max(600_000).default(60_000)
+    .describe('Overall environment startup deadline in milliseconds, across dependencies and service startup. Default 60000; maximum 600000. Individual service deadlines also apply.'),
 });
 
 export const previewSpecSchema = z.discriminatedUnion('type', [
@@ -138,7 +145,7 @@ export const secretRequestSchemas = {
 };
 export interface ServiceStatus {
   type: EnvironmentService['type'];
-  state: 'waiting' | 'starting' | 'ready' | 'failed' | 'stopped';
+  state: 'waiting' | 'starting' | 'ready' | 'succeeded' | 'skipped' | 'failed' | 'canceled' | 'stopped';
   url?: string;
   browserUrl?: string;
   error?: Failure;
@@ -175,7 +182,7 @@ export interface PreviewDescription {
     services: Record<string, {
       type: EnvironmentService['type']; cwd?: string; directory?: string; command?: string[];
       envKeys?: string[]; bindings?: Record<string, Exclude<EnvironmentValue, string>>;
-      readyPath?: string; timeoutMs?: number; spa?: boolean;
+      readyPath?: string; timeoutMs?: number; spa?: boolean; dependsOn?: string[]; run?: 'always' | 'once';
       url?: ScalarValue; // External database literals are omitted.
     }>;
   };
@@ -210,10 +217,11 @@ export interface PreviewApi {
   cancel(name: string, attemptId: string): Promise<PreviewStatus>;
   stop(name: string, options?: StopOptions): Promise<PreviewStatus>;
   deleteData(name: string): Promise<PreviewStatus>;
+  rerunJob(name: string, attemptId: string, job: string): Promise<PreviewStatus>;
 }
 export type AuthorizationRequest = (
   | { operation: 'allow-sources'; directories: string[] }
-  | { operation: 'start'; spec: EffectiveSpec }
+  | { operation: 'start'; spec: EffectiveSpec; rerunJob?: string }
   | { operation: 'replace'; spec: EffectiveSpec }
   | { operation: 'delete-data'; name: string; resources: DataStatus['resources'] }
   | { operation: 'recover-data'; name: string; resources: DataStatus['resources'] }
@@ -246,5 +254,6 @@ export const requestSchemas = {
   describe: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   startAgain: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   saveConfiguration: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
+  rerunJob: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, job: nameSchema }),
   deleteData: z.strictObject({ name: nameSchema }),
 };

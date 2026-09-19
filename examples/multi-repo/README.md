@@ -3,7 +3,7 @@
 This example is a shared notes application.
 The frontend sends notes to an API, which writes to PostgreSQL and Redis.
 A separate reporting service reads the same data and verifies API readiness.
-One preview environment starts these five services and gives the frontend a local URL.
+One preview environment starts five services and one migration job and gives the frontend a local URL.
 
 ## Files and services
 
@@ -11,7 +11,8 @@ One preview environment starts these five services and gives the frontend a loca
 examples/multi-repo/
   environment.yaml       Preview recipe
   package.json           Backend dependencies and optional npm commands
-  api/server.mjs         Note API and table creation
+  api/server.mjs         Note API
+  api/migrate.mjs        Repeatable schema migration
   reporting/server.mjs   Database count and cached note
   frontend/
     server.mjs           Page, configuration, and readiness route
@@ -69,7 +70,14 @@ services:
     type: postgres
   cache:
     type: redis
+  migrate:
+    type: job
+    cwd: ./api
+    command: [node, migrate.mjs]
+    env:
+      DATABASE_URL: { service: database }
   api:
+    dependsOn: [migrate]
     type: command
     cwd: ./api
     command: [node, server.mjs]
@@ -142,16 +150,12 @@ Native requests use numeric loopback URLs from `service` bindings, because nativ
 ### Who prepares the application
 
 You or the coding host installs dependencies before preview startup.
-For this example, the API creates its table with `CREATE TABLE IF NOT EXISTS` before it starts its HTTP listener.
-The API repeats that statement on replacement and restart. Existing rows remain.
-There is no seed script. The browser action below creates the example data.
-
-For another application, use its existing migration and seed commands.
-Run them through your terminal or coding host with the intended development database credentials.
-If they need previewhost-managed credentials, the application's startup command can run preparation before its HTTP server starts.
-That preparation must finish within the startup deadline and safely handle replacement or retry.
-previewhost has no separate job, migration, seed, or scenario system.
-Replacement does not undo database changes made by application code.
+The `migrate` job creates the notes table before the API starts.
+It runs on each start and replacement; `CREATE TABLE IF NOT EXISTS` keeps existing rows.
+The API's `/ready` endpoint checks the table and cache, not just the database connection.
+There is no seed script in this example. The browser creates the sample data.
+For optional seeds and recovery after partial writes, see [setup jobs](../../docs/jobs.md).
+Replacement does not undo database changes.
 
 ## Start the environment
 
@@ -181,7 +185,7 @@ Start the environment:
 previewhost start --file environment.yaml --token-file .local/token
 ```
 
-The result contains `state: "ready"`, a `url`, and the five service states.
+The result contains `state: "ready"`, a `url`, and the service and job states.
 Read current status:
 
 ```sh

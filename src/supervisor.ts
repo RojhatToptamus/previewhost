@@ -33,8 +33,7 @@ process.on('message', (value: Record<string, unknown>) => {
     target = spawn(launch.command[0], launch.command.slice(1), {
       cwd: launch.cwd, env: launch.env, stdio: ['ignore', 'pipe', 'pipe'], detached: false,
     });
-    capture(target.stdout!, launch.redactions);
-    capture(target.stderr!, launch.redactions);
+    const output = [capture(target.stdout!, launch.redactions), capture(target.stderr!, launch.redactions)];
     target.once('spawn', () => { void send({ type: 'started', pid: target!.pid }); });
     target.once('error', (error: NodeJS.ErrnoException) => {
       const code = error.code && /^[A-Z0-9_]{1,32}$/.test(error.code) ? error.code : 'UNKNOWN';
@@ -42,8 +41,12 @@ process.on('message', (value: Record<string, unknown>) => {
     });
     // close may wait forever on a grandchild that inherited the output pipes.
     target.once('exit', (code, signal) => {
-      if (!stopping) void send({ type: 'target-exit', code, signal });
-      void stop();
+      void (async () => {
+        // A grandchild may hold a pipe open. Bound draining before group cleanup.
+        await Promise.race([Promise.all(output), new Promise(resolve => setTimeout(resolve, 250))]);
+        if (!stopping) await send({ type: 'target-exit', code, signal });
+        await stop();
+      })();
     });
   }
 });
@@ -81,7 +84,9 @@ function send(message: Record<string, unknown>): Promise<void> {
   });
 }
 
-function capture(readable: Readable, values: string[]) {
+function capture(readable: Readable, values: string[]): Promise<void> {
+  let flushed!: () => void;
+  const complete = new Promise<void>(resolve => { flushed = resolve; });
   const decoder = new StringDecoder('utf8');
   // Match the UTF-8 value delivered by spawn, including replacement characters
   // for malformed surrogate input; encodeURIComponent must never break cleanup.
@@ -122,8 +127,9 @@ function capture(readable: Readable, values: string[]) {
     writes = writes.then(() => append(decoder.write(chunk))).finally(() => readable.resume());
   });
   readable.once('end', () => {
-    writes = writes.then(() => append(decoder.end(), true));
+    writes = writes.then(() => append(decoder.end(), true)).then(flushed);
   });
+  return complete;
 }
 
 function completeCodePointEnd(text: string, end: number): number {
