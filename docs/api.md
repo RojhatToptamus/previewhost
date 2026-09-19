@@ -235,11 +235,29 @@ External services remain outside owned stop and deletion operations.
 | `get(name)` | Current `PreviewStatus`. |
 | `list()` | Current and retained terminal status records. |
 | `wait(name, attemptId, { timeoutMs?, signal? })` | Exact `AttemptResult`. Default and maximum wait: 30 seconds. |
-| `logs(name, attemptId?, maxBytes?)` | `{ name, attemptId, text, truncated }`. Default and maximum: 65,536 bytes. |
+| `logs(name, attemptId?, { source?, after?, maxBytes? })` | `{ name, attemptId, text, cursor, truncated }`. Select a service/job or omit `source` for all output. |
 | `cancel(name, attemptId)` | Cancels the pending candidate and waits for cleanup. A stale ID fails. |
 | `stop(name, { afterEngineRestart? })` | Stops all applications and owned containers. Preserves data. Repeated stop retries incomplete cleanup. |
 | `rerunJob(name, attemptId, job)` | Reruns the named job and starts the stopped environment from its latest configuration. Normal authorization applies; partial writes remain. |
-| `deleteData(name)` | Permanently removes a stopped environment's verified owned database data after host authorization. |
+| `deleteData(name, { expected? })` | Permanently removes a stopped environment's verified owned database data after host authorization. |
+
+Logs use one bounded store per attempt: 65,536 captured UTF-8 bytes and at most 1,024
+output chunks. Filtering does not create another buffer. Source labels in **All output**
+are added when reading, not parsed from application text. Known supplied values are
+redacted before storage; applications must still avoid logging other sensitive data.
+
+Without `after`, reads return a tail. For incremental reads, keep the same `attemptId`
+and `source`, then pass the returned `cursor` as `after`. A cursor is a byte offset in
+that attempt's captured output, before display labels. It advances past other sources
+as well. `maxBytes` limits captured bytes per read (4–65,536); display labels add bytes.
+`truncated` means earlier output was omitted by retention or the initial tail limit.
+Incremental pages do not skip output still retained. An expired attempt is an error;
+logs are not persisted after owner shutdown. No streaming endpoint is provided.
+Output comes from command services and jobs; database container logs are not collected.
+
+For a confirmed deletion, `expected` accepts `{ attemptId, resources: [{ name, type }] }`.
+The latest attempt and exact managed resource list must still match before deletion.
+Normal stopped-state, ownership and authorization checks still apply.
 
 `PreviewStatus` contains `name`, `busy`, and optional `url`, `active`, `candidate`,
 `latest`, `cleanup`, and `data`. `cleanup` lists attempt IDs and errors that require repair.
@@ -319,7 +337,8 @@ previewhost start --file preview.json --allow-exec --no-wait
 previewhost wait app ATTEMPT_ID --timeout-ms 30000
 previewhost replace --file preview.json
 previewhost get app
-previewhost logs app ATTEMPT_ID --max-bytes 8192
+previewhost logs app ATTEMPT_ID --source migrate --max-bytes 8192
+previewhost logs app ATTEMPT_ID --source migrate --after RETURNED_CURSOR
 previewhost cancel app ATTEMPT_ID
 previewhost stop app
 previewhost delete-data shop
@@ -608,6 +627,13 @@ The authenticated owner client also supports:
 observed attempt IDs (or `null`) before changing state. A mismatch returns
 `STALE_ATTEMPT`. The dashboard always supplies this guard. CLI/MCP behavior without
 it is unchanged; MCP also forwards an explicitly supplied guard.
+
+Dashboard **Reset data** confirms the managed resource list, then calls guarded Stop,
+guarded `deleteData`, and `startAgain` in order. It restarts the serving configuration
+when available; otherwise it uses the latest stopped or failed attempt. It starts only
+after deletion succeeds. A canceled attempt without a serving app is not resettable.
+A startup failure uses ordinary error reporting and Retry start; it does not repeat
+deletion. After a lost response, inspect the current state before resetting again.
 
 Declarations and logs remain bounded owner memory. They are unavailable after owner
 shutdown or history eviction. Start again may allocate a different URL and keeps

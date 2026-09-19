@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createPreviewRuntime } from './runtime.js';
 import { startDaemon } from './daemon.js';
-import type { PreviewSpec, PreviewStatus } from './contracts.js';
+import type { LogResult, PreviewSpec, PreviewStatus } from './contracts.js';
 
 const execute = promisify(execFile);
 test('CLI and MCP share real job results, rerun guards, authorization and cancellation', { skip: process.platform !== 'darwin', timeout: 30_000 }, async () => {
@@ -41,6 +41,17 @@ test('CLI and MCP share real job results, rerun guards, authorization and cancel
     const ready = await runtime.wait(spec.name, started.candidate!.id);
     assert.equal(ready.services?.prepare.state, 'succeeded');
     assert.equal(await (await fetch(ready.url!)).text(), 'job application');
+    const logArgs = { name: spec.name, attemptId: ready.id, source: 'prepare' };
+    const output = await mcp.callTool({ name: 'preview_logs', arguments: logArgs });
+    assert.ok(!output.isError);
+    const log = (output.structuredContent as { result: LogResult }).result;
+    assert.match(log.text, /finished\n/);
+    const cliLog = JSON.parse((await execute(process.execPath, [cli, 'logs', spec.name, ready.id, '--source', 'prepare', '--after', '0', '--max-bytes', '4', ...common])).stdout) as LogResult;
+    assert.equal(cliLog.text, log.text.slice(0, 4)); assert.equal(cliLog.truncated, false);
+    const rest = await mcp.callTool({ name: 'preview_logs', arguments: { ...logArgs, after: cliLog.cursor } });
+    assert.equal((rest.structuredContent as { result: LogResult }).result.text, log.text.slice(4));
+    const empty = await mcp.callTool({ name: 'preview_logs', arguments: { ...logArgs, after: log.cursor } });
+    assert.equal((empty.structuredContent as { result: LogResult }).result.text, '');
     const deniedLive = await mcp.callTool({ name: 'preview_rerun_job', arguments: { name: spec.name, attemptId: ready.id, job: 'prepare' } });
     assert.equal(deniedLive.isError, true);
     await call('preview_stop', { name: spec.name });

@@ -131,9 +131,9 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     inputSchema: requestSchemas.wait.extend(scope), annotations: read,
   }, (input, context) => run('wait', input, client => client.wait(input.name, input.attemptId, { timeoutMs: input.timeoutMs, signal: context.mcpReq.signal })));
   server.registerTool('preview_logs', {
-    description: 'Read a bounded log tail for an attempt. Known supplied environment values are redacted; other application output can contain secrets.',
+    description: 'Read bounded output; source selects a job or service. Omit source for all output. For incremental reads, supply the same attemptId and source with the previous cursor as after. truncated means earlier output was omitted. Without after, returns a tail. Known supplied environment values are redacted; other application output can contain secrets.',
     inputSchema: requestSchemas.logs.extend(scope), annotations: read,
-  }, input => run('request', input, client => client.logs(input.name, input.attemptId, input.maxBytes)));
+  }, input => run('request', input, client => client.logs(input.name, input.attemptId, input)));
   server.registerTool('preview_cancel', {
     description: 'Cancel only the specified pending candidate and join its cleanup. A stale id never cancels a later attempt.',
     inputSchema: requestSchemas.cancel.extend(scope), annotations: cleanup,
@@ -149,7 +149,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   server.registerTool('preview_delete_data', {
     description: 'Permanently delete a stopped environment\'s verified owned database data. Requires an explicit user request and daemon owner authorization. Rejects live applications or unresolved cleanup. Never deletes attached databases or source directories. Stop alone preserves data.',
     inputSchema: requestSchemas.deleteData.extend(scope), annotations: cleanup,
-  }, input => run('request', input, client => client.deleteData(input.name)));
+  }, input => run('request', input, client => client.deleteData(input.name, input)));
   server.registerTool('preview_secrets_setup', {
     description: 'Request exact secret references through the owner’s private browser form. For new bindings, choose project-specific references, not generic environment-variable names such as API_SECRET. Preserve existing references; use the same exact reference only for intentional sharing. After a canceled result, do not call this tool again or retry startup until the user explicitly asks to resume. The owner approves runtime access to unselected names, then enters only missing values privately. Existing entries are reused, never overwritten. Any authorized preview on this owner can use approved names until shutdown. Returns public metadata only. Never supply values or inspect the private form. Requires owner setup authorization. Saving starts no code; check status, then retry ordinary start/replace with the current spec only after complete.',
     inputSchema, annotations: write,

@@ -21,7 +21,7 @@ export async function startEnvironment(input: {
   data?: DataOwner;
   rerunJob?: string;
   signal: AbortSignal;
-  appendLog(text: string): void;
+  appendLog(text: string, source: string): void;
   serviceStatus(id: string, status: ServiceStatus): void;
   onResource(resource: Resource): void;
 }): Promise<Resource> {
@@ -138,20 +138,20 @@ export async function startEnvironment(input: {
         } else if (service.type === 'job') {
           if (service.run === 'once' && !await input.data!.beginJob(spec.name, id, input.rerunJob === id)) {
             status(id, 'skipped');
-            input.appendLog(`[${id}] Skipped: already succeeded for retained data.\n`);
+            input.appendLog(`Skipped: already succeeded for retained data.\n`, id);
             return;
           }
           const { env, redactions } = commandBindings(service.env);
-          input.appendLog(`[${id}] Running job.\n`);
+          input.appendLog(`Running job.\n`, id);
           await runNativeJob({ spec: { ...service, env }, url: input.url, signal: controller.signal,
-            timeoutMs: service.timeoutMs, redactions, appendLog: text => input.appendLog(`[${id}] ${text}`),
+            timeoutMs: service.timeoutMs, redactions, appendLog: text => input.appendLog(text, id),
             onResource: resource => jobs.set(id, resource),
           });
           jobs.delete(id);
           assertRunning();
           if (service.run === 'once') await input.data!.completeJob(spec.name, id);
           status(id, 'succeeded');
-          input.appendLog(`[${id}] Succeeded.\n`);
+          input.appendLog(`Succeeded.\n`, id);
           return;
         } else {
           let native: NativeResource | undefined;
@@ -168,7 +168,7 @@ export async function startEnvironment(input: {
             const { env, redactions } = commandBindings(service.env);
             native = await startNative({
               spec: { ...service, env }, url: browserUrl(id), signal: controller.signal,
-              appendLog: (text) => input.appendLog(`[${id}] ${text}`), redactions,
+              appendLog: (text) => input.appendLog(text, id), redactions,
               onResource: (value) => own(id, value),
             });
           }
@@ -189,7 +189,7 @@ export async function startEnvironment(input: {
       if (!stopping && !controller.signal.aborted) {
         status(id, 'failed', error instanceof Error ? error : new Error('Node startup failed.'));
       } else if (spec.services[id].type === 'job') status(id, 'canceled');
-      input.appendLog(`[${id}] ${controller.signal.aborted ? 'Canceled' : failure(error).message}\n`);
+      input.appendLog(`${controller.signal.aborted ? 'Canceled' : failure(error).message}\n`, id);
       controller.abort();
       throw error;
     });

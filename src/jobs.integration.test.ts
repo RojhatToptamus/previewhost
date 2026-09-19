@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createPreviewRuntime, type PreviewRuntime } from './runtime.js';
 import { parseSpec } from './spec.js';
 import { loadPreviewSpec, savePreviewSpec } from './config.js';
-import type { PreviewSpec, PreviewStatus } from './contracts.js';
+import type { PreviewSpec, PreviewStatus, RuntimeOptions } from './contracts.js';
 import { testKeychain } from './testSupport/keychain.js';
 
 type Spec = Extract<PreviewSpec, { type: 'environment' }>;
@@ -109,7 +109,7 @@ test('timeout and cancellation stop job process groups before startup returns', 
   for (const pid of (await readFile(join(directory, 'pids'), 'utf8')).split(' ').map(Number)) assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });
 
-async function databaseFixture(t: test.TestContext) {
+async function databaseFixture(t: test.TestContext, authorize: RuntimeOptions['authorize'] = () => true) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-jobs-')));
   let runtime: PreviewRuntime;
   t.after(async () => {
@@ -118,7 +118,7 @@ async function databaseFixture(t: test.TestContext) {
   });
   const keys = await testKeychain(t);
   await keys.store.add('user', 'disposable/jobs-seed', 'fake-job-secret-value');
-  const options = { allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket, secretIds: ['disposable/jobs-seed'], authorize: () => true };
+  const options = { allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket, secretIds: ['disposable/jobs-seed'], authorize };
   runtime = await createPreviewRuntime(options);
   const connection = `import {Client} from ${JSON.stringify(import.meta.resolve('pg'))}; const db=new Client({connectionString:process.env.DATABASE_URL}); await db.connect();`;
   await writeFile(join(directory, 'migrate.mjs'), connection + `await db.query('CREATE TABLE IF NOT EXISTS items (id serial primary key, label text)'); console.log('schema ready'); await db.end();`);
@@ -222,4 +222,143 @@ test('owner crash leaves an in-flight seed blocked until explicit recovery', dat
   const recovered = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, blocked.id, 'seed'));
   assert.equal(recovered.state, 'ready', JSON.stringify(recovered));
   assert.equal(((await (await fetch(recovered.url!)).json()) as unknown[]).length, 2);
+});
+
+test('real process logs preserve redaction, source selection, bounded output and attempt isolation', native, async t => {
+  const directory = await folder(t);
+  const keys = await testKeychain(t);
+  const secret = 'FAKE_split_process_secret';
+  await keys.store.add('user', 'disposable/logs', secret);
+  const runtime = await createPreviewRuntime({ allowedRoots: [directory], secretIds: ['disposable/logs'], authorize: () => true });
+  t.after(() => runtime.close());
+  const spec: Spec = { name: 'output', type: 'environment', primary: 'api', services: {
+    prepare: { ...job(directory, `process.stdout.write('[api] job only\\n'+process.env.TOKEN.slice(0,8));setTimeout(()=>{process.stdout.write(process.env.TOKEN.slice(8)+'\\n');process.stderr.write('job stderr\\n');},30);`), env: { TOKEN: { secret: 'disposable/logs' } } },
+    api: { type: 'command', cwd: directory, command: [process.execPath, '-e', `require('http').createServer((req,res)=>{if(req.url==='/write')console.log('later output');res.end('ok');}).listen(Number(process.env.PORT),process.env.HOST,()=>console.log('[prepare] api only'));`], dependsOn: ['prepare'] },
+  } };
+  const ready = await outcome(runtime, await runtime.start(spec)); assert.equal(ready.state, 'ready', JSON.stringify(ready));
+  const all = await runtime.logs(spec.name, ready.id);
+  const prepare = await runtime.logs(spec.name, ready.id, { source: 'prepare' });
+  const api = await runtime.logs(spec.name, ready.id, { source: 'api' });
+  assert.match(prepare.text, /\[api\] job only/); assert.match(prepare.text, /job stderr/); assert.match(prepare.text, /REDACTED/);
+  assert.ok(!prepare.text.includes(secret)); assert.ok(!all.text.includes(secret)); assert.ok(!prepare.text.includes('api only'));
+  assert.match(api.text, /\[prepare\] api only/); assert.ok(!api.text.includes('job only'));
+  await fetch(ready.url! + '/write');
+  await until(async () => (await runtime.logs(spec.name, ready.id, { source: 'api', after: api.cursor })).text.includes('later output'));
+  await assert.rejects(runtime.logs(spec.name, undefined, { after: 0 }), { code: 'INVALID_INPUT' });
+  await assert.rejects(runtime.logs(spec.name, ready.id, { source: 'absent' }), { code: 'INVALID_INPUT' });
+  const replacement: Spec = { ...spec, services: { ...spec.services, prepare: job(directory, "console.log('failed replacement');process.exit(7)") } };
+  const failed = await outcome(runtime, await runtime.replace(spec.name, replacement)); assert.equal(failed.state, 'failed');
+  assert.ok(!(await runtime.logs(spec.name, failed.id, { source: 'api' })).text.includes('api only'));
+  assert.match((await runtime.logs(spec.name, failed.id, { source: 'prepare' })).text, /failed replacement/);
+  assert.ok(!(await runtime.logs(spec.name, ready.id)).text.includes('failed replacement'));
+  await runtime.stop(spec.name);
+  const flood = await outcome(runtime, await runtime.start({ ...spec, services: { prepare: job(directory, "process.stdout.write('x'.repeat(100000)+'🙂tail');"), web: { type: 'static', directory, dependsOn: ['prepare'] } }, primary: 'web' }));
+  assert.equal(flood.state, 'ready');
+  const bounded = await runtime.logs(spec.name, flood.id, { source: 'prepare' });
+  assert.equal(bounded.truncated, true); assert.ok(Buffer.byteLength(bounded.text) <= 65536); assert.ok(bounded.text.includes('🙂tail'));
+});
+
+
+test('dashboard reset uses guarded authorized deletion, retains unrelated data and stops on failure', database, async t => {
+  let allowDelete = true; let lockDeletion = false; let deletionRequests = 0;
+  const f = await databaseFixture(t, async request => {
+    if (request.operation === 'delete-data') {
+      deletionRequests++;
+      if (lockDeletion) { lockDeletion = false; await f.keys.control('lock'); }
+      return allowDelete;
+    }
+    return true;
+  });
+  const { startDaemon } = await import('./daemon.js');
+  const { startDashboard } = await import('./dashboard.js');
+  const tokenFile = join(f.directory, 'owner', 'token');
+  const owner = { projectDirectory: f.directory, pid: process.pid, allowedRoots: [f.directory], allowExec: true, inputKeys: [], secretIds: ['disposable/jobs-seed'] };
+  const daemon = await startDaemon({ runtime: f.runtime, tokenFile, port: 0, owner });
+  let launch = '';
+  const id = 'a'.repeat(64);
+  const dashboard = await startDashboard({ discover: async () => [{ id, tokenFile, connection: { endpoint: daemon.endpoint, pid: process.pid, projectDirectory: f.directory } }], openBrowser: async url => { launch = url; } });
+  t.after(async () => { await dashboard.close(); await daemon.close(); });
+  await dashboard.open();
+  const post = async (body: object) => {
+    const response = await fetch(dashboard.endpoint + '/api', { method: 'POST', headers: { 'content-type': 'application/json', origin: dashboard.endpoint, authorization: 'Bearer ' + new URL(launch).hash.slice(1) }, body: JSON.stringify(body) });
+    return await response.json() as { result: PreviewStatus; error?: { code: string; message: string } };
+  };
+  const resetRequest = async (name = f.spec.name) => {
+    const p = await f.runtime.get(name);
+    return { action: 'resetData', owner: id, name: p.name, resources: p.data!.resources, expected: { active: p.active?.id ?? null, candidate: p.candidate?.id ?? null, latest: p.latest!.id } };
+  };
+  const rows = async (url: string, method = 'GET') => (await (await fetch(url, { method })).json()) as unknown[];
+  try {
+    let ready = await outcome(f.runtime, await f.runtime.start(f.spec)); assert.equal(ready.state, 'ready', JSON.stringify(ready));
+    assert.equal((await rows(ready.url!, 'POST')).length, 2);
+    const other = await outcome(f.runtime, await f.runtime.start({ ...f.spec, name: 'other-data' }));
+    assert.equal(other.state, 'ready', JSON.stringify(other));
+    assert.equal((await rows(other.url!, 'POST')).length, 2);
+    // Missing confirmation and stale attempts cannot stop the running preview.
+    assert.equal((await post({ action: 'resetData', owner: id, name: f.spec.name })).error?.code, 'INVALID_INPUT');
+    const stale = await resetRequest(); stale.expected.active = 'stale';
+    assert.equal((await post(stale)).error?.code, 'STALE_ATTEMPT');
+    assert.equal((await rows(ready.url!)).length, 2);
+    const wrongResources = await resetRequest(); wrongResources.resources = [{ name: 'another-database', type: 'postgres' }];
+    assert.equal((await post(wrongResources)).error?.code, 'STALE_ATTEMPT');
+    assert.equal(deletionRequests, 0);
+    assert.ok((await f.runtime.get(f.spec.name)).data);
+    ready = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, ready.id));
+    assert.equal((await rows(ready.url!)).length, 2);
+    allowDelete = false;
+    const denied = await post(await resetRequest()); assert.equal(denied.error?.code, 'EXECUTION_DENIED');
+    let stopped = await f.runtime.get(f.spec.name);
+    assert.ok(!stopped.active && !stopped.candidate); assert.ok(stopped.data);
+    allowDelete = true;
+    ready = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, stopped.latest!.id));
+    assert.equal((await rows(ready.url!)).length, 2, 'denied deletion retained data');
+    // Stop retains the serving configuration after a failed update. Reset must use it too.
+    const failedUpdate: Spec = { ...f.spec, services: { ...f.spec.services, migrate: job(f.directory, 'process.exit(12)') } };
+    assert.equal((await outcome(f.runtime, await f.runtime.replace(f.spec.name, failedUpdate))).state, 'failed');
+    const reset = await post(await resetRequest()); assert.equal(reset.error, undefined);
+    ready = await outcome(f.runtime, reset.result); assert.equal(ready.state, 'ready', JSON.stringify(ready));
+    assert.equal(ready.services?.seed.state, 'succeeded'); assert.equal((await rows(ready.url!)).length, 1);
+    assert.equal((await rows(other.url!)).length, 2, 'other environment is untouched');
+    assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
+    // A migration failure after deletion is a normal failed attempt, never a reset loop.
+    await writeFile(join(f.directory, 'migrate.mjs'), "console.error('deliberate migration failure');process.exit(6);");
+    const before = deletionRequests;
+    const started = await post(await resetRequest()); assert.equal(started.error, undefined);
+    const failed = await outcome(f.runtime, started.result); assert.equal(failed.state, 'failed');
+    assert.equal(failed.services?.migrate.state, 'failed');
+    const selected = await post({ action: 'logs', owner: id, name: f.spec.name, attemptId: failed.id, source: 'migrate' }) as unknown as { result: { text: string } };
+    assert.match(selected.result.text, /deliberate migration failure/);
+    assert.equal(deletionRequests, before + 1);
+    await writeFile(join(f.directory, 'migrate.mjs'), `import {Client} from ${JSON.stringify(import.meta.resolve('pg'))};const db=new Client({connectionString:process.env.DATABASE_URL});await db.connect();await db.query('CREATE TABLE items(id serial primary key,label text)');await db.end();`);
+    const retry = await post({ action: 'startAgain', owner: id, name: f.spec.name, attemptId: failed.id });
+    ready = await outcome(f.runtime, retry.result); assert.equal(ready.state, 'ready');
+    assert.equal((await rows(ready.url!)).length, 1); assert.equal(deletionRequests, before + 1);
+    // A real Keychain failure can follow volume deletion. Do not start until explicit recovery succeeds.
+    lockDeletion = true;
+    const interrupted = await post(await resetRequest()); assert.equal(interrupted.error?.code, 'SECRET_STORE_UNAVAILABLE');
+    stopped = await f.runtime.get(f.spec.name);
+    assert.equal(stopped.data?.cleanup?.operation, 'remove-credential');
+    assert.ok(!stopped.active && !stopped.candidate);
+    await f.keys.control('unlock');
+    const recovered = await post(await resetRequest()); assert.equal(recovered.error, undefined);
+    ready = await outcome(f.runtime, recovered.result); assert.equal(ready.state, 'ready');
+    assert.equal((await rows(ready.url!)).length, 1);
+    assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
+    // Concurrent confirmations of the same serving attempt cannot delete twice.
+    const request = await resetRequest(); const prior = deletionRequests;
+    const simultaneous = await Promise.all([post(request), post(request)]);
+    assert.equal(simultaneous.filter(response => !response.error).length, 1);
+    assert.equal(deletionRequests, prior + 1);
+    assert.equal((await outcome(f.runtime, simultaneous.find(response => !response.error)!.result)).state, 'ready');
+    const canceledSpec: Spec = { name: 'canceled-data', type: 'environment', primary: 'web', services: {
+      db: { type: 'postgres' }, prepare: { ...job(f.directory, 'setInterval(()=>{},1000)'), dependsOn: ['db'] }, web: { type: 'static', directory: f.directory, dependsOn: ['prepare'] },
+    } };
+    const pending = await f.runtime.start(canceledSpec);
+    await until(async () => !!(await f.runtime.get(canceledSpec.name)).candidate?.services?.prepare);
+    await f.runtime.cancel(canceledSpec.name, pending.candidate!.id);
+    const previousDeletes = deletionRequests;
+    assert.equal((await post(await resetRequest(canceledSpec.name))).error?.code, 'STALE_ATTEMPT');
+    assert.equal(deletionRequests, previousDeletes, 'cannot erase data without a restartable configuration');
+    assert.ok((await f.runtime.get(canceledSpec.name)).data);
+  } finally { allowDelete = true; await f.keys.control('unlock'); }
 });

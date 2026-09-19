@@ -246,7 +246,8 @@ A short log tail can remain buffered until another chunk or stream completion.
 
 Environment inspection shows binding names without resolved values.
 Redaction includes database connection URLs and credential components for each consumer.
-Attempt logs include service prefixes and retain a bounded tail.
+Attempt logs capture source identity separately from output and retain one bounded tail.
+Filtering cannot relabel output; application text that imitates a prefix stays with its actual source.
 
 Redaction cannot detect every secret. Application files, transformed values,
 arguments, third-party output, and HTTP responses can expose values.
@@ -324,6 +325,13 @@ the existing owner control listener still rejects browser Origin headers.
 Discovery validates private connection records and authenticates each owner identity.
 It does not scan ports, launch owners, grant roots, or infer cleanup from an unreachable
 endpoint. One unresponsive owner has a bounded read deadline and does not hide others.
+
+Dashboard reset requires a confirmation of the environment and its managed databases.
+It calls existing Stop, authorized data deletion, and Start again operations. Attempt IDs
+and the managed resource list are checked for changes before deletion. Deletion must
+succeed before startup is requested. Failed startup never retries deletion. These steps
+are not a transaction: deleted data and job writes cannot be rolled back. External data
+and user-secret entries are excluded from deletion; jobs retain their normal permissions.
 
 The dashboard can reopen an owner’s pending private form. Secret Manager also lists
 user-reference names and edits an existing entry in a dashboard dialog, without

@@ -85,7 +85,20 @@ Use compatible migrations during replacement, or Stop before a disruptive schema
 The dashboard shows **Setup jobs** for the latest attempt, including progress, failures, logs, and **Run again** when stopped.
 CLI `get`, `wait`, and `logs`, and their MCP counterparts, report the same outcomes.
 `skipped` means that the job already succeeded for the retained data; it did not execute in this attempt.
-Logs are bounded and remain available only while their attempt is retained by the owner.
+Choose **Logs** on a job or command service to open its output. The log selector also
+has **All output**. Use the attempt selector to compare a failed update with the serving app.
+CLI: `previewhost logs shop ATTEMPT_ID --source migrate`. MCP `preview_logs` accepts the same
+`source` and an optional `after` cursor. [Log limits and incremental reads](api.md#methods).
+
+**Reset data** in Services stops the selected environment, deletes its managed data,
+then starts the configuration that Stop retains: the serving app, or the latest attempt if none is serving. The confirmation names the worktree and databases.
+External databases and saved user secrets are not deleted. Jobs still use their configured connections.
+Setup runs against fresh managed data,
+including once-only seeds. Deletion and job writes cannot be rolled back.
+
+If deletion fails, startup does not run. If startup or a migration fails after deletion,
+review the error and use **Retry start** after fixing the cause. That retry retains data;
+it does not delete again. Reset does not reload YAML.
 
 After inspecting partial writes and making the command safe to repeat:
 
@@ -126,5 +139,5 @@ Reviewed [Task Monki's preview guide](https://www.monki.work/docs/preview/) and 
 | Setup skipped on replacement | Adapt: seeds stay skipped, but repeatable migrations run so a new application can update its schema. |
 | Restart policies, retries, backoff, liveness probes | Leave out automatic retries. They do not solve missing migrations and can repeat writes. Existing explicit restart and readiness remain. |
 | Captured source, generation storage, approvals, route replacement | Keep Previewhost's live sources, current authorization, and existing atomic route switch. No second lifecycle. |
-| Logs and failure recovery | Reuse bounded attempt logs and statuses across library, CLI, MCP, and dashboard. Stop and deletion remain separate. |
+| Logs and failure recovery | Reuse bounded attempt logs and statuses across library, CLI, MCP, and dashboard. Dashboard reset composes existing Stop, authorized deletion and startup operations. |
 | Workers, Compose, additional probe types | Outside this setup requirement. Existing HTTP services and managed or attached local databases cover it. |

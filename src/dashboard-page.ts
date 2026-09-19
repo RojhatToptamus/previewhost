@@ -43,7 +43,7 @@ function mountDashboard() {
   let loading = false;
   let acting = false;
   let connectionNotice = false;
-  let panel: { tab: Tab; attemptId?: string; loading?: boolean; error?: string; logs?: LogResult; description?: PreviewDescription } = { tab: 'activity' };
+  let panel: { tab: Tab; attemptId?: string; source?: string; loading?: boolean; error?: string; logs?: LogResult; description?: PreviewDescription } = { tab: 'activity' };
   const projects = document.querySelector<HTMLElement>('#projects')!;
   const detail = document.querySelector<HTMLElement>('#detail')!;
   const search = document.querySelector<HTMLInputElement>('#search')!;
@@ -270,7 +270,8 @@ function mountDashboard() {
       row.append(el('span', p.active ? 'Serving' : 'Latest attempt', 'section-label'), id); detail.append(row);
     }
   }
-  function renderServices(p: PreviewStatus) {
+  function renderServices(entry: Entry) {
+    const p = entry.preview!;
     const attempt = p.active ?? p.candidate ?? p.latest;
     if (!attempt && !p.data) return;
     const node = section('Services');
@@ -287,7 +288,10 @@ function mountDashboard() {
       row.append(el('strong', name), el('span', typeLabels[service.type], 'muted'), el('span', service.state[0].toUpperCase() + service.state.slice(1), 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
       const meta = el('span', managed.has(name) ? 'Data retained' : '', 'service-meta muted');
       if (url) { try { meta.textContent = ':' + new URL(url).port; meta.classList.add('machine'); } catch { /* Invalid links are omitted below. */ } }
-      row.append(meta, url ? urlLink(url, 'Open', 'button small') : el('span', '', 'service-action'));
+      const controls = el('div', '', 'row-actions service-action');
+      if (service.type === 'command') controls.append(button('Logs', () => openLogs(entry, attempt!, name), 'small', 'logs-' + name));
+      if (url) controls.append(urlLink(url, 'Open', 'button small'));
+      row.append(meta, controls);
       if (service.error) row.append(el('p', service.error.message, 'error service-error'));
       table.append(row);
     }
@@ -299,12 +303,36 @@ function mountDashboard() {
     }
     if (!table.children.length) table.append(el('p', 'Service status is not available yet.', 'muted'));
     node.append(table);
+    const deletionPending = p.data?.cleanup?.operation === 'remove-credential' && !p.cleanup?.length &&
+      !attempts(p).some(attempt => attempt.state === 'cleanup-incomplete');
+    if (p.data?.resources.length && p.latest && (p.active || ['stopped', 'failed'].includes(p.latest.state)) &&
+        !p.busy && !p.candidate && (!needsCleanup(p) || deletionPending) && !entry.owner.legacy) {
+      const reset = el('div', '', 'reset-row');
+      reset.append(el('p', 'Reset managed data and run setup again.', 'muted'), button('Reset data', () => confirmReset(entry), 'danger small'));
+      node.append(reset);
+    }
     if (p.candidate) { const elapsed = el('p', '', 'machine muted'); elapsed.dataset.elapsed = p.candidate.startedAt; node.append(elapsed); }
     if (attempt?.sources?.length) {
       const sources = el('details', '', 'source-folders'); sources.append(el('summary', 'Source folders'));
       for (const source of attempt.sources) sources.append(pathText(source));
       node.append(sources);
     }
+  }
+  function confirmReset(entry: Entry) {
+    const p = entry.preview!;
+    const dialog = el('dialog'); dialog.setAttribute('aria-labelledby', 'reset-title'); dialog.setAttribute('aria-describedby', 'reset-hint');
+    const title = el('h2', 'Reset data for ' + p.name + '?'); title.id = 'reset-title';
+    const hint = el('p', 'Stops this preview, deletes the managed data below, then starts the ' + (p.active ? 'serving' : 'latest') + ' configuration and runs setup again. Deletion and job writes cannot be rolled back.', 'muted'); hint.id = 'reset-hint';
+    const list = el('ul', '', 'reset-resources');
+    for (const resource of p.data!.resources) list.append(el('li', resource.name + ' · ' + (resource.type === 'postgres' ? 'PostgreSQL' : 'Redis')));
+    const controls = el('div', '', 'actions'); const cancel = button('Cancel', () => dialog.close()); cancel.autofocus = true;
+    controls.append(cancel, button('Delete data and start', () => {
+      dialog.close();
+      void mutate({ action: 'resetData', owner: entry.owner.id, name: p.name, resources: p.data!.resources,
+        expected: { active: p.active?.id ?? null, candidate: p.candidate?.id ?? null, latest: p.latest!.id } }, 'Data deleted. Startup requested; check setup jobs below.');
+    }, 'danger'));
+    dialog.append(title, pathText(entry.owner.project ?? ''), hint, list, el('p', 'External databases and saved secrets are not deleted.', 'muted'), controls);
+    dialog.addEventListener('close', () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
   }
   function renderJobs(entry: Entry) {
     const p = entry.preview!; const attempt = p.candidate ?? p.latest ?? p.active;
@@ -313,12 +341,6 @@ function mountDashboard() {
     const node = section('Setup jobs'); const list = el('div', '', 'row-list');
     const heading = el('div', '', 'section-heading'); heading.append(node.firstElementChild!);
     if (p.active && p.active.id !== attempt.id) heading.append(el('span', 'Latest update', 'muted'));
-    heading.append(button('View logs', () => {
-      void loadPanel(entry, 'logs', attempt).then(() => {
-        const content = document.getElementById('tab-content');
-        if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'nearest' }); }
-      });
-    }, 'small', 'job-logs'));
     node.append(heading);
     for (const [name, job] of jobs) {
       const row = el('div', '', 'job-row');
@@ -346,18 +368,25 @@ function mountDashboard() {
       }, 'small', 'rerun-' + name));
       if (controls.children.length) {
         controls.firstElementChild!.setAttribute('aria-label', 'Run ' + name + ' again');
-        row.append(controls);
       }
+      controls.append(button('Logs', () => openLogs(entry, attempt, name), 'small', 'logs-' + name));
+      row.append(controls);
       list.append(row);
     }
     node.append(list);
     if (p.active && jobs.some(([, job]) => job.state === 'failed')) node.append(el('p', 'Stop the preview to rerun a job.', 'job-hint'));
   }
-  async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary) {
-    const current = panel = { tab, attemptId: attempt?.id, loading: tab !== 'activity' };
+  function openLogs(entry: Entry, attempt: AttemptSummary, source: string) {
+    void loadPanel(entry, 'logs', attempt, source).then(() => {
+      const content = document.getElementById('tab-content');
+      if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'nearest' }); }
+    });
+  }
+  async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary, source?: string) {
+    const current = panel = { tab, attemptId: attempt?.id, source, loading: tab !== 'activity' };
     render(); if (tab === 'activity' || !attempt) return;
     try {
-      const result = await call<LogResult | PreviewDescription>({ action: tab === 'logs' ? 'logs' : 'describe', owner: entry.owner.id, name: entry.name, attemptId: attempt.id });
+      const result = await call<LogResult | PreviewDescription>({ action: tab === 'logs' ? 'logs' : 'describe', owner: entry.owner.id, name: entry.name, attemptId: attempt.id, ...(tab === 'logs' && source ? { source } : {}) });
       if (panel !== current) return;
       if (tab === 'logs') panel.logs = result as LogResult; else panel.description = result as PreviewDescription;
     } catch (error) { if (panel === current) panel.error = error instanceof Error ? error.message : 'Details unavailable.'; }
@@ -427,14 +456,25 @@ function mountDashboard() {
       renderRequests(entry, content, new Set(actions(entry).map(a => a.label))); return;
     }
     if (!selected) { content.append(el('p', 'The retained attempt is no longer available.', 'muted')); return; }
-    const choose = el('label', '', 'attempt-picker'); choose.append(el('span', 'Attempt'));
+    const choose = el('div', '', 'attempt-picker'); choose.append(el('span', 'Attempt'));
     const selectAttempt = el('select'); selectAttempt.setAttribute('aria-label', 'Diagnostic attempt'); selectAttempt.dataset.focus = 'diagnostic-attempt';
     for (const attempt of retained) {
       const option = el('option', (attempt.id === p?.active?.id ? 'Serving' : attempt.id === p?.candidate?.id ? 'Starting' : 'Latest') + ' · ' + attempt.id);
       option.value = attempt.id; option.selected = attempt.id === selected.id; selectAttempt.append(option);
     }
     selectAttempt.addEventListener('change', () => { void loadPanel(entry, panel.tab, retained.find(a => a.id === selectAttempt.value)); });
-    choose.append(selectAttempt, button('Refresh', () => { void loadPanel(entry, panel.tab, selected); }, 'small', 'refresh-panel')); content.append(choose);
+    choose.append(selectAttempt);
+    if (panel.tab === 'logs') {
+      const sources = el('select'); sources.setAttribute('aria-label', 'Log source'); sources.dataset.focus = 'log-source';
+      const all = el('option', 'All output'); all.value = ''; sources.append(all);
+      const names = selected.type === 'environment' ? Object.keys(selected.services ?? {}) : [p!.name];
+      for (const name of names) {
+        const option = el('option', name); option.value = name; option.selected = panel.source === name; sources.append(option);
+      }
+      sources.addEventListener('change', () => { void loadPanel(entry, 'logs', selected, sources.value || undefined); });
+      choose.append(sources);
+    }
+    choose.append(button('Refresh', () => { void loadPanel(entry, panel.tab, selected, panel.source); }, 'small', 'refresh-panel')); content.append(choose);
     if (panel.loading) { content.append(el('p', 'Loading…', 'muted')); return; }
     if (panel.error) { message('Details unavailable', panel.error, 'error', content); return; }
     if (panel.attemptId !== selected.id) { content.append(el('p', 'The selected attempt changed. Refresh to load its details.', 'muted')); return; }
@@ -548,7 +588,7 @@ function mountDashboard() {
     }
     if (!canOpen && !primaryTaken && p?.candidate) { const waiting = el('button', 'Waiting for URL', 'hero'); waiting.disabled = true; row.append(waiting); }
     row.append(controls); detail.append(row, el('p', hint(entry), 'hint'));
-    if (p) { renderAttempts(p); renderServices(p); renderJobs(entry); }
+    if (p) { renderAttempts(p); renderServices(entry); renderJobs(entry); }
     if (owner.configuration?.error) addNotice('preview.yml needs attention', owner.configuration.error.message + (p?.active ? ' The running app is unchanged. Its Configuration tab shows the serving attempt.' : ' Ask your agent to resolve this configuration error before starting.'), 'error');
     else if (owner.configuration) detail.append(el('p', 'preview.yml is available for the next agent startup. Start again uses the retained attempt configuration.', 'muted'));
 
@@ -678,7 +718,7 @@ dialog .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-w
 dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .secret-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:14px 16px; }
 .secret-row code { overflow-wrap:anywhere; color:var(--t2); }
-.service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 56px; align-items:center; gap:12px; padding:12px 16px; }
+.service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 112px; align-items:center; gap:12px; padding:12px 16px; }
 .service-row>strong { overflow-wrap:anywhere; font-size:13.5px; }
 .service-row .status { font-size:12.5px; }
 .service-row .ready { font-weight:400; }
@@ -726,7 +766,10 @@ dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .activity-row>div { min-width:0; }
 .activity-row code { display:block; margin:3px 0; }
 .activity-row p { margin:0; font-size:12.5px; }
-.attempt-picker { display:flex; gap:10px; align-items:center; margin-bottom:16px; color:var(--t4); font-size:12.5px; }
+.reset-row { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:16px; }
+.reset-row p { margin:0; font-size:12.5px; }
+.reset-resources { padding-left:20px; margin:16px 0; }
+.attempt-picker { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; color:var(--t4); font-size:12.5px; }
 select { min-width:0; max-width:100%; height:32px; padding:0 8px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t2); font-family:'Geist Mono',monospace; font-size:12px; }
 .logs,.configuration { border:1px solid var(--border); border-radius:8px; background:var(--subtle); padding:14px 16px; max-height:360px; overflow:auto; white-space:pre; line-height:1.9; font-size:12px; color:var(--t3); }
 .env-row { display:grid; grid-template-columns:180px 90px minmax(0,1fr); gap:14px; align-items:baseline; padding:11px 16px; }
@@ -749,7 +792,7 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
 @media (max-width:1100px) {
   .overview-row { grid-template-columns:minmax(0,1fr) 150px; gap:12px; }
   .row-actions { grid-column:1/-1; }
-  .service-row { grid-template-columns:80px 76px 64px minmax(0,1fr) 48px; gap:8px; padding:12px; }
+  .service-row { grid-template-columns:80px 76px 64px minmax(0,1fr) 112px; gap:8px; padding:12px; }
 }
 @media (max-width:760px) {
   header { padding:0 14px; gap:10px; }
@@ -779,7 +822,7 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   .job-row { flex-wrap:wrap; gap:10px 16px; }
   .job-row .row-actions { width:100%; }
   .section-heading { flex-wrap:wrap; gap:10px; }
-  .service-row { grid-template-columns:72px 66px minmax(0,1fr) 48px; }
+  .service-row { grid-template-columns:72px 66px minmax(0,1fr) 104px; }
   .service-meta { grid-column:1/4; grid-row:auto; text-align:left; }
   .service-row>.button,.service-action { grid-column:4; }
   .service-row>.status { text-align:right; }

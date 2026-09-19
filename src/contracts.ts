@@ -191,7 +191,9 @@ export interface PreviewDescription {
   source: 'caller-owned-live-directory' | 'external-http-server' | 'live-directories-and-dependencies';
   cleanup: 'owned-process-group' | 'owned-file-server' | 'proxy-connections-only' | 'owned-apps-and-containers-data-retained';
 }
-export interface LogResult { name: string; attemptId: string; text: string; truncated: boolean }
+export interface LogOptions { source?: string; after?: number; maxBytes?: number }
+export interface LogResult { name: string; attemptId: string; text: string; truncated: boolean; cursor: number }
+export interface DeleteDataOptions { expected?: { attemptId: string; resources: DataStatus['resources'] } }
 export interface WaitOptions { timeoutMs?: number; signal?: AbortSignal }
 export interface StopOptions {
   afterEngineRestart?: boolean;
@@ -213,10 +215,10 @@ export interface PreviewApi {
   list(): Promise<PreviewStatus[]>;
   get(name: string): Promise<PreviewStatus>;
   wait(name: string, attemptId: string, options?: WaitOptions): Promise<AttemptResult>;
-  logs(name: string, attemptId?: string, maxBytes?: number): Promise<LogResult>;
+  logs(name: string, attemptId?: string, options?: LogOptions): Promise<LogResult>;
   cancel(name: string, attemptId: string): Promise<PreviewStatus>;
   stop(name: string, options?: StopOptions): Promise<PreviewStatus>;
-  deleteData(name: string): Promise<PreviewStatus>;
+  deleteData(name: string, options?: DeleteDataOptions): Promise<PreviewStatus>;
   rerunJob(name: string, attemptId: string, job: string): Promise<PreviewStatus>;
 }
 export type AuthorizationRequest = (
@@ -246,7 +248,7 @@ export const requestSchemas = {
   get: z.strictObject({ name: nameSchema }),
   wait: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, timeoutMs: z.number().int().min(1).max(limits.waitMs).optional()
     .describe('Wait limit in milliseconds, default and maximum 30000. Timeout or canceling this wait leaves startup running; wait again or cancel the exact candidate.') }),
-  logs: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema.optional(), maxBytes: z.number().int().min(1).max(limits.logBytes).optional() }),
+  logs: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema.optional(), maxBytes: z.number().int().min(4).max(limits.logBytes).optional(), source: nameSchema.optional(), after: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional() }),
   cancel: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   stop: z.strictObject({ name: nameSchema, afterEngineRestart: z.boolean().optional(), expected: z.strictObject({
     active: attemptIdSchema.nullable(), candidate: attemptIdSchema.nullable(), latest: attemptIdSchema.nullable(),
@@ -255,5 +257,5 @@ export const requestSchemas = {
   startAgain: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   saveConfiguration: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   rerunJob: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, job: nameSchema }),
-  deleteData: z.strictObject({ name: nameSchema }),
+  deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema, resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis']) })).min(1).max(limits.environmentDatabases) }).optional() }),
 };
