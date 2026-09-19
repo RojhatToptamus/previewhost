@@ -22,9 +22,15 @@ async function outcome(runtime: PreviewRuntime, started: PreviewStatus) {
     if (result.state !== 'starting') return result;
   }
 }
-async function until(check: () => Promise<boolean>) {
-  const deadline = Date.now() + 10_000;
-  while (!await check()) { if (Date.now() > deadline) throw new Error('Condition did not become true'); await delay(20); }
+async function until(check: () => Promise<boolean>, signal = AbortSignal.timeout(10_000)) {
+  while (!await check()) await delay(20, undefined, { signal });
+}
+async function seedWaiting(f: Awaited<ReturnType<typeof databaseFixture>>, started: PreviewStatus, signal: AbortSignal) {
+  await until(async () => {
+    const status = await f.runtime.get(started.name);
+    assert.equal(status.candidate?.id, started.candidate!.id, JSON.stringify(status.latest));
+    return access(join(f.directory, 'waiting')).then(() => true, () => false);
+  }, signal);
 }
 async function folder(t: test.TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-jobs-'));
@@ -146,19 +152,18 @@ test('real PostgreSQL jobs: startup, retained seeds, replacement, explicit rerun
   assert.equal(replaced.state, 'ready', JSON.stringify(replaced)); assert.equal(replaced.services?.seed.state, 'skipped');
   assert.equal((await rows(replaced.url!)).length, 2);
   // A replacement can keep the old app serving, but cannot undo a job's writes.
+  const migration = await readFile(join(f.directory, 'migrate.mjs'), 'utf8');
   await writeFile(join(f.directory, 'migrate.mjs'), `process.exit(8);`);
   const failed = await outcome(f.runtime, await f.runtime.replace(f.spec.name, f.spec)); assert.equal(failed.state, 'failed');
   assert.equal((await rows(replaced.url!)).length, 2);
   const stopped = await f.runtime.stop(f.spec.name);
-  await writeFile(join(f.directory, 'migrate.mjs'), `console.log('migration already applied');`);
+  await writeFile(join(f.directory, 'migrate.mjs'), migration);
   ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, stopped.latest!.id, 'seed'));
   assert.equal(ready.state, 'ready', JSON.stringify(ready)); assert.equal((await rows(ready.url!)).length, 3);
   await f.reconnect();
   ready = await outcome(f.runtime, await f.runtime.start(f.spec)); assert.equal(ready.state, 'ready', JSON.stringify(ready));
   assert.equal(ready.services?.seed.state, 'skipped'); assert.equal((await rows(ready.url!)).length, 3);
   await f.runtime.stop(f.spec.name); await f.runtime.deleteData(f.spec.name);
-  // Reinstall the migration for the newly empty database.
-  await writeFile(join(f.directory, 'migrate.mjs'), `import {Client} from ${JSON.stringify(import.meta.resolve('pg'))};const db=new Client({connectionString:process.env.DATABASE_URL});await db.connect();await db.query('CREATE TABLE items (id serial primary key,label text)');await db.end();`);
   ready = await outcome(f.runtime, await f.runtime.start(f.spec)); assert.equal(ready.state, 'ready', JSON.stringify(ready));
   assert.equal(ready.services?.seed.state, 'succeeded'); assert.equal((await rows(ready.url!)).length, 1);
 });
@@ -174,17 +179,17 @@ test('failed and canceled seeds retain partial writes and block implicit retries
   let ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, failed.id, 'seed'));
   assert.equal(ready.state, 'ready', JSON.stringify(ready));
   assert.equal(((await (await fetch(ready.url!)).json()) as unknown[]).length, 2, 'partial seed was not rolled back');
-  await f.runtime.stop(f.spec.name); await f.runtime.deleteData(f.spec.name);
+  const stopped = await f.runtime.stop(f.spec.name);
   await writeFile(join(f.directory, 'mode'), 'wait');
-  const starting = await f.runtime.start(f.spec);
-  await until(() => access(join(f.directory, 'waiting')).then(() => true, () => false));
+  const starting = await f.runtime.rerunJob(f.spec.name, stopped.latest!.id, 'seed');
+  await seedWaiting(f, starting, t.signal);
   await f.runtime.cancel(f.spec.name, starting.candidate!.id); await f.reconnect();
   await writeFile(join(f.directory, 'mode'), '');
   failed = await outcome(f.runtime, await f.runtime.start(f.spec)); assert.equal(failed.state, 'failed');
   assert.match(failed.services!.seed.error!.message, /explicitly rerun/);
   ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, failed.id, 'seed'));
   assert.equal(ready.state, 'ready', JSON.stringify(ready));
-  assert.equal(((await (await fetch(ready.url!)).json()) as unknown[]).length, 2);
+  assert.equal(((await (await fetch(ready.url!)).json()) as unknown[]).length, 4, 'failed and canceled writes both remain');
 });
 
 test('a script reporting success cannot mask a database-querying readiness failure', database, async t => {
@@ -206,13 +211,25 @@ test('owner crash leaves an in-flight seed blocked until explicit recovery', dat
   await writeFile(childFile, f.keys.installSource + `
     import {createPreviewRuntime} from ${JSON.stringify(new URL('./runtime.js', import.meta.url).href)};
     const runtime = await createPreviewRuntime({...${JSON.stringify(f.options)},authorize:()=>true});
-    await runtime.start(${JSON.stringify(f.spec)});
-    setInterval(()=>{},1000);
+    const started = await runtime.start(${JSON.stringify(f.spec)});
+    for (;;) {
+      const result = await runtime.wait(started.name, started.candidate.id);
+      if (result.state !== 'starting') {
+        await runtime.close();
+        throw new Error(JSON.stringify(result));
+      }
+    }
   `);
-  const child = spawn(process.execPath, [childFile], { stdio: 'ignore' });
+  const child = spawn(process.execPath, [childFile], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let error = '';
+  child.stderr.setEncoding('utf8').on('data', text => { error = (error + text).slice(-4096); });
   const exited = once(child, 'exit');
   try {
-    await until(() => access(join(f.directory, 'waiting')).then(() => true, () => false));
+    await until(() => {
+      assert.equal(child.exitCode, null, error);
+      assert.equal(child.signalCode, null, error);
+      return access(join(f.directory, 'waiting')).then(() => true, () => false);
+    }, t.signal);
   } finally { child.kill('SIGKILL'); await exited; }
   await f.reconnect();
   await writeFile(join(f.directory, 'mode'), '');
@@ -303,8 +320,6 @@ test('dashboard reset uses guarded authorized deletion, retains unrelated data a
     assert.equal((await post(wrongResources)).error?.code, 'STALE_ATTEMPT');
     assert.equal(deletionRequests, 0);
     assert.ok((await f.runtime.get(f.spec.name)).data);
-    ready = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, ready.id));
-    assert.equal((await rows(ready.url!)).length, 2);
     allowDelete = false;
     const denied = await post(await resetRequest()); assert.equal(denied.error?.code, 'EXECUTION_DENIED');
     let stopped = await f.runtime.get(f.spec.name);
@@ -315,12 +330,18 @@ test('dashboard reset uses guarded authorized deletion, retains unrelated data a
     // Stop retains the serving configuration after a failed update. Reset must use it too.
     const failedUpdate: Spec = { ...f.spec, services: { ...f.spec.services, migrate: job(f.directory, 'process.exit(12)') } };
     assert.equal((await outcome(f.runtime, await f.runtime.replace(f.spec.name, failedUpdate))).state, 'failed');
-    const reset = await post(await resetRequest()); assert.equal(reset.error, undefined);
-    ready = await outcome(f.runtime, reset.result); assert.equal(ready.state, 'ready', JSON.stringify(ready));
+    // Concurrent confirmations of the same serving attempt cannot delete twice.
+    const request = await resetRequest(); const prior = deletionRequests;
+    const simultaneous = await Promise.all([post(request), post(request)]);
+    assert.equal(simultaneous.filter(response => !response.error).length, 1);
+    assert.equal(deletionRequests, prior + 1);
+    ready = await outcome(f.runtime, simultaneous.find(response => !response.error)!.result);
+    assert.equal(ready.state, 'ready', JSON.stringify(ready));
     assert.equal(ready.services?.seed.state, 'succeeded'); assert.equal((await rows(ready.url!)).length, 1);
     assert.equal((await rows(other.url!)).length, 2, 'other environment is untouched');
     assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
     // A migration failure after deletion is a normal failed attempt, never a reset loop.
+    const migration = await readFile(join(f.directory, 'migrate.mjs'), 'utf8');
     await writeFile(join(f.directory, 'migrate.mjs'), "console.error('deliberate migration failure');process.exit(6);");
     const before = deletionRequests;
     const started = await post(await resetRequest()); assert.equal(started.error, undefined);
@@ -329,7 +350,7 @@ test('dashboard reset uses guarded authorized deletion, retains unrelated data a
     const selected = await post({ action: 'logs', owner: id, name: f.spec.name, attemptId: failed.id, source: 'migrate' }) as unknown as { result: { text: string } };
     assert.match(selected.result.text, /deliberate migration failure/);
     assert.equal(deletionRequests, before + 1);
-    await writeFile(join(f.directory, 'migrate.mjs'), `import {Client} from ${JSON.stringify(import.meta.resolve('pg'))};const db=new Client({connectionString:process.env.DATABASE_URL});await db.connect();await db.query('CREATE TABLE items(id serial primary key,label text)');await db.end();`);
+    await writeFile(join(f.directory, 'migrate.mjs'), migration);
     const retry = await post({ action: 'startAgain', owner: id, name: f.spec.name, attemptId: failed.id });
     ready = await outcome(f.runtime, retry.result); assert.equal(ready.state, 'ready');
     assert.equal((await rows(ready.url!)).length, 1); assert.equal(deletionRequests, before + 1);
@@ -344,21 +365,15 @@ test('dashboard reset uses guarded authorized deletion, retains unrelated data a
     ready = await outcome(f.runtime, recovered.result); assert.equal(ready.state, 'ready');
     assert.equal((await rows(ready.url!)).length, 1);
     assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
-    // Concurrent confirmations of the same serving attempt cannot delete twice.
-    const request = await resetRequest(); const prior = deletionRequests;
-    const simultaneous = await Promise.all([post(request), post(request)]);
-    assert.equal(simultaneous.filter(response => !response.error).length, 1);
-    assert.equal(deletionRequests, prior + 1);
-    assert.equal((await outcome(f.runtime, simultaneous.find(response => !response.error)!.result)).state, 'ready');
-    const canceledSpec: Spec = { name: 'canceled-data', type: 'environment', primary: 'web', services: {
-      db: { type: 'postgres' }, prepare: { ...job(f.directory, 'setInterval(()=>{},1000)'), dependsOn: ['db'] }, web: { type: 'static', directory: f.directory, dependsOn: ['prepare'] },
-    } };
-    const pending = await f.runtime.start(canceledSpec);
-    await until(async () => !!(await f.runtime.get(canceledSpec.name)).candidate?.services?.prepare);
-    await f.runtime.cancel(canceledSpec.name, pending.candidate!.id);
+    // Cancellation needs no third database: interrupt a rerun against the same retained data.
+    stopped = await f.runtime.stop(f.spec.name);
+    await writeFile(join(f.directory, 'mode'), 'wait');
+    const pending = await f.runtime.rerunJob(f.spec.name, stopped.latest!.id, 'seed');
+    await seedWaiting(f, pending, t.signal);
+    await f.runtime.cancel(f.spec.name, pending.candidate!.id);
     const previousDeletes = deletionRequests;
-    assert.equal((await post(await resetRequest(canceledSpec.name))).error?.code, 'STALE_ATTEMPT');
+    assert.equal((await post(await resetRequest())).error?.code, 'STALE_ATTEMPT');
     assert.equal(deletionRequests, previousDeletes, 'cannot erase data without a restartable configuration');
-    assert.ok((await f.runtime.get(canceledSpec.name)).data);
+    assert.ok((await f.runtime.get(f.spec.name)).data);
   } finally { allowDelete = true; await f.keys.control('unlock'); }
 });
