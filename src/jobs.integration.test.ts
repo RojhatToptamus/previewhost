@@ -9,6 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createPreviewRuntime, type PreviewRuntime } from './runtime.js';
 import { parseSpec } from './spec.js';
 import { loadPreviewSpec, savePreviewSpec } from './config.js';
+import { PreviewError } from './errors.js';
 import type { PreviewSpec, PreviewStatus, RuntimeOptions } from './contracts.js';
 import { testKeychain } from './testSupport/keychain.js';
 
@@ -18,8 +19,12 @@ const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
 const database = { skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000 };
 async function outcome(runtime: PreviewRuntime, started: PreviewStatus) {
   for (;;) {
-    const result = await runtime.wait(started.name, started.candidate!.id);
-    if (result.state !== 'starting') return result;
+    try {
+      // Exercise pending observation windows without extending startup or repeating effects.
+      return await runtime.wait(started.name, started.candidate!.id, { timeoutMs: 1000 });
+    } catch (error) {
+      if (!(error instanceof PreviewError) || error.code !== 'TIMEOUT') throw error;
+    }
   }
 }
 async function until(check: () => Promise<boolean>, signal = AbortSignal.timeout(10_000)) {
@@ -209,14 +214,15 @@ test('owner crash leaves an in-flight seed blocked until explicit recovery', dat
   const childFile = join(f.directory, 'owner.mjs');
   await writeFile(childFile, f.keys.installSource + `
     import {createPreviewRuntime} from ${JSON.stringify(new URL('./runtime.js', import.meta.url).href)};
+    import {PreviewError} from ${JSON.stringify(new URL('./errors.js', import.meta.url).href)};
     const runtime = await createPreviewRuntime({...${JSON.stringify(f.options)},authorize:()=>true});
     const started = await runtime.start(${JSON.stringify(f.spec)});
     for (;;) {
-      const result = await runtime.wait(started.name, started.candidate.id);
-      if (result.state !== 'starting') {
-        await runtime.close();
-        throw new Error(JSON.stringify(result));
-      }
+      let result;
+      try { result = await runtime.wait(started.name, started.candidate.id, {timeoutMs:1000}); }
+      catch (error) { if (error instanceof PreviewError && error.code === 'TIMEOUT') continue; throw error; }
+      await runtime.close();
+      throw new Error(JSON.stringify(result));
     }
   `);
   const child = spawn(process.execPath, [childFile], { stdio: ['ignore', 'ignore', 'pipe'] });
