@@ -227,7 +227,7 @@ function mountDashboard() {
     if (pending(entry).length) return 'Values go to the macOS Keychain. Saving them does not start the app on its own.';
     if (p?.candidate) return p.active ? 'Your app is still available; canceling affects only the pending update in this worktree.' : 'The URL appears once startup checks pass. Cancelling affects only this worktree.';
     if (p?.busy) return 'An operation is in progress; wait for it to finish before changing this preview.';
-    if (p?.active && p.latest?.state === 'failed') return 'This opens the serving attempt; the failed update is not serving.';
+    if (p?.active && p.latest?.state === 'failed') return 'Your previous app is still running.';
     if (p?.active) return p.data ? 'Every startup check passed. Stopping keeps your database data.' : 'Every startup check passed. Stopping affects only this preview.';
     if (p?.latest?.state === 'failed') return 'Your app is not serving; resolve the startup error before retrying.';
     if (p?.latest?.state === 'canceled') return 'Startup was canceled; ask your agent to start again only when you want to continue.';
@@ -255,17 +255,19 @@ function mountDashboard() {
     const latest = p.candidate ?? p.latest;
     if (!latest && !p.active) return;
     if (p.active && latest && p.active.id !== latest.id) {
-      const node = section('Attempts'); const split = el('div', '', 'attempt-split');
-      for (const [label, attempt, note] of [
-        ['Serving now', p.active, 'This is what “Open app” gives you.'],
-        ['Latest update', latest, 'Not serving. Source files remain live; these are runtime attempts, not build snapshots.'],
+      const split = el('div', '', 'attempt-split');
+      for (const [label, attempt] of [
+        ['Serving', p.active],
+        ['Latest update', latest],
       ] as const) {
-        const column = el('div'); column.append(el('p', label, 'muted'), el('code', attempt.id, 'attempt-id'), el('span', attempt.state, 'status ' + (attempt.state === 'failed' ? 'error' : 'muted')), el('p', note)); split.append(column);
+        const id = el('code', attempt.id.slice(0, 8), 'attempt-id'); id.title = attempt.id;
+        const column = el('div'); column.append(el('p', label, 'muted'), id, el('span', attempt.state[0].toUpperCase() + attempt.state.slice(1), 'status ' + (attempt.state === 'failed' ? 'error' : attempt.state === 'ready' ? 'ready' : 'muted'))); split.append(column);
       }
-      node.append(split);
+      detail.append(split);
     } else {
       const attempt = p.active ?? latest!; const row = el('div', '', 'attempt-line');
-      row.append(el('span', p.active ? 'Serving / latest' : 'Latest attempt', 'section-label'), el('code', attempt.id, 'attempt-id'), el('span', attempt.state, 'muted')); detail.append(row);
+      const id = el('code', attempt.id.slice(0, 8), 'attempt-id'); id.title = attempt.id;
+      row.append(el('span', p.active ? 'Serving' : 'Latest attempt', 'section-label'), id); detail.append(row);
     }
   }
   function renderServices(p: PreviewStatus) {
@@ -275,14 +277,15 @@ function mountDashboard() {
     if (p.active && p.candidate) node.append(el('p', 'Serving services are shown below; the update is still starting.', 'muted'));
     const table = el('div', '', 'row-list');
     const managed = new Set(p.data?.resources.map(r => r.name) ?? []);
+    const typeLabels = { command: 'HTTP', static: 'Static', attach: 'Attached HTTP', postgres: 'PostgreSQL', redis: 'Redis', 'external-postgres': 'PostgreSQL', 'external-redis': 'Redis' };
     const services = Object.entries(attempt?.services ?? {}).sort(([a], [b]) => Number(managed.has(a)) - Number(managed.has(b)));
     if (!services.length && attempt && attempt.type !== 'environment') services.push([p.name, { type: attempt.type, state: attempt.state === 'ready' ? 'ready' : attempt.state === 'starting' ? 'starting' : attempt.state === 'failed' ? 'failed' : 'stopped' }]);
     for (const [name, service] of services) {
       if (service.type === 'job') continue;
       const row = el('div', '', 'service-row' + (managed.has(name) ? ' managed' : ''));
       const url = attempt?.id === p.active?.id ? service.browserUrl : undefined;
-      row.append(el('strong', name), el('span', service.type, 'machine muted'), el('span', service.state, 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
-      const meta = el('span', managed.has(name) ? 'Data retained on stop' : '', 'service-meta muted');
+      row.append(el('strong', name), el('span', typeLabels[service.type], 'muted'), el('span', service.state[0].toUpperCase() + service.state.slice(1), 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
+      const meta = el('span', managed.has(name) ? 'Data retained' : '', 'service-meta muted');
       if (url) { try { meta.textContent = ':' + new URL(url).port; meta.classList.add('machine'); } catch { /* Invalid links are omitted below. */ } }
       row.append(meta, url ? urlLink(url, 'Open', 'button small') : el('span', '', 'service-action'));
       if (service.error) row.append(el('p', service.error.message, 'error service-error'));
@@ -291,49 +294,64 @@ function mountDashboard() {
     for (const resource of p.data?.resources ?? []) {
       if (services.some(([name]) => name === resource.name)) continue;
       const row = el('div', '', 'service-row managed');
-      row.append(el('strong', resource.name), el('span', resource.type, 'machine muted'), el('span', 'Retained', 'muted'), el('span', 'Data retained on stop', 'service-meta muted'), el('span'));
+      row.append(el('strong', resource.name), el('span', typeLabels[resource.type], 'muted'), el('span', 'Retained', 'muted'), el('span', 'Data retained', 'service-meta muted'), el('span'));
       table.append(row);
     }
     if (!table.children.length) table.append(el('p', 'Service status is not available yet.', 'muted'));
     node.append(table);
     if (p.candidate) { const elapsed = el('p', '', 'machine muted'); elapsed.dataset.elapsed = p.candidate.startedAt; node.append(elapsed); }
-    if (p.data) node.append(el('p', 'Stopping keeps your database data. Deletion is a separate explicit CLI operation.', 'muted'));
-    for (const source of attempt?.sources ?? []) node.append(pathText(source));
+    if (attempt?.sources?.length) {
+      const sources = el('details', '', 'source-folders'); sources.append(el('summary', 'Source folders'));
+      for (const source of attempt.sources) sources.append(pathText(source));
+      node.append(sources);
+    }
   }
   function renderJobs(entry: Entry) {
     const p = entry.preview!; const attempt = p.candidate ?? p.latest ?? p.active;
     const jobs = Object.entries(attempt?.services ?? {}).filter(([, s]) => s.type === 'job');
     if (!jobs.length || !attempt) return;
     const node = section('Setup jobs'); const list = el('div', '', 'row-list');
-    node.append(el('p', 'Latest attempt. Skipped jobs already succeeded for retained data. Completed writes remain after failure, cancellation, or Stop.', 'muted'));
+    const heading = el('div', '', 'section-heading'); heading.append(node.firstElementChild!);
+    if (p.active && p.active.id !== attempt.id) heading.append(el('span', 'Latest update', 'muted'));
+    heading.append(button('View logs', () => {
+      void loadPanel(entry, 'logs', attempt).then(() => {
+        const content = document.getElementById('tab-content');
+        if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'nearest' }); }
+      });
+    }, 'small', 'job-logs'));
+    node.append(heading);
     for (const [name, job] of jobs) {
-      const row = el('div', '', 'service-row');
+      const row = el('div', '', 'job-row');
       const label = job.state === 'skipped' ? 'Skipped' : job.state === 'starting' ? 'Running' : job.state[0].toUpperCase() + job.state.slice(1);
-      row.append(el('strong', name), el('span', 'job', 'muted'), el('span', label, 'status ' + (job.state === 'failed' ? 'error' : ['succeeded', 'skipped'].includes(job.state) ? 'ready' : 'muted')));
+      const identity = el('div', '', 'job-identity'); identity.append(el('strong', name));
+      if (job.error) identity.append(el('p', job.error.message, 'job-note'));
+      else if (job.state === 'skipped') identity.append(el('p', 'Already applied to retained data.', 'job-note'));
+      row.append(identity, el('span', label, 'status ' + (job.state === 'failed' ? 'error' : job.state === 'succeeded' ? 'ready' : 'muted')));
       const controls = el('div', '', 'row-actions');
-      controls.append(button('Logs', () => { void loadPanel(entry, 'logs', attempt); }, 'small'));
       if (!p.active && !p.busy && !p.candidate && !needsCleanup(p)) controls.append(button('Run again', () => {
         const dialog = el('dialog');
         dialog.setAttribute('aria-labelledby', 'rerun-title');
         dialog.setAttribute('aria-describedby', 'rerun-hint');
         const title = el('h2', 'Run ' + name + ' again?'); title.id = 'rerun-title';
-        const hint = el('p', 'This starts the environment and its startup dependencies. Existing writes are not rolled back; rerunning can duplicate data.', 'muted'); hint.id = 'rerun-hint';
+        const hint = el('p', 'Starts the preview and its dependencies. Previous writes remain; running this job again may duplicate data.', 'muted'); hint.id = 'rerun-hint';
         const actions = el('div', '', 'actions');
         const cancel = button('Cancel', () => dialog.close()); cancel.autofocus = true;
-        actions.append(cancel, button('Run job and start', () => {
+        actions.append(cancel, button('Run and start preview', () => {
           dialog.close();
           void mutate({ action: 'rerunJob', owner: entry.owner.id, name: p.name, attemptId: attempt.id, job: name }, 'Job rerun and startup requested.');
         }, 'primary'));
         dialog.append(title, hint, actions);
         dialog.addEventListener('close', () => dialog.remove(), { once: true });
         document.body.append(dialog); dialog.showModal();
-      }, 'small'));
-      row.append(controls);
-      if (job.error) row.append(el('p', job.error.message, 'error service-error'));
+      }, 'small', 'rerun-' + name));
+      if (controls.children.length) {
+        controls.firstElementChild!.setAttribute('aria-label', 'Run ' + name + ' again');
+        row.append(controls);
+      }
       list.append(row);
     }
     node.append(list);
-    if (p.active) node.append(el('p', 'Stop this environment before rerunning a job. Other previews keep running.', 'muted'));
+    if (p.active && jobs.some(([, job]) => job.state === 'failed')) node.append(el('p', 'Stop the preview to rerun a job.', 'job-hint'));
   }
   async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary) {
     const current = panel = { tab, attemptId: attempt?.id, loading: tab !== 'activity' };
@@ -513,7 +531,7 @@ function mountDashboard() {
     };
     if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
     else if (pending(entry).length) addNotice('Private setup requested', 'Approve access and enter any missing values in the separate private form. Cancellation stays in that form.', 'warning');
-    else if (!p?.candidate && p?.latest?.state === 'failed') addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
+    else if (!p?.candidate && p?.latest?.state === 'failed' && !Object.values(p.latest.services ?? {}).some(service => service.type === 'job' && service.state === 'failed')) addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
     else if (!p?.candidate && p?.latest?.state === 'canceled') addNotice(p.active ? 'The update was canceled. Your previous version is still running.' : 'Startup was canceled.', 'Nothing was started again automatically. Ask your agent to continue only when you are ready.');
     if (owner.legacy) addNotice('Owner update needed', 'This owner runs an older build. New controls require an explicit owner upgrade; this page will not restart it.');
     const row = el('div', '', 'actions');
@@ -620,8 +638,7 @@ input::placeholder { color:var(--t5); }
 .preview-row>.ready,.preview-row>.muted { color:var(--t5); font-weight:400; }
 .scope { border-top:1px solid var(--border); margin:0; padding:12px 16px; font-size:12px; color:var(--t5); line-height:1.45; }
 #main { min-width:0; min-height:0; overflow-y:auto; }
-#detail { padding:30px 32px 64px; max-width:960px; }
-#detail.overview { max-width:1120px; }
+#detail { padding:30px 32px 64px; max-width:1120px; }
 .overview>h1 { font-size:26px; letter-spacing:-.6px; }
 .breadcrumb { display:flex; align-items:baseline; gap:9px; margin-bottom:10px; font-size:13px; color:var(--t5); }
 .text-button { height:auto; border:0; padding:0; background:none; color:var(--t5); font-weight:400; }
@@ -643,12 +660,11 @@ input::placeholder { color:var(--t5); }
 .attempt-line { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:18px 0; border-bottom:1px solid var(--border); }
 .attempt-line>.section-label { width:110px; }
 .attempt-id { font-size:12px; overflow-wrap:anywhere; }
-.attempt-split { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.attempt-split { margin-top:24px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .attempt-split>div { padding:16px 18px; min-width:0; }
 .attempt-split>div+div { border-left:1px solid var(--border); }
 .attempt-split .attempt-id { display:block; margin:6px 0; }
-.attempt-split p { font-size:12.5px; color:var(--t4); }
-.attempt-split p:last-child { margin-top:10px; margin-bottom:0; }
+.attempt-split p { margin:0; font-size:12.5px; color:var(--t4); }
 .row-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .row-list>div+div { border-top:1px solid var(--divider); }
 dialog { width:min(520px,calc(100% - 32px)); max-height:calc(100dvh - 32px); overflow:auto; padding:26px; border:1px solid var(--border-2); border-radius:9px; background:var(--bg); color:var(--t1); }
@@ -664,12 +680,23 @@ dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .secret-row code { overflow-wrap:anywhere; color:var(--t2); }
 .service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 56px; align-items:center; gap:12px; padding:12px 16px; }
 .service-row>strong { overflow-wrap:anywhere; font-size:13.5px; }
-.service-row .row-actions { grid-column:4/-1; }
 .service-row .status { font-size:12.5px; }
 .service-row .ready { font-weight:400; }
 .service-row.managed { background:var(--subtle); }
 .service-meta { text-align:right; font-size:12px; }
 .service-error { grid-column:1/-1; margin:0; font-size:12.5px; }
+.source-folders { margin-top:12px; }
+.source-folders .path { margin-top:8px; }
+.section-heading { display:flex; align-items:center; gap:16px; margin-bottom:12px; }
+.section-heading h2 { margin:0 auto 0 0; }
+.section-heading>.muted { font-size:12px; }
+.job-row { display:flex; align-items:center; gap:20px; padding:14px 16px; }
+.job-identity { flex:1; min-width:0; }
+.job-identity strong { font-size:13.5px; overflow-wrap:anywhere; }
+.job-note { margin:4px 0 0; font-size:12.5px; color:var(--t4); overflow-wrap:anywhere; }
+.job-hint { margin:10px 0 0; color:var(--t4); }
+.job-row>.status { font-size:12.5px; font-weight:400; }
+
 .overview .section { border-bottom:0; padding:0; margin-bottom:30px; }
 .overview .section-label { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
 .overview .section-label::after { content:''; flex:1; height:1px; background:var(--divider); }
@@ -749,10 +776,12 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   .overview-row { grid-template-columns:minmax(0,1fr) 130px; gap:10px; padding:12px; }
   .overview-state .status { font-size:12px; }
   .overview-state small { font-size:11px; }
+  .job-row { flex-wrap:wrap; gap:10px 16px; }
+  .job-row .row-actions { width:100%; }
+  .section-heading { flex-wrap:wrap; gap:10px; }
   .service-row { grid-template-columns:72px 66px minmax(0,1fr) 48px; }
   .service-meta { grid-column:1/4; grid-row:auto; text-align:left; }
   .service-row>.button,.service-action { grid-column:4; }
-  .service-row .row-actions { grid-column:1/-1; }
   .service-row>.status { text-align:right; }
   .env-row { grid-template-columns:minmax(0,1fr) 90px; }
   .env-row>:last-child { grid-column:1/-1; }
