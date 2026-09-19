@@ -144,7 +144,6 @@ async function databaseFixture(t: test.TestContext, authorize: RuntimeOptions['a
 test('real PostgreSQL jobs: startup, retained seeds, replacement, explicit rerun, owner restart and reset', database, async t => {
   const f = await databaseFixture(t);
   let ready = await outcome(f.runtime, await f.runtime.start(f.spec)); assert.equal(ready.state, 'ready', JSON.stringify(ready));
-  const rows = async (url: string, method = 'GET') => (await (await fetch(url, { method })).json()) as unknown[];
   assert.equal((await rows(ready.url!)).length, 1);
   assert.ok(!(await f.runtime.logs(f.spec.name)).text.includes('fake-job-secret-value'));
   assert.equal((await rows(ready.url!, 'POST')).length, 2);
@@ -276,16 +275,8 @@ test('real process logs preserve redaction, source selection, bounded output and
 });
 
 
-test('dashboard reset uses guarded authorized deletion, retains unrelated data and stops on failure', database, async t => {
-  let allowDelete = true; let lockDeletion = false; let deletionRequests = 0;
-  const f = await databaseFixture(t, async request => {
-    if (request.operation === 'delete-data') {
-      deletionRequests++;
-      if (lockDeletion) { lockDeletion = false; await f.keys.control('lock'); }
-      return allowDelete;
-    }
-    return true;
-  });
+async function dashboardFixture(t: test.TestContext, authorize: RuntimeOptions['authorize']) {
+  const f = await databaseFixture(t, authorize);
   const { startDaemon } = await import('./daemon.js');
   const { startDashboard } = await import('./dashboard.js');
   const tokenFile = join(f.directory, 'owner', 'token');
@@ -300,11 +291,23 @@ test('dashboard reset uses guarded authorized deletion, retains unrelated data a
     const response = await fetch(dashboard.endpoint + '/api', { method: 'POST', headers: { 'content-type': 'application/json', origin: dashboard.endpoint, authorization: 'Bearer ' + new URL(launch).hash.slice(1) }, body: JSON.stringify(body) });
     return await response.json() as { result: PreviewStatus; error?: { code: string; message: string } };
   };
-  const resetRequest = async (name = f.spec.name) => {
-    const p = await f.runtime.get(name);
+  const resetRequest = async () => {
+    const p = await f.runtime.get(f.spec.name);
     return { action: 'resetData', owner: id, name: p.name, resources: p.data!.resources, expected: { active: p.active?.id ?? null, candidate: p.candidate?.id ?? null, latest: p.latest!.id } };
   };
-  const rows = async (url: string, method = 'GET') => (await (await fetch(url, { method })).json()) as unknown[];
+  return { f, id, post, resetRequest };
+}
+
+async function rows(url: string, method = 'GET') {
+  return await (await fetch(url, { method })).json() as unknown[];
+}
+
+test('dashboard reset enforces authorization, stale and concurrent guards, and environment isolation', database, async t => {
+  let allowDelete = true; let deletionRequests = 0;
+  const { f, id, post, resetRequest } = await dashboardFixture(t, request => {
+    if (request.operation === 'delete-data') { deletionRequests++; return allowDelete; }
+    return true;
+  });
   try {
     let ready = await outcome(f.runtime, await f.runtime.start(f.spec)); assert.equal(ready.state, 'ready', JSON.stringify(ready));
     assert.equal((await rows(ready.url!, 'POST')).length, 2);
@@ -322,7 +325,7 @@ test('dashboard reset uses guarded authorized deletion, retains unrelated data a
     assert.ok((await f.runtime.get(f.spec.name)).data);
     allowDelete = false;
     const denied = await post(await resetRequest()); assert.equal(denied.error?.code, 'EXECUTION_DENIED');
-    let stopped = await f.runtime.get(f.spec.name);
+    const stopped = await f.runtime.get(f.spec.name);
     assert.ok(!stopped.active && !stopped.candidate); assert.ok(stopped.data);
     allowDelete = true;
     ready = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, stopped.latest!.id));
@@ -340,40 +343,57 @@ test('dashboard reset uses guarded authorized deletion, retains unrelated data a
     assert.equal(ready.services?.seed.state, 'succeeded'); assert.equal((await rows(ready.url!)).length, 1);
     assert.equal((await rows(other.url!)).length, 2, 'other environment is untouched');
     assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
-    // A migration failure after deletion is a normal failed attempt, never a reset loop.
+  } finally { allowDelete = true; }
+});
+
+
+test('dashboard reset requires explicit recovery after deletion, startup and cancellation failures', database, async t => {
+  let lockDeletion = true; let deletionRequests = 0;
+  const { f, id, post, resetRequest } = await dashboardFixture(t, async request => {
+    if (request.operation === 'delete-data') {
+      deletionRequests++;
+      if (lockDeletion) { lockDeletion = false; await f.keys.control('lock'); }
+    }
+    return true;
+  });
+  try {
+    const ready = await outcome(f.runtime, await f.runtime.start(f.spec));
+    assert.equal(ready.state, 'ready', JSON.stringify(ready));
+    assert.equal((await rows(ready.url!, 'POST')).length, 2);
     const migration = await readFile(join(f.directory, 'migrate.mjs'), 'utf8');
     await writeFile(join(f.directory, 'migrate.mjs'), "console.error('deliberate migration failure');process.exit(6);");
-    const before = deletionRequests;
-    const started = await post(await resetRequest()); assert.equal(started.error, undefined);
-    const failed = await outcome(f.runtime, started.result); assert.equal(failed.state, 'failed');
-    assert.equal(failed.services?.migrate.state, 'failed');
-    const selected = await post({ action: 'logs', owner: id, name: f.spec.name, attemptId: failed.id, source: 'migrate' }) as unknown as { result: { text: string } };
-    assert.match(selected.result.text, /deliberate migration failure/);
-    assert.equal(deletionRequests, before + 1);
-    await writeFile(join(f.directory, 'migrate.mjs'), migration);
-    const retry = await post({ action: 'startAgain', owner: id, name: f.spec.name, attemptId: failed.id });
-    ready = await outcome(f.runtime, retry.result); assert.equal(ready.state, 'ready');
-    assert.equal((await rows(ready.url!)).length, 1); assert.equal(deletionRequests, before + 1);
-    // A real Keychain failure can follow volume deletion. Do not start until explicit recovery succeeds.
-    lockDeletion = true;
-    const interrupted = await post(await resetRequest()); assert.equal(interrupted.error?.code, 'SECRET_STORE_UNAVAILABLE');
-    stopped = await f.runtime.get(f.spec.name);
+    // Volume deletion can succeed before Keychain cleanup fails. Startup must not begin.
+    const interrupted = await post(await resetRequest());
+    assert.equal(interrupted.error?.code, 'SECRET_STORE_UNAVAILABLE');
+    const stopped = await f.runtime.get(f.spec.name);
     assert.equal(stopped.data?.cleanup?.operation, 'remove-credential');
     assert.ok(!stopped.active && !stopped.candidate);
+    assert.equal(deletionRequests, 1);
     await f.keys.control('unlock');
     const recovered = await post(await resetRequest()); assert.equal(recovered.error, undefined);
-    ready = await outcome(f.runtime, recovered.result); assert.equal(ready.state, 'ready');
-    assert.equal((await rows(ready.url!)).length, 1);
+    // After explicit deletion recovery, a migration failure must not trigger another reset.
+    const failed = await outcome(f.runtime, recovered.result);
+    assert.equal(failed.state, 'failed', JSON.stringify(failed));
+    assert.equal(failed.services?.migrate.state, 'failed');
+    assert.equal(deletionRequests, 2);
+    const selected = await post({ action: 'logs', owner: id, name: f.spec.name, attemptId: failed.id, source: 'migrate' }) as unknown as { result: { text: string } };
+    assert.match(selected.result.text, /deliberate migration failure/);
+    await writeFile(join(f.directory, 'migrate.mjs'), migration);
+    const retry = await post({ action: 'startAgain', owner: id, name: f.spec.name, attemptId: failed.id });
+    const restarted = await outcome(f.runtime, retry.result);
+    assert.equal(restarted.state, 'ready', JSON.stringify(restarted));
+    assert.equal((await rows(restarted.url!)).length, 1);
+    assert.equal(deletionRequests, 2, 'startup recovery does not delete again');
     assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
-    // Cancellation needs no third database: interrupt a rerun against the same retained data.
-    stopped = await f.runtime.stop(f.spec.name);
+    // Reuse retained data to verify that cancellation blocks reset.
+    const canceledBase = await f.runtime.stop(f.spec.name);
     await writeFile(join(f.directory, 'mode'), 'wait');
-    const pending = await f.runtime.rerunJob(f.spec.name, stopped.latest!.id, 'seed');
+    const pending = await f.runtime.rerunJob(f.spec.name, canceledBase.latest!.id, 'seed');
     await seedWaiting(f, pending, t.signal);
     await f.runtime.cancel(f.spec.name, pending.candidate!.id);
     const previousDeletes = deletionRequests;
     assert.equal((await post(await resetRequest())).error?.code, 'STALE_ATTEMPT');
     assert.equal(deletionRequests, previousDeletes, 'cannot erase data without a restartable configuration');
     assert.ok((await f.runtime.get(f.spec.name)).data);
-  } finally { allowDelete = true; await f.keys.control('unlock'); }
+  } finally { await f.keys.control('unlock'); }
 });
