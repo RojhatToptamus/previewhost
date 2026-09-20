@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { AttemptLog } from './logs.js';
 import {
   limits, nameSchema, requestSchemas, type AttemptResult, type AttemptSummary, type EffectiveSpec, type Failure,
-  type LogResult, type PreviewDescription, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
+  type LogResult, type LogOptions, type DeleteDataOptions, type PreviewDescription, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
 } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
 import { attachmentTarget, canonicalDirectory, describeSpec, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
@@ -22,8 +23,7 @@ interface Attempt {
   completed: boolean;
   waiters: Set<() => void>;
   resource?: Resource;
-  log: Buffer;
-  truncated: boolean;
+  log: AttemptLog;
   cleanupTask?: Promise<void>;
   nodes: number;
   failure?: Failure;
@@ -219,6 +219,22 @@ class Runtime implements PreviewRuntime {
     return this.start(attempt.declaration);
   }
 
+  async rerunJob(name: string, attemptId: string, job: string): Promise<PreviewStatus> {
+    this.assertOpen();
+    const slot = this.slot(name);
+    const attempt = this.attempt(slot, attemptId);
+    if (slot.latest !== attempt) throw new PreviewError('STALE_ATTEMPT', 'Select the latest attempt before rerunning a job.');
+    if (slot.active || slot.gateway || slot.operation || slot.stopping || slot.cleanup.size || this.data?.status(name)?.cleanup) {
+      throw new PreviewError('BUSY', 'Stop this preview and complete cleanup before rerunning a job. Database writes are not rolled back.');
+    }
+    const spec = attempt.declaration;
+    if (spec.type !== 'environment' || spec.services[job]?.type !== 'job') throw new PreviewError('INVALID_INPUT', 'Select a job in this configuration.');
+    if ([...this.slots.values()].filter(isLive).length >= limits.livePreviews) throw new PreviewError('BUSY', 'The live preview limit was reached.');
+    this.checkNodeCapacity(spec);
+    // Normal start authorization, source checks and secret approvals apply again.
+    return this.begin(slot, spec, 'start', job);
+  }
+
   async saveConfiguration(name: string, attemptId: string, projectDirectory: string, signal?: AbortSignal) {
     this.assertOpen();
     const spec = this.attempt(this.slot(name), attemptId).declaration;
@@ -236,16 +252,15 @@ class Runtime implements PreviewRuntime {
     return { ...copySummary(attempt.summary), name, ...(slot.active === attempt && slot.gateway ? { url: slot.gateway.url } : {}) };
   }
 
-  async logs(name: string, attemptId?: string, maxBytes = limits.logBytes): Promise<LogResult> {
+  async logs(name: string, attemptId?: string, options: LogOptions = {}): Promise<LogResult> {
     const slot = this.slot(name, 'ATTEMPT_EXPIRED');
-    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > limits.logBytes) throw new PreviewError('INVALID_INPUT', 'Log size is outside the supported range.');
+    if (options.after !== undefined && !attemptId) throw new PreviewError('INVALID_INPUT', 'Incremental logs require an attemptId.');
     const attempt = attemptId ? this.attempt(slot, attemptId) : slot.candidate ?? slot.active ?? slot.latest;
     if (!attempt) throw new PreviewError('ATTEMPT_EXPIRED', 'The attempt logs are no longer available.');
-    return {
-      name, attemptId: attempt.summary.id,
-      text: attempt.log.subarray(Math.max(0, attempt.log.length - maxBytes)).toString('utf8'),
-      truncated: attempt.truncated || attempt.log.length > maxBytes,
-    };
+    if (options.source !== undefined && !(attempt.declaration.type === 'environment' ? Object.hasOwn(attempt.declaration.services, options.source) : options.source === name)) {
+      throw new PreviewError('INVALID_INPUT', 'Select a service or job in this attempt.');
+    }
+    return { name, attemptId: attempt.summary.id, ...attempt.log.read(options) };
   }
 
   async cancel(name: string, attemptId: string): Promise<PreviewStatus> {
@@ -286,12 +301,22 @@ class Runtime implements PreviewRuntime {
     return this.status(slot);
   }
 
-  async deleteData(name: string): Promise<PreviewStatus> {
+  async deleteData(name: string, options: DeleteDataOptions = {}): Promise<PreviewStatus> {
+    if (!requestSchemas.deleteData.safeParse({ ...options, name }).success) throw new PreviewError('INVALID_INPUT', 'Invalid data deletion options.');
     this.assertOpen();
     const slot = this.slot(name);
     if (isLive(slot)) throw new PreviewError('BUSY', 'Stop the environment and resolve application cleanup before deleting data.');
-    if (!this.data?.status(name)) throw new PreviewError('NOT_FOUND', 'This name has no retained database data.');
-    const cleanup = this.data.status(name)?.cleanup;
+    const data = this.data?.status(name);
+    if (!data) throw new PreviewError('NOT_FOUND', 'This name has no retained database data.');
+    if (options.expected) {
+      const expected = options.expected;
+      const resources = data.resources;
+      if (slot.latest?.summary.id !== expected.attemptId || resources.length !== expected.resources.length ||
+          resources.some(resource => !expected.resources.some(item => item.name === resource.name && item.type === resource.type))) {
+        throw new PreviewError('STALE_ATTEMPT', 'The preview or managed databases changed. Review them before deleting data.');
+      }
+    }
+    const cleanup = data.cleanup;
     if (cleanup && cleanup.operation !== 'remove-credential') throw new PreviewError('CLEANUP_INCOMPLETE', 'Resolve retained cleanup with stop before deleting data.');
     const controller = new AbortController();
     slot.control = controller;
@@ -321,14 +346,14 @@ class Runtime implements PreviewRuntime {
     catch (error) { this.closing = undefined; throw error; }
   }
 
-  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace'): PreviewStatus {
+  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace', rerunJob?: string): PreviewStatus {
     const attempt: Attempt = {
       summary: { id: randomUUID(), type: spec.type, state: 'starting', startedAt: new Date().toISOString(), sources: sourceDirectories(spec) },
       declaration: structuredClone(spec), controller: new AbortController(), completed: false, waiters: new Set(),
-      log: Buffer.alloc(0), truncated: false, nodes: nodeCost(spec),
+      log: new AttemptLog(), nodes: nodeCost(spec),
     };
     slot.candidate = attempt;
-    slot.operation = this.runCandidate(slot, attempt, spec, operation).finally(() => {
+    slot.operation = this.runCandidate(slot, attempt, spec, operation, rerunJob).finally(() => {
       slot.operation = undefined;
       attempt.completed = true;
       for (const waiter of attempt.waiters) waiter();
@@ -338,7 +363,7 @@ class Runtime implements PreviewRuntime {
     return this.status(slot);
   }
 
-  private async runCandidate(slot: Slot, attempt: Attempt, input: EffectiveSpec, operation: 'start' | 'replace'): Promise<void> {
+  private async runCandidate(slot: Slot, attempt: Attempt, input: EffectiveSpec, operation: 'start' | 'replace', rerunJob?: string): Promise<void> {
     const signal = attempt.controller.signal;
     let committed = false;
     let timedOut = false;
@@ -352,7 +377,7 @@ class Runtime implements PreviewRuntime {
       attempt.summary.sources = sourceDirectories(spec);
       this.admitted(slot, attempt);
       if (this.authorize) {
-        const approved = await abortable(Promise.resolve(this.authorize({ operation, spec: structuredClone(spec), signal })), signal);
+        const approved = await abortable(Promise.resolve(this.authorize({ operation, spec: structuredClone(spec), ...(rerunJob ? { rerunJob } : {}), signal })), signal);
         if (!approved) throw new PreviewError('EXECUTION_DENIED', 'The host denied this preview operation.');
       } else if (needsExecution(spec)) {
         throw new PreviewError('EXECUTION_DENIED', 'Commands and managed databases require host authorization. Start the daemon with --allow-exec only for trusted code.');
@@ -382,7 +407,7 @@ class Runtime implements PreviewRuntime {
         const resource = await startNative({
           spec: { ...spec, env: Object.fromEntries(Object.entries(spec.env).map(([key, value]) => [key, resolveInput(value, this.inputs, secrets)])) },
           url: slot.gateway.url, signal,
-          appendLog: (text) => appendLog(attempt, text),
+          appendLog: (text) => attempt.log.append(text, spec.name),
           onResource: (resource) => { attempt.resource = resource; },
         });
         attempt.resource = resource;
@@ -396,8 +421,8 @@ class Runtime implements PreviewRuntime {
         this.admitted(slot, attempt);
         attempt.summary.services = {};
         attempt.resource = await startEnvironment({
-          spec, url: slot.gateway.url, inputs: this.inputs, secrets, databases: bindings, signal, privateDirectories: this.privateDirectories,
-          appendLog: (text) => appendLog(attempt, text),
+          spec, url: slot.gateway.url, inputs: this.inputs, secrets, databases: bindings, signal, privateDirectories: this.privateDirectories, data: this.data, rerunJob,
+          appendLog: (text, source) => attempt.log.append(text, source),
           serviceStatus: (id, status) => { attempt.summary.services![id] = status; },
           onResource: (resource) => { attempt.resource = resource; },
         });
@@ -621,18 +646,12 @@ function copySummary(summary: AttemptSummary): AttemptSummary { return structure
 function nodeCost(spec: EffectiveSpec): number { return spec.type === 'environment' ? Object.keys(spec.services).length : 1; }
 export function needsExecution(spec: EffectiveSpec): boolean {
   return spec.type === 'command' || spec.type === 'environment' && Object.values(spec.services).some((service) =>
-    service.type === 'command' || service.type === 'postgres' || service.type === 'redis');
-}
-function appendLog(attempt: Attempt, text: string): void {
-  const bytes = Buffer.from(text);
-  const combined = Buffer.concat([attempt.log, bytes]);
-  attempt.truncated ||= combined.length > limits.logBytes;
-  attempt.log = combined.subarray(Math.max(0, combined.length - limits.logBytes));
+    (service.type === 'command' || service.type === 'job') || service.type === 'postgres' || service.type === 'redis');
 }
 function redactedFailure(error: unknown, spec: EffectiveSpec, inputs: Readonly<Record<string, string>> = {}, secrets: Readonly<Record<string, string>> = {}) {
   const result = failure(error);
   const values = spec.type === 'command' ? Object.values(spec.env).filter((value): value is string => typeof value === 'string') : spec.type === 'environment'
-    ? Object.values(spec.services).flatMap((service) => service.type === 'command' ? Object.values(service.env).filter((value): value is string => typeof value === 'string') :
+    ? Object.values(spec.services).flatMap((service) => (service.type === 'command' || service.type === 'job') ? Object.values(service.env).filter((value): value is string => typeof value === 'string') :
       (service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'string' ? [service.url] : []) : [];
     for (const value of [...values, ...Object.values(inputs), ...Object.values(secrets)].filter(Boolean).sort((a, b) => b.length - a.length)) {
       const utf8 = Buffer.from(value).toString('utf8');

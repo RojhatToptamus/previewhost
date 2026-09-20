@@ -7,7 +7,14 @@ services:
     type: postgres
   cache:
     type: redis
+  migrate:
+    type: job
+    cwd: ./api
+    command: [node, migrate.mjs]
+    env:
+      DATABASE_URL: { service: database }
   api:
+    dependsOn: [migrate]
     type: command
     cwd: ./api
     command: [node, server.mjs]

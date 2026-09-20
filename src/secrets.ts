@@ -32,7 +32,7 @@ export function secretRequirements(spec: EffectiveSpec, selected: ReadonlySet<st
   }
   if (spec.type === 'command') for (const [key, value] of Object.entries(spec.env)) add(value, key);
   if (spec.type === 'environment') for (const [id, service] of Object.entries(spec.services)) {
-    if (service.type === 'command') for (const [key, value] of Object.entries(service.env)) add(value, key, id);
+    if (service.type === 'command' || service.type === 'job') for (const [key, value] of Object.entries(service.env)) add(value, key, id);
     else if (service.type === 'external-postgres' || service.type === 'external-redis') add(service.url, 'url', id);
   }
   if (required.size > limits.secrets) throw new PreviewError('INVALID_INPUT', `An attempt can use at most ${limits.secrets} distinct secrets.`);

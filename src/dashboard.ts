@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { connectPreviewDaemon } from './client.js';
 import { limits, requestSchemas, secretIdSchema } from './contracts.js';
 import { readBody } from './daemon.js';
-import { failure, PreviewError } from './errors.js';
+import { failure, PreviewError, throwIfAborted } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
 import { discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
 import { listSecrets } from './secrets.js';
@@ -21,7 +21,9 @@ const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('listSecrets') }),
   z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
+  requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('resetData'), owner: ownerId, resources: requestSchemas.deleteData.shape.expected.unwrap().shape.resources }).required({ expected: true }),
   requestSchemas.cancel.extend({ action: z.literal('cancel'), owner: ownerId }),
+  requestSchemas.rerunJob.extend({ action: z.literal('rerunJob'), owner: ownerId }),
   requestSchemas.startAgain.extend({ action: z.literal('startAgain'), owner: ownerId }),
   requestSchemas.saveConfiguration.extend({ action: z.literal('saveConfiguration'), owner: ownerId }),
   requestSchemas.describe.extend({ action: z.literal('describe'), owner: ownerId }),
@@ -115,11 +117,31 @@ export async function startDashboard(options: {
     return withOwner<unknown>(owner, async client => {
       switch (p.action) {
         case 'stop': return client.stop(p.name, { expected: p.expected });
+        case 'resetData': {
+          const attemptId = p.expected.active ?? p.expected.latest;
+          if (!attemptId) throw new PreviewError('INVALID_INPUT', 'Reset needs a retained configuration. Start through your agent first.');
+          if (p.expected.candidate) throw new PreviewError('BUSY', 'Finish or cancel startup before resetting data.');
+          // Stop and delete keep their own authorization and concurrency guards.
+          throwIfAborted(signal);
+          const stopped = await client.stop(p.name, { expected: p.expected });
+          if (stopped.latest?.id !== attemptId || !['stopped', 'failed'].includes(stopped.latest.state)) {
+            throw new PreviewError('STALE_ATTEMPT', 'No restartable configuration remains. Data was not deleted; ask your agent to start the preview.');
+          }
+          throwIfAborted(signal);
+          await client.deleteData(p.name, { expected: { attemptId, resources: p.resources } });
+          try {
+            throwIfAborted(signal);
+            return await client.startAgain(p.name, attemptId);
+          } catch (error) {
+            throw new PreviewError('START_FAILED', 'Data was deleted, but startup could not begin. Review the preview and use Start preview to retry without deleting again. ' + failure(error).message);
+          }
+        }
         case 'cancel': return client.cancel(p.name, p.attemptId);
+        case 'rerunJob': return client.rerunJob(p.name, p.attemptId, p.job);
         case 'startAgain': return client.startAgain(p.name, p.attemptId);
         case 'saveConfiguration': return client.saveConfiguration(p.name, p.attemptId);
         case 'describe': return client.describe(p.name, p.attemptId);
-        case 'logs': return client.logs(p.name, p.attemptId, p.maxBytes);
+        case 'logs': return client.logs(p.name, p.attemptId, p);
         case 'secretsOpen': return client.secretsOpen(p.id);
       }
     });

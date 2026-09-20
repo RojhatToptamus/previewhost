@@ -24,11 +24,12 @@ Owner:
 Preview operations:
   previewhost inspect [--file spec.yaml]
   previewhost start [--file spec.yaml] [--allow-exec] [--no-wait] [--timeout-ms 30000]
+  previewhost rerun-job NAME ATTEMPT_ID JOB  (stop first; writes are not rolled back)
   previewhost replace [--file spec.yaml] [--no-wait] [--timeout-ms 30000]
   previewhost list
   previewhost get NAME
   previewhost wait NAME ATTEMPT_ID [--timeout-ms 30000]
-  previewhost logs NAME [ATTEMPT_ID] [--max-bytes 65536]
+  previewhost logs NAME [ATTEMPT_ID] [--source SERVICE_OR_JOB] [--after CURSOR] [--max-bytes 65536]
   previewhost cancel NAME ATTEMPT_ID
   previewhost stop NAME [--after-engine-restart]
   previewhost delete-data NAME
@@ -131,20 +132,21 @@ async function main(): Promise<void> {
     start: ['file', 'no-wait', 'timeout-ms', 'endpoint', 'token-file'],
     replace: ['file', 'no-wait', 'timeout-ms', 'endpoint', 'token-file'],
     list: ['endpoint', 'token-file'], get: ['endpoint', 'token-file'],
-    wait: ['timeout-ms', 'endpoint', 'token-file'], logs: ['max-bytes', 'endpoint', 'token-file'],
+    wait: ['timeout-ms', 'endpoint', 'token-file'], logs: ['max-bytes', 'source', 'after', 'endpoint', 'token-file'],
     cancel: ['endpoint', 'token-file'], stop: ['after-engine-restart', 'endpoint', 'token-file'],
+    'rerun-job': ['endpoint', 'token-file'],
     'delete-data': ['endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
   };
   if (!Object.hasOwn(accepted, command)) throw new PreviewError('INVALID_INPUT', 'Unknown command. Run previewhost --help.');
   if (!['serve', 'dashboard'].includes(command)) accepted[command].push('project');
   if (['mcp', 'inspect', 'start', 'replace'].includes(command)) accepted[command].push(...launchFlags);
   for (const key of Object.keys(values)) if (!accepted[command].includes(key)) throw new PreviewError('INVALID_INPUT', `--${key} is not supported for ${command}.`);
-  const counts: Record<string, [number, number]> = { get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
+  const counts: Record<string, [number, number]> = { 'rerun-job': [4, 4], get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
   const [minimum, maximum] = counts[command] ?? [1, 1];
   if (positionals.length < minimum || positionals.length > maximum) throw new PreviewError('INVALID_INPUT', `Invalid arguments for ${command}. Run previewhost --help.`);
   const tokenFile = values['token-file'] ? resolve(values['token-file']) : defaultTokenFile();
   const timeoutMs = integer(values['timeout-ms'], '--timeout-ms', limits.waitMs);
-  const maxBytes = integer(values['max-bytes'], '--max-bytes', limits.logBytes);
+  const maxBytes = integer(values['max-bytes'], '--max-bytes', limits.logBytes, 4);
 
   if (command === 'dashboard') {
     const { startDashboard } = await import('./dashboard.js');
@@ -230,9 +232,10 @@ async function main(): Promise<void> {
       case 'list': result = await client.list(); break;
       case 'get': result = await client.get(positionals[1]); break;
       case 'wait': attempt = { name: positionals[1], attemptId: positionals[2] }; result = await client.wait(attempt.name, attempt.attemptId, { timeoutMs }); break;
-      case 'logs': result = await client.logs(positionals[1], positionals[2], maxBytes); break;
+      case 'logs': result = await client.logs(positionals[1], positionals[2], { maxBytes, source: values.source, after: integer(values.after, '--after', Number.MAX_SAFE_INTEGER, 0) }); break;
       case 'cancel': result = await client.cancel(positionals[1], positionals[2]); break;
       case 'stop': result = await client.stop(positionals[1], { afterEngineRestart: values['after-engine-restart'] }); break;
+      case 'rerun-job': result = await client.rerunJob(positionals[1], positionals[2], positionals[3]); break;
       case 'delete-data': result = await client.deleteData(positionals[1]); break;
       case 'shutdown': await client.shutdown(); result = { stopped: true }; break;
     }
@@ -297,7 +300,7 @@ function parseCliArgs() {
     'after-engine-restart': { type: 'boolean' },
     endpoint: { type: 'string' }, 'token-file': { type: 'string' },
     file: { type: 'string', short: 'f' }, 'no-wait': { type: 'boolean' },
-    'timeout-ms': { type: 'string' }, 'max-bytes': { type: 'string' },
+    'timeout-ms': { type: 'string' }, 'max-bytes': { type: 'string' }, source: { type: 'string' }, after: { type: 'string' },
   } });
 }
 

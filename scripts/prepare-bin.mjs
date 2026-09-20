@@ -13,7 +13,7 @@ await rm(skill, { recursive: true, force: true });
 await mkdir(new URL('references/docs/', skill), { recursive: true });
 await cp(new URL('../skills/previewhost/SKILL.md', import.meta.url), new URL('SKILL.md', skill));
 for (const file of ['README.md', 'LICENSE', 'NOTICE', 'CONTRIBUTING.md',
-  ...['api', 'integrations', 'recipes', 'worktrees', 'security', 'troubleshooting', 'releasing'].map(name => `docs/${name}.md`)]) {
+  ...['api', 'jobs', 'integrations', 'recipes', 'worktrees', 'security', 'troubleshooting', 'releasing'].map(name => `docs/${name}.md`)]) {
   const destination = new URL(`references/${file}`, skill);
   await mkdir(new URL('.', destination), { recursive: true });
   await cp(new URL(`../${file}`, import.meta.url), destination);

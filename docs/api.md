@@ -139,9 +139,12 @@ startup. Attachment status is not a continuous health check.
 ## Environment specs
 
 An environment uses the same preview methods and attempt IDs. Its `services`
-map contains 1–16 services and at most four owned databases.
+map contains 1–16 nodes (services and finite jobs) and at most four owned databases.
 `primary` must name an HTTP service. Environment `timeoutMs` defaults to 60,000
-and accepts 100–120,000. Each service deadline also remains in effect.
+and accepts 100–600,000. Each node deadline also remains in effect.
+
+Use `type: job` for finite commands and `dependsOn` to wait for successful jobs or ready services.
+See [setup jobs](jobs.md) for fields, examples, retained seed results, and recovery.
 
 The example below assumes prepared `backend` and `frontend` directories beside
 the spec directory. Each must contain an HTTP `server.mjs` with installed dependencies.
@@ -232,10 +235,29 @@ External services remain outside owned stop and deletion operations.
 | `get(name)` | Current `PreviewStatus`. |
 | `list()` | Current and retained terminal status records. |
 | `wait(name, attemptId, { timeoutMs?, signal? })` | Exact `AttemptResult`. Default and maximum wait: 30 seconds. |
-| `logs(name, attemptId?, maxBytes?)` | `{ name, attemptId, text, truncated }`. Default and maximum: 65,536 bytes. |
+| `logs(name, attemptId?, { source?, after?, maxBytes? })` | `{ name, attemptId, text, cursor, truncated }`. Select a service/job or omit `source` for all output. |
 | `cancel(name, attemptId)` | Cancels the pending candidate and waits for cleanup. A stale ID fails. |
 | `stop(name, { afterEngineRestart? })` | Stops all applications and owned containers. Preserves data. Repeated stop retries incomplete cleanup. |
-| `deleteData(name)` | Permanently removes a stopped environment's verified owned database data after host authorization. |
+| `rerunJob(name, attemptId, job)` | Reruns the named job and starts the stopped environment from its latest configuration. Normal authorization applies; partial writes remain. |
+| `deleteData(name, { expected? })` | Permanently removes a stopped environment's verified owned database data after host authorization. |
+
+Logs use one bounded store per attempt: 65,536 captured UTF-8 bytes and at most 1,024
+output chunks. Filtering does not create another buffer. Source labels in **All output**
+are added when reading, not parsed from application text. Known supplied values are
+redacted before storage; applications must still avoid logging other sensitive data.
+
+Without `after`, reads return a tail. For incremental reads, keep the same `attemptId`
+and `source`, then pass the returned `cursor` as `after`. A cursor is a byte offset in
+that attempt's captured output, before display labels. It advances past other sources
+as well. `maxBytes` limits captured bytes per read (4–65,536); display labels add bytes.
+`truncated` means earlier output was omitted by retention or the initial tail limit.
+Incremental pages do not skip output still retained. An expired attempt is an error;
+logs are not persisted after owner shutdown. No streaming endpoint is provided.
+Output comes from command services and jobs; database container logs are not collected.
+
+For a confirmed deletion, `expected` accepts `{ attemptId, resources: [{ name, type }] }`.
+The latest attempt and exact managed resource list must still match before deletion.
+Normal stopped-state, ownership and authorization checks still apply.
 
 `PreviewStatus` contains `name`, `busy`, and optional `url`, `active`, `candidate`,
 `latest`, `cleanup`, and `data`. `cleanup` lists attempt IDs and errors that require repair.
@@ -244,7 +266,8 @@ and optional `{ code, message }` error.
 
 Environment attempts also contain a `services` map. Each entry reports `type`,
 `state`, optional public `url`/`browserUrl`, and an optional error. Service states
-are `waiting`, `starting`, `ready`, `failed`, and `stopped`.
+are `waiting`, `starting`, `ready`, `failed`, and `stopped`. Jobs also report
+`succeeded`, `skipped` (retained success), or `canceled`, and never have public URLs.
 
 `data` reports retained resource names/types, `running`, and an optional cleanup
 error. It never contains passwords or database connection URLs.
@@ -314,7 +337,8 @@ previewhost start --file preview.json --allow-exec --no-wait
 previewhost wait app ATTEMPT_ID --timeout-ms 30000
 previewhost replace --file preview.json
 previewhost get app
-previewhost logs app ATTEMPT_ID --max-bytes 8192
+previewhost logs app ATTEMPT_ID --source migrate --max-bytes 8192
+previewhost logs app ATTEMPT_ID --source migrate --after RETURNED_CURSOR
 previewhost cancel app ATTEMPT_ID
 previewhost stop app
 previewhost delete-data shop
@@ -485,8 +509,8 @@ client, the library client, or the CLI. This is not a browser control API.
 MCP tools use the names `preview_inspect`, `preview_start`, `preview_replace`,
 `preview_list`, `preview_get`, `preview_wait`, `preview_logs`, `preview_cancel`,
 `preview_stop`, `preview_delete_data`, `preview_secrets_setup`, `preview_secrets_status`,
-`preview_save_config`, and `preview_shutdown` (14 tools).
-Global registration without fixed project/root options adds `preview_access({project, sources?})` (15 tools).
+`preview_save_config`, `preview_rerun_job`, and `preview_shutdown` (15 tools; global mode also includes `preview_access`).
+Global registration without fixed project/root options adds `preview_access({project, sources?})` (16 tools total).
 It requests native client confirmation of exact directories before connecting to that project.
 Approval may start the owner but never an application. Denial/cancellation stops the flow; reconnecting requires approval again.
 Automatic MCP tools require an absolute `project` on every call unless the registration supplies `--project` as a default.
@@ -517,6 +541,7 @@ The runtime requires `authorize` to accept `operation: "allow-sources"`, recheck
 This is an owner operation, not an agent-controlled approval argument. Fixed daemons reject it.
 Attempt summaries and incomplete cleanup records include `sources` so callers can identify directories still in use.
 
+Job rerun uses `POST /rerunJob` with `{ "name": "shop", "attemptId": "...", "job": "seed" }`.
 Data deletion uses `POST /deleteData` with `{ "name": "shop" }`.
 Stop accepts `{ "name": "shop", "afterEngineRestart": true }` for explicit recovery.
 The deletion tool has a destructive annotation and requires owner authorization.
@@ -543,7 +568,7 @@ the same redacted `requirements` metadata used by inspect.
 
 There are at most 32 live names, 128 inactive names, and 64 KiB of logs per attempt.
 The total live-node limit is 128, including candidates and retained cleanup.
-At most four environment services start concurrently.
+At most four environment nodes start concurrently. Jobs count toward this limit.
 
 Each gateway permits 256 connections and in-flight requests. Upstream response
 headers and WebSocket handshakes have a 10-second deadline. Active streams do not.
@@ -602,6 +627,13 @@ The authenticated owner client also supports:
 observed attempt IDs (or `null`) before changing state. A mismatch returns
 `STALE_ATTEMPT`. The dashboard always supplies this guard. CLI/MCP behavior without
 it is unchanged; MCP also forwards an explicitly supplied guard.
+
+Dashboard **Reset data** confirms the managed resource list, then calls guarded Stop,
+guarded `deleteData`, and `startAgain` in order. It restarts the serving configuration
+when available; otherwise it uses the latest stopped or failed attempt. It starts only
+after deletion succeeds. A canceled attempt without a serving app is not resettable.
+A startup failure uses ordinary error reporting and Retry start; it does not repeat
+deletion. After a lost response, inspect the current state before resetting again.
 
 Declarations and logs remain bounded owner memory. They are unavailable after owner
 shutdown or history eviction. Start again may allocate a different URL and keeps

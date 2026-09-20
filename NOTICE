@@ -1,4 +1,4 @@
-previewd includes HTTP forwarding and process-lifecycle behavior adapted from Task Monki.
+previewhost includes HTTP forwarding, dependency scheduling, and process-lifecycle behavior adapted from Task Monki.
 Task Monki: https://github.com/RojhatToptamus/task-monki
 Copyright (c) 2026 Rojhat Toptamus, licensed under the MIT License in LICENSE.
 

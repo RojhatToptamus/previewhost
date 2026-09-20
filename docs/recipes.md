@@ -18,7 +18,9 @@ Read configuration variable names without displaying secret values.
 Determine which commands load existing environment files and which values require explicit bindings.
 
 Use current task directories and worktrees supplied by the coding host.
-The coding host owns dependency installation, generation, builds, migrations, and source removal.
+The coding host chooses installation, build, migration, and seed commands.
+Declare finite preparation as [setup jobs](jobs.md) when it belongs in preview startup.
+The coding host still owns source removal.
 Do not clone or reset source merely to create a preview.
 For shared output or overlapping processes, read the [worktree guide](worktrees.md#prepare-and-start).
 

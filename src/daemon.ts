@@ -152,6 +152,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         return null;
       }
       case 'describe': { const p = parse(requestSchemas.describe, value); return runtime.describe(p.name, p.attemptId); }
+      case 'rerunJob': { const p = parse(requestSchemas.rerunJob, value); return runtime.rerunJob(p.name, p.attemptId, p.job); }
       case 'startAgain': { const p = parse(requestSchemas.startAgain, value); return runtime.startAgain(p.name, p.attemptId); }
       case 'saveConfiguration': {
         const p = parse(requestSchemas.saveConfiguration, value);
@@ -166,10 +167,10 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       case 'list': parse(requestSchemas.list, value); return runtime.list();
       case 'get': return runtime.get(parse(requestSchemas.get, value).name);
       case 'wait': { const p = parse(requestSchemas.wait, value); return runtime.wait(p.name, p.attemptId, { timeoutMs: p.timeoutMs, signal }); }
-      case 'logs': { const p = parse(requestSchemas.logs, value); return runtime.logs(p.name, p.attemptId, p.maxBytes); }
+      case 'logs': { const p = parse(requestSchemas.logs, value); return runtime.logs(p.name, p.attemptId, p); }
       case 'cancel': { const p = parse(requestSchemas.cancel, value); return runtime.cancel(p.name, p.attemptId); }
       case 'stop': { const p = parse(requestSchemas.stop, value); return runtime.stop(p.name, { afterEngineRestart: p.afterEngineRestart, expected: p.expected }); }
-      case 'deleteData': return runtime.deleteData(parse(requestSchemas.deleteData, value).name);
+      case 'deleteData': { const p = parse(requestSchemas.deleteData, value); return runtime.deleteData(p.name, p); }
       case 'secrets/setup': { const p = parse(secretRequestSchemas.setup, value); return secrets.setup(p.spec, signal, p.reopen); }
       case 'secrets/status': { const p = parse(secretRequestSchemas.status, value); return secrets.wait(p.id, { timeoutMs: p.timeoutMs, signal }); }
       case 'secrets/edit': return secrets.setup(parse(secretRequestSchemas.edit, value).id, signal);

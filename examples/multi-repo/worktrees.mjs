@@ -32,6 +32,7 @@ try {
     spec.name = values.name;
     spec.services.frontend.cwd = resolve(values.frontend);
     spec.services.api.cwd = resolve(values.backend, 'api');
+    if (spec.services.migrate?.type === 'job') spec.services.migrate.cwd = resolve(values.backend, 'api');
     spec.services.reporting.cwd = resolve(values.backend, 'reporting');
     process.stdout.write(`${JSON.stringify(spec)}\n`);
   }

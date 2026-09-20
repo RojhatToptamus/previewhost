@@ -246,7 +246,8 @@ A short log tail can remain buffered until another chunk or stream completion.
 
 Environment inspection shows binding names without resolved values.
 Redaction includes database connection URLs and credential components for each consumer.
-Attempt logs include service prefixes and retain a bounded tail.
+Attempt logs capture source identity separately from output and retain one bounded tail.
+Filtering cannot relabel output; application text that imitates a prefix stays with its actual source.
 
 Redaction cannot detect every secret. Application files, transformed values,
 arguments, third-party output, and HTTP responses can expose values.
@@ -325,6 +326,13 @@ Discovery validates private connection records and authenticates each owner iden
 It does not scan ports, launch owners, grant roots, or infer cleanup from an unreachable
 endpoint. One unresponsive owner has a bounded read deadline and does not hide others.
 
+Dashboard reset requires a confirmation of the environment and its managed databases.
+It calls existing Stop, authorized data deletion, and Start again operations. Attempt IDs
+and the managed resource list are checked for changes before deletion. Deletion must
+succeed before startup is requested. Failed startup never retries deletion. These steps
+are not a transaction: deleted data and job writes cannot be rolled back. External data
+and user-secret entries are excluded from deletion; jobs retain their normal permissions.
+
 The dashboard can reopen an owner’s pending private form. Secret Manager also lists
 user-reference names and edits an existing entry in a dashboard dialog, without
 requiring a running owner. Internal database and migration entries are excluded.
@@ -347,3 +355,12 @@ Retry start reuses normal source, execution, and secret-access checks for the ex
 current failed attempt. It neither retries canceled attempts nor opens private setup.
 
 Logs retain existing best-effort redaction limits and are shown on request, never treated as HTML.
+
+## Setup jobs
+
+Jobs use the same source authorization, secret bindings, redacted logs, supervisor, and process-group cleanup as command services.
+Once-only job intent and success are stored in the existing private owned-data record.
+Failure or owner interruption cannot silently retry that job; an explicit rerun or data deletion is required.
+Reruns require a stopped environment, its latest attempt ID, and normal start authorization.
+The authorization callback receives `rerunJob` on that start request.
+No process cleanup rolls back database writes. See [job lifecycle and recovery](jobs.md).

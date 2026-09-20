@@ -23,14 +23,52 @@ export interface NativeResource extends Resource {
 export type NativeCommandSpec = Omit<CommandSpec, 'env'> & { env: Record<string, string> };
 
 /** The caller receives cleanup ownership before the supervisor can execute. */
-export async function startNative(input: {
-  spec: NativeCommandSpec;
+interface NativeInput {
+  spec: Pick<NativeCommandSpec, 'cwd' | 'command' | 'env'>;
   url: string;
   signal: AbortSignal;
   appendLog(text: string): void;
   redactions?: string[];
   onResource(resource: NativeResource): void;
-}): Promise<NativeResource> {
+}
+
+export function startNative(input: NativeInput): Promise<NativeResource> {
+  return launchNative(input, false);
+}
+
+/** Finite jobs use the same supervisor, redaction and verified group cleanup as servers. */
+export async function runNativeJob(input: Omit<NativeInput, 'onResource'> & {
+  timeoutMs: number; onResource(resource: Pick<Resource, 'stop'>): void;
+}): Promise<void> {
+  const controller = new AbortController();
+  const signal = AbortSignal.any([input.signal, controller.signal]);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, input.timeoutMs);
+  let resource: Awaited<ReturnType<typeof launchNative>> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    resource = await launchNative({ ...input, signal }, true);
+    const result = await Promise.race([
+      resource.completion,
+      resource.exited!.then(error => { throw error; }),
+      new Promise<never>((_, reject) => {
+        onAbort = () => reject(new PreviewError('CLOSED', 'Job canceled. Database writes are not rolled back.'));
+        if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    ]);
+    throwIfAborted(signal);
+    if (result.code !== 0 || result.signal) throw new PreviewError('START_FAILED', `Job exited (${result.code ?? result.signal ?? 'unknown'}). Database writes are not rolled back.`);
+  } catch (error) {
+    if (timedOut) throw new PreviewError('TIMEOUT', `Job exceeded ${input.timeoutMs}ms. Database writes are not rolled back.`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+    await resource?.stop();
+  }
+}
+
+async function launchNative(input: NativeInput, job: boolean): Promise<NativeResource & { completion: Promise<{ code: number | null; signal: string | null }> }> {
   if (process.platform !== 'darwin') {
     throw new PreviewError('UNSUPPORTED_PLATFORM', 'Native commands are currently supported on macOS only.');
   }
@@ -38,7 +76,7 @@ export async function startNative(input: {
   validateEnvironmentSize(input.spec.env);
   await Promise.all(['/bin/ps', '/usr/sbin/lsof'].map((name) => access(name, constants.X_OK)));
   throwIfAborted(input.signal);
-  const port = await availablePort();
+  const port = job ? 0 : await availablePort();
   throwIfAborted(input.signal);
 
   let supervisor: ChildProcess | undefined;
@@ -51,7 +89,11 @@ export async function startNative(input: {
   let stopWork: Promise<void> | undefined;
   let unexpected!: (error: Error) => void;
   const exited = new Promise<Error>((resolve) => { unexpected = resolve; });
-  const resource: NativeResource = {
+  let finished = false;
+  let complete!: (result: { code: number | null; signal: string | null }) => void;
+  const completion = new Promise<{ code: number | null; signal: string | null }>(resolve => { complete = resolve; });
+  const resource = {
+    completion,
     target: { port, hostHeader: `127.0.0.1:${port}` },
     exited,
     stop,
@@ -137,7 +179,10 @@ export async function startNative(input: {
       if (message?.type === 'log' && typeof message.text === 'string') {
         input.appendLog(message.text);
       } else if (message?.type === 'target-exit' && !stopping) {
-        recordUnexpected(new PreviewError('START_FAILED', `Native command exited (${message.code ?? message.signal ?? 'unknown'}).`));
+        if (job) {
+          finished = true;
+          complete({ code: typeof message.code === 'number' ? message.code : null, signal: typeof message.signal === 'string' ? message.signal : null });
+        } else recordUnexpected(new PreviewError('START_FAILED', `Native command exited (${message.code ?? message.signal ?? 'unknown'}).`));
       } else if (message?.type === 'failure' && !stopping) {
         recordUnexpected(new PreviewError('START_FAILED', typeof message.message === 'string' ? message.message : 'Native command failed.'));
       }
@@ -146,7 +191,7 @@ export async function startNative(input: {
       recordUnexpected(new PreviewError('START_FAILED', `Native supervisor failed: ${error.message}`));
     });
     supervisor.once('exit', (code, signal) => {
-      recordUnexpected(new PreviewError('START_FAILED', `Native supervisor exited (${code ?? signal ?? 'unknown'}).`));
+      if (!finished) recordUnexpected(new PreviewError('START_FAILED', `Native supervisor exited (${code ?? signal ?? 'unknown'}).`));
     });
     await waitMessage(supervisor, 'online', input.signal);
     ensureStarting();
@@ -155,13 +200,13 @@ export async function startNative(input: {
       throw new PreviewError('START_FAILED', 'The native supervisor did not establish its owned process group.');
     }
     ensureStarting();
-    const argv = input.spec.command.map((arg) => arg.replaceAll('{port}', String(port)));
+    const argv = job ? input.spec.command : input.spec.command.map((arg) => arg.replaceAll('{port}', String(port)));
     await Promise.all([
       waitMessage(supervisor, 'configured', input.signal),
       send(supervisor, {
         type: 'configure', command: argv,
         cwd: input.spec.cwd,
-        env: commandEnvironment(input.spec.env, port, input.url),
+        env: commandEnvironment(input.spec.env, job ? undefined : port, input.url),
         redactions: [...Object.values(input.spec.env), ...(input.redactions ?? [])],
       }),
     ]);
@@ -172,6 +217,8 @@ export async function startNative(input: {
     ]);
     ensureStarting();
     if (typeof started.pid !== 'number') throw new PreviewError('START_FAILED', 'Native command identity is missing.');
+    // The supervisor's verified process group owns even jobs that exit before ps can observe them.
+    if (job) return resource;
     commandIdentity = await inspectProcess(started.pid);
     if (!commandIdentity || commandIdentity.group !== group) {
       throw new PreviewError('START_FAILED', 'Native command exited before its process identity could be verified.');
@@ -188,12 +235,12 @@ function cleanupError(group: number) {
   return new PreviewError('CLEANUP_INCOMPLETE', `Could not verify cleanup of native process group ${group}. Inspect its processes manually; previewhost will not signal an unknown owner.`);
 }
 
-function commandEnvironment(values: Record<string, string>, port: number, url: string): NodeJS.ProcessEnv {
+function commandEnvironment(values: Record<string, string>, port: number | undefined, url: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TERM']) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
-  return { ...env, ...values, PORT: String(port), HOST: '127.0.0.1', PREVIEW_URL: url };
+  return { ...env, ...values, ...(port === undefined ? {} : { PORT: String(port), HOST: '127.0.0.1' }), PREVIEW_URL: url };
 }
 
 async function availablePort(): Promise<number> {

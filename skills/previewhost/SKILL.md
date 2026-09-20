@@ -30,6 +30,10 @@ After denial or cancellation, stop until the user explicitly asks to resume. Nev
 Reconnection needs new project approval; existing owners and their private-secret approvals keep running.
 Explicit `--root` or `--project` registrations retain their restrictions; `preview_access` is unavailable in those modes.
 Identify required APIs, database connections and migrations from application code and documentation.
+Declare finite migrations and seeds as `type: job` with `dependsOn`; see [setup jobs](references/docs/jobs.md).
+Use repeatable migrations with `run: always` and `run: once` for seeds that must not repeat with retained managed data.
+After a failed or interrupted once job, inspect partial writes and wait for an explicit user request before `preview_rerun_job` or data deletion.
+A zero exit code cannot reveal swallowed script errors. Prefer an API readiness route that queries required tables, not `/openapi.json`.
 A frontend-only preview is incomplete when the application needs a backend. Ask for missing dependency locations only when evidence is insufficient.
 On a cold start, trusted commands need `--allow-exec`; selected inputs and names use `--env` and `--secret`.
 An explicit `--endpoint` or `--token-file` selects connection-only mode for an existing manual daemon.

@@ -43,7 +43,7 @@ function mountDashboard() {
   let loading = false;
   let acting = false;
   let connectionNotice = false;
-  let panel: { tab: Tab; attemptId?: string; loading?: boolean; error?: string; logs?: LogResult; description?: PreviewDescription } = { tab: 'activity' };
+  let panel: { tab: Tab; attemptId?: string; source?: string; loading?: boolean; error?: string; logs?: LogResult; description?: PreviewDescription } = { tab: 'activity' };
   const projects = document.querySelector<HTMLElement>('#projects')!;
   const detail = document.querySelector<HTMLElement>('#detail')!;
   const search = document.querySelector<HTMLInputElement>('#search')!;
@@ -89,6 +89,10 @@ function mountDashboard() {
   function needsCleanup(preview?: PreviewStatus) {
     return !!(preview?.cleanup?.length || preview?.data?.cleanup ||
       [preview?.active, preview?.candidate, preview?.latest].some(attempt => attempt?.state === 'cleanup-incomplete'));
+  }
+  function deletionNeedsRetry(p?: PreviewStatus) {
+    return p?.data?.cleanup?.operation === 'remove-credential' && !p.cleanup?.length &&
+      !attempts(p).some(attempt => attempt.state === 'cleanup-incomplete');
   }
   function requests(entry: Entry) { return entry.owner.requests?.filter(r => r.name === entry.name) ?? []; }
   function pending(entry: Entry) { return requests(entry).filter(r => r.state === 'pending' || r.state === 'saving'); }
@@ -153,7 +157,7 @@ function mountDashboard() {
     if (p.candidate) result.push({ label: p.active ? 'Cancel update' : 'Cancel startup', danger: true, run: () => {
       void mutate({ action: 'cancel', owner: owner.id, name, attemptId: p.candidate!.id }, 'The selected attempt was canceled.');
     } });
-    if ((p.active || needsCleanup(p) || p.url) && !p.busy && !owner.legacy) result.push({ label: needsCleanup(p) ? 'Retry cleanup' : 'Stop', danger: !needsCleanup(p), run: () => {
+    if ((p.active || needsCleanup(p) || p.url) && !deletionNeedsRetry(p) && !p.busy && !owner.legacy) result.push({ label: needsCleanup(p) ? 'Retry cleanup' : 'Stop', danger: !needsCleanup(p), run: () => {
       void mutate({ action: 'stop', owner: owner.id, name, expected: { active: p.active?.id ?? null, candidate: p.candidate?.id ?? null, latest: p.latest?.id ?? null } }, 'Preview stopped. Your database data is retained.');
     } });
     if (!p.active && !p.busy && !p.candidate && ['stopped', 'failed'].includes(p.latest?.state ?? '') && !owner.legacy && !needsCleanup(p)) result.push({ label: p.latest?.state === 'failed' ? 'Retry start' : 'Start preview', run: () => {
@@ -223,11 +227,12 @@ function mountDashboard() {
   }
   function hint(entry: Entry) {
     const p = entry.preview;
+    if (deletionNeedsRetry(p)) return 'Nothing restarts until you explicitly retry Reset data.';
     if (needsCleanup(p)) return 'Cleanup is incomplete; keep the source directories and retry cleanup before starting again.';
     if (pending(entry).length) return 'Values go to the macOS Keychain. Saving them does not start the app on its own.';
     if (p?.candidate) return p.active ? 'Your app is still available; canceling affects only the pending update in this worktree.' : 'The URL appears once startup checks pass. Cancelling affects only this worktree.';
     if (p?.busy) return 'An operation is in progress; wait for it to finish before changing this preview.';
-    if (p?.active && p.latest?.state === 'failed') return 'This opens the serving attempt; the failed update is not serving.';
+    if (p?.active && p.latest?.state === 'failed') return 'Your previous app is still running.';
     if (p?.active) return p.data ? 'Every startup check passed. Stopping keeps your database data.' : 'Every startup check passed. Stopping affects only this preview.';
     if (p?.latest?.state === 'failed') return 'Your app is not serving; resolve the startup error before retrying.';
     if (p?.latest?.state === 'canceled') return 'Startup was canceled; ask your agent to start again only when you want to continue.';
@@ -255,55 +260,137 @@ function mountDashboard() {
     const latest = p.candidate ?? p.latest;
     if (!latest && !p.active) return;
     if (p.active && latest && p.active.id !== latest.id) {
-      const node = section('Attempts'); const split = el('div', '', 'attempt-split');
-      for (const [label, attempt, note] of [
-        ['Serving now', p.active, 'This is what “Open app” gives you.'],
-        ['Latest update', latest, 'Not serving. Source files remain live; these are runtime attempts, not build snapshots.'],
+      const split = el('div', '', 'attempt-split');
+      for (const [label, attempt] of [
+        ['Serving', p.active],
+        ['Latest update', latest],
       ] as const) {
-        const column = el('div'); column.append(el('p', label, 'muted'), el('code', attempt.id, 'attempt-id'), el('span', attempt.state, 'status ' + (attempt.state === 'failed' ? 'error' : 'muted')), el('p', note)); split.append(column);
+        const id = el('code', attempt.id.slice(0, 8), 'attempt-id'); id.title = attempt.id;
+        const column = el('div'); column.append(el('p', label, 'muted'), id, el('span', attempt.state[0].toUpperCase() + attempt.state.slice(1), 'status ' + (attempt.state === 'failed' ? 'error' : attempt.state === 'ready' ? 'ready' : 'muted'))); split.append(column);
       }
-      node.append(split);
+      detail.append(split);
     } else {
       const attempt = p.active ?? latest!; const row = el('div', '', 'attempt-line');
-      row.append(el('span', p.active ? 'Serving / latest' : 'Latest attempt', 'section-label'), el('code', attempt.id, 'attempt-id'), el('span', attempt.state, 'muted')); detail.append(row);
+      const id = el('code', attempt.id.slice(0, 8), 'attempt-id'); id.title = attempt.id;
+      row.append(el('span', p.active ? 'Serving' : 'Latest attempt', 'section-label'), id); detail.append(row);
     }
   }
-  function renderServices(p: PreviewStatus) {
+  function renderServices(entry: Entry) {
+    const p = entry.preview!;
     const attempt = p.active ?? p.candidate ?? p.latest;
     if (!attempt && !p.data) return;
     const node = section('Services');
     if (p.active && p.candidate) node.append(el('p', 'Serving services are shown below; the update is still starting.', 'muted'));
     const table = el('div', '', 'row-list');
     const managed = new Set(p.data?.resources.map(r => r.name) ?? []);
+    const dataLabel = p.data?.cleanup?.operation === 'remove-credential' ? 'Data deleted' : p.data?.cleanup ? 'Check data' : 'Data retained';
+    const typeLabels = { command: 'HTTP', static: 'Static', attach: 'Attached HTTP', postgres: 'PostgreSQL', redis: 'Redis', 'external-postgres': 'PostgreSQL', 'external-redis': 'Redis' };
     const services = Object.entries(attempt?.services ?? {}).sort(([a], [b]) => Number(managed.has(a)) - Number(managed.has(b)));
     if (!services.length && attempt && attempt.type !== 'environment') services.push([p.name, { type: attempt.type, state: attempt.state === 'ready' ? 'ready' : attempt.state === 'starting' ? 'starting' : attempt.state === 'failed' ? 'failed' : 'stopped' }]);
     for (const [name, service] of services) {
+      if (service.type === 'job') continue;
       const row = el('div', '', 'service-row' + (managed.has(name) ? ' managed' : ''));
       const url = attempt?.id === p.active?.id ? service.browserUrl : undefined;
-      row.append(el('strong', name), el('span', service.type, 'machine muted'), el('span', service.state, 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
-      const meta = el('span', managed.has(name) ? 'Data retained on stop' : '', 'service-meta muted');
+      row.append(el('strong', name), el('span', typeLabels[service.type], 'muted'), el('span', service.state[0].toUpperCase() + service.state.slice(1), 'status ' + (service.state === 'failed' ? 'error' : service.state === 'ready' ? 'ready' : 'muted')));
+      const meta = el('span', managed.has(name) ? dataLabel : '', 'service-meta muted');
       if (url) { try { meta.textContent = ':' + new URL(url).port; meta.classList.add('machine'); } catch { /* Invalid links are omitted below. */ } }
-      row.append(meta, url ? urlLink(url, 'Open', 'button small') : el('span', '', 'service-action'));
+      const controls = el('div', '', 'row-actions service-action');
+      if (service.type === 'command') controls.append(button('Logs', () => openLogs(entry, attempt!, name), 'small', 'logs-' + name));
+      if (url) controls.append(urlLink(url, 'Open', 'button small'));
+      row.append(meta, controls);
       if (service.error) row.append(el('p', service.error.message, 'error service-error'));
       table.append(row);
     }
     for (const resource of p.data?.resources ?? []) {
       if (services.some(([name]) => name === resource.name)) continue;
       const row = el('div', '', 'service-row managed');
-      row.append(el('strong', resource.name), el('span', resource.type, 'machine muted'), el('span', 'Retained', 'muted'), el('span', 'Data retained on stop', 'service-meta muted'), el('span'));
+      row.append(el('strong', resource.name), el('span', typeLabels[resource.type], 'muted'), el('span', p.data?.cleanup ? 'Needs cleanup' : 'Retained', 'muted'), el('span', dataLabel, 'service-meta muted'), el('span'));
       table.append(row);
     }
     if (!table.children.length) table.append(el('p', 'Service status is not available yet.', 'muted'));
     node.append(table);
+    if (p.data?.resources.length && p.latest && (p.active || ['stopped', 'failed'].includes(p.latest.state)) &&
+        !p.busy && !p.candidate && (!needsCleanup(p) || deletionNeedsRetry(p)) && !entry.owner.legacy) {
+      const reset = el('div', '', 'reset-row');
+      reset.append(el('p', 'Reset managed data and run setup again.', 'muted'), button('Reset data', () => confirmReset(entry), 'danger small'));
+      node.append(reset);
+    }
     if (p.candidate) { const elapsed = el('p', '', 'machine muted'); elapsed.dataset.elapsed = p.candidate.startedAt; node.append(elapsed); }
-    if (p.data) node.append(el('p', 'Stopping keeps your database data. Deletion is a separate explicit CLI operation.', 'muted'));
-    for (const source of attempt?.sources ?? []) node.append(pathText(source));
+    if (attempt?.sources?.length) {
+      const sources = el('details', '', 'source-folders'); sources.append(el('summary', 'Source folders'));
+      for (const source of attempt.sources) sources.append(pathText(source));
+      node.append(sources);
+    }
   }
-  async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary) {
-    const current = panel = { tab, attemptId: attempt?.id, loading: tab !== 'activity' };
+  function confirmReset(entry: Entry) {
+    const p = entry.preview!;
+    const dialog = el('dialog'); dialog.setAttribute('aria-labelledby', 'reset-title'); dialog.setAttribute('aria-describedby', 'reset-hint');
+    const title = el('h2', 'Reset data for ' + p.name + '?'); title.id = 'reset-title';
+    const hint = el('p', 'Stops this preview, deletes the managed data below, then starts the ' + (p.active ? 'serving' : 'latest') + ' configuration and runs setup again. Deletion and job writes cannot be rolled back.', 'muted'); hint.id = 'reset-hint';
+    const list = el('ul', '', 'reset-resources');
+    for (const resource of p.data!.resources) list.append(el('li', resource.name + ' · ' + (resource.type === 'postgres' ? 'PostgreSQL' : 'Redis')));
+    const controls = el('div', '', 'actions'); const cancel = button('Cancel', () => dialog.close()); cancel.autofocus = true;
+    controls.append(cancel, button('Delete data and start', () => {
+      dialog.close();
+      void mutate({ action: 'resetData', owner: entry.owner.id, name: p.name, resources: p.data!.resources,
+        expected: { active: p.active?.id ?? null, candidate: p.candidate?.id ?? null, latest: p.latest!.id } }, 'Data deleted. Startup requested; check setup jobs below.');
+    }, 'danger'));
+    dialog.append(title, pathText(entry.owner.project ?? ''), hint, list, el('p', 'External databases and saved secrets are not deleted.', 'muted'), controls);
+    dialog.addEventListener('close', () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
+  }
+  function renderJobs(entry: Entry) {
+    const p = entry.preview!; const attempt = p.candidate ?? p.latest ?? p.active;
+    const jobs = Object.entries(attempt?.services ?? {}).filter(([, s]) => s.type === 'job');
+    if (!jobs.length || !attempt) return;
+    const node = section('Setup jobs'); const list = el('div', '', 'row-list');
+    const heading = el('div', '', 'section-heading'); heading.append(node.firstElementChild!);
+    if (p.active && p.active.id !== attempt.id) heading.append(el('span', 'Latest update', 'muted'));
+    node.append(heading);
+    for (const [name, job] of jobs) {
+      const row = el('div', '', 'job-row');
+      const label = job.state === 'skipped' ? 'Skipped' : job.state === 'starting' ? 'Running' : job.state[0].toUpperCase() + job.state.slice(1);
+      const identity = el('div', '', 'job-identity'); identity.append(el('strong', name));
+      if (job.error) identity.append(el('p', job.error.message, 'job-note'));
+      else if (job.state === 'skipped') identity.append(el('p', 'Already applied to retained data.', 'job-note'));
+      row.append(identity, el('span', label, 'status ' + (job.state === 'failed' ? 'error' : job.state === 'succeeded' ? 'ready' : 'muted')));
+      const controls = el('div', '', 'row-actions');
+      if (!p.active && !p.busy && !p.candidate && !needsCleanup(p)) controls.append(button('Run again', () => {
+        const dialog = el('dialog');
+        dialog.setAttribute('aria-labelledby', 'rerun-title');
+        dialog.setAttribute('aria-describedby', 'rerun-hint');
+        const title = el('h2', 'Run ' + name + ' again?'); title.id = 'rerun-title';
+        const hint = el('p', 'Starts the preview and its dependencies. Previous writes remain; running this job again may duplicate data.', 'muted'); hint.id = 'rerun-hint';
+        const actions = el('div', '', 'actions');
+        const cancel = button('Cancel', () => dialog.close()); cancel.autofocus = true;
+        actions.append(cancel, button('Run and start preview', () => {
+          dialog.close();
+          void mutate({ action: 'rerunJob', owner: entry.owner.id, name: p.name, attemptId: attempt.id, job: name }, 'Job rerun and startup requested.');
+        }, 'primary'));
+        dialog.append(title, hint, actions);
+        dialog.addEventListener('close', () => dialog.remove(), { once: true });
+        document.body.append(dialog); dialog.showModal();
+      }, 'small', 'rerun-' + name));
+      if (controls.children.length) {
+        controls.firstElementChild!.setAttribute('aria-label', 'Run ' + name + ' again');
+      }
+      controls.append(button('Logs', () => openLogs(entry, attempt, name), 'small', 'logs-' + name));
+      row.append(controls);
+      list.append(row);
+    }
+    node.append(list);
+    if (p.active && jobs.some(([, job]) => job.state === 'failed')) node.append(el('p', 'Stop the preview to rerun a job.', 'job-hint'));
+  }
+  function openLogs(entry: Entry, attempt: AttemptSummary, source: string) {
+    void loadPanel(entry, 'logs', attempt, source).then(() => {
+      const content = document.getElementById('tab-content');
+      if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'nearest' }); }
+    });
+  }
+  async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary, source?: string) {
+    const current = panel = { tab, attemptId: attempt?.id, source, loading: tab !== 'activity' };
     render(); if (tab === 'activity' || !attempt) return;
     try {
-      const result = await call<LogResult | PreviewDescription>({ action: tab === 'logs' ? 'logs' : 'describe', owner: entry.owner.id, name: entry.name, attemptId: attempt.id });
+      const result = await call<LogResult | PreviewDescription>({ action: tab === 'logs' ? 'logs' : 'describe', owner: entry.owner.id, name: entry.name, attemptId: attempt.id, ...(tab === 'logs' && source ? { source } : {}) });
       if (panel !== current) return;
       if (tab === 'logs') panel.logs = result as LogResult; else panel.description = result as PreviewDescription;
     } catch (error) { if (panel === current) panel.error = error instanceof Error ? error.message : 'Details unavailable.'; }
@@ -328,6 +415,8 @@ function mountDashboard() {
       for (const [name, service] of Object.entries(spec.services)) {
         const row = el('div', '', 'definition-row'); row.append(el('strong', name), el('span', service.type, 'machine muted'));
         if (service.command) row.append(el('pre', JSON.stringify(service.command)));
+        if (service.dependsOn?.length) row.append(el('p', 'After: ' + service.dependsOn.join(', '), 'muted'));
+        if (service.run) row.append(el('p', service.run === 'once' ? 'Once per retained environment; explicit rerun required after failure.' : 'Runs on every start and replacement.', 'muted'));
         if (service.cwd || service.directory) row.append(pathText(service.cwd ?? service.directory!));
         list.append(row);
       }
@@ -364,21 +453,32 @@ function mountDashboard() {
       }
       if (!retained.length) content.append(el('p', 'No retained attempts. Start through your agent or CLI.', 'muted'));
       if (p?.cleanup?.length || p?.data?.cleanup) {
-        const cleanup = message('Cleanup needs attention', 'Keep these source directories until cleanup succeeds.', 'error', content);
+        const cleanup = message('Cleanup needs attention', deletionNeedsRetry(p) ? 'Database credential removal is incomplete.' : 'Keep these source directories until cleanup succeeds.', 'error', content);
         for (const item of p.cleanup ?? []) cleanup.append(el('p', item.error.message), ...item.sources.map(pathText));
         if (p.data?.cleanup) cleanup.append(el('p', p.data.cleanup.message));
       }
       renderRequests(entry, content, new Set(actions(entry).map(a => a.label))); return;
     }
     if (!selected) { content.append(el('p', 'The retained attempt is no longer available.', 'muted')); return; }
-    const choose = el('label', '', 'attempt-picker'); choose.append(el('span', 'Attempt'));
+    const choose = el('div', '', 'attempt-picker'); choose.append(el('span', 'Attempt'));
     const selectAttempt = el('select'); selectAttempt.setAttribute('aria-label', 'Diagnostic attempt'); selectAttempt.dataset.focus = 'diagnostic-attempt';
     for (const attempt of retained) {
       const option = el('option', (attempt.id === p?.active?.id ? 'Serving' : attempt.id === p?.candidate?.id ? 'Starting' : 'Latest') + ' · ' + attempt.id);
       option.value = attempt.id; option.selected = attempt.id === selected.id; selectAttempt.append(option);
     }
     selectAttempt.addEventListener('change', () => { void loadPanel(entry, panel.tab, retained.find(a => a.id === selectAttempt.value)); });
-    choose.append(selectAttempt, button('Refresh', () => { void loadPanel(entry, panel.tab, selected); }, 'small', 'refresh-panel')); content.append(choose);
+    choose.append(selectAttempt);
+    if (panel.tab === 'logs') {
+      const sources = el('select'); sources.setAttribute('aria-label', 'Log source'); sources.dataset.focus = 'log-source';
+      const all = el('option', 'All output'); all.value = ''; sources.append(all);
+      const names = selected.type === 'environment' ? Object.keys(selected.services ?? {}) : [p!.name];
+      for (const name of names) {
+        const option = el('option', name); option.value = name; option.selected = panel.source === name; sources.append(option);
+      }
+      sources.addEventListener('change', () => { void loadPanel(entry, 'logs', selected, sources.value || undefined); });
+      choose.append(sources);
+    }
+    choose.append(button('Refresh', () => { void loadPanel(entry, panel.tab, selected, panel.source); }, 'small', 'refresh-panel')); content.append(choose);
     if (panel.loading) { content.append(el('p', 'Loading…', 'muted')); return; }
     if (panel.error) { message('Details unavailable', panel.error, 'error', content); return; }
     if (panel.attemptId !== selected.id) { content.append(el('p', 'The selected attempt changed. Refresh to load its details.', 'muted')); return; }
@@ -473,9 +573,10 @@ function mountDashboard() {
       const node = message(heading, body, tone);
       if (extra && !taken.has(extra.label)) { node.append(button(extra.label, extra.run)); taken.add(extra.label); }
     };
-    if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
+    if (deletionNeedsRetry(p)) addNotice('Data reset incomplete', 'Managed data was deleted, but its database credential could not be removed. Resolve the Keychain error, then choose Reset data to finish and start again.', 'error');
+    else if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
     else if (pending(entry).length) addNotice('Private setup requested', 'Approve access and enter any missing values in the separate private form. Cancellation stays in that form.', 'warning');
-    else if (!p?.candidate && p?.latest?.state === 'failed') addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
+    else if (!p?.candidate && p?.latest?.state === 'failed' && !Object.values(p.latest.services ?? {}).some(service => service.type === 'job' && service.state === 'failed')) addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
     else if (!p?.candidate && p?.latest?.state === 'canceled') addNotice(p.active ? 'The update was canceled. Your previous version is still running.' : 'Startup was canceled.', 'Nothing was started again automatically. Ask your agent to continue only when you are ready.');
     if (owner.legacy) addNotice('Owner update needed', 'This owner runs an older build. New controls require an explicit owner upgrade; this page will not restart it.');
     const row = el('div', '', 'actions');
@@ -492,12 +593,12 @@ function mountDashboard() {
     }
     if (!canOpen && !primaryTaken && p?.candidate) { const waiting = el('button', 'Waiting for URL', 'hero'); waiting.disabled = true; row.append(waiting); }
     row.append(controls); detail.append(row, el('p', hint(entry), 'hint'));
-    if (p) { renderAttempts(p); renderServices(p); }
+    if (p) { renderAttempts(p); renderServices(entry); renderJobs(entry); }
     if (owner.configuration?.error) addNotice('preview.yml needs attention', owner.configuration.error.message + (p?.active ? ' The running app is unchanged. Its Configuration tab shows the serving attempt.' : ' Ask your agent to resolve this configuration error before starting.'), 'error');
     else if (owner.configuration) detail.append(el('p', 'preview.yml is available for the next agent startup. Start again uses the retained attempt configuration.', 'muted'));
 
     if (owner.legacy && p?.active) message('Stop through the CLI', `Run previewhost stop ${p.name} from the project directory shown above; this owner cannot guard a stale dashboard action.`);
-    if (!p?.active && !p?.candidate && !availableActions.length && !pending(entry).length) detail.append(el('p', `Ask your agent to start ${entry.name ?? 'an application'} in this worktree.`, 'muted'));
+    if (!p?.active && !p?.candidate && !availableActions.length && !pending(entry).length && !needsCleanup(p)) detail.append(el('p', `Ask your agent to start ${entry.name ?? 'an application'} in this worktree.`, 'muted'));
     renderTabs(entry);
   }
   function render() {
@@ -582,8 +683,7 @@ input::placeholder { color:var(--t5); }
 .preview-row>.ready,.preview-row>.muted { color:var(--t5); font-weight:400; }
 .scope { border-top:1px solid var(--border); margin:0; padding:12px 16px; font-size:12px; color:var(--t5); line-height:1.45; }
 #main { min-width:0; min-height:0; overflow-y:auto; }
-#detail { padding:30px 32px 64px; max-width:960px; }
-#detail.overview { max-width:1120px; }
+#detail { padding:30px 32px 64px; max-width:1120px; }
 .overview>h1 { font-size:26px; letter-spacing:-.6px; }
 .breadcrumb { display:flex; align-items:baseline; gap:9px; margin-bottom:10px; font-size:13px; color:var(--t5); }
 .text-button { height:auto; border:0; padding:0; background:none; color:var(--t5); font-weight:400; }
@@ -605,32 +705,43 @@ input::placeholder { color:var(--t5); }
 .attempt-line { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:18px 0; border-bottom:1px solid var(--border); }
 .attempt-line>.section-label { width:110px; }
 .attempt-id { font-size:12px; overflow-wrap:anywhere; }
-.attempt-split { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.attempt-split { margin-top:24px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .attempt-split>div { padding:16px 18px; min-width:0; }
 .attempt-split>div+div { border-left:1px solid var(--border); }
 .attempt-split .attempt-id { display:block; margin:6px 0; }
-.attempt-split p { font-size:12.5px; color:var(--t4); }
-.attempt-split p:last-child { margin-top:10px; margin-bottom:0; }
+.attempt-split p { margin:0; font-size:12.5px; color:var(--t4); }
 .row-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .row-list>div+div { border-top:1px solid var(--divider); }
-#secret-edit { width:min(520px,calc(100% - 32px)); max-height:calc(100dvh - 32px); overflow:auto; padding:26px; border:1px solid var(--border-2); border-radius:9px; background:var(--bg); color:var(--t1); }
-#secret-edit::backdrop { background:var(--bg); opacity:.72; }
-#secret-edit h2 { font-size:22px; margin-bottom:8px; }
+dialog { width:min(520px,calc(100% - 32px)); max-height:calc(100dvh - 32px); overflow:auto; padding:26px; border:1px solid var(--border-2); border-radius:9px; background:var(--bg); color:var(--t1); }
+dialog::backdrop { background:var(--bg); opacity:.72; }
+dialog h2 { font-size:22px; margin-bottom:8px; }
 #secret-edit-name { overflow-wrap:anywhere; color:var(--t2); margin-bottom:18px; }
 #secret-edit-hint { color:var(--t4); font-size:13px; margin-bottom:22px; }
 #secret-edit label { display:block; font-weight:500; margin-bottom:8px; }
 #secret-value { width:100%; min-height:100px; padding:12px; border:1px solid var(--border-2); border-radius:6px; resize:vertical; background:var(--subtle); color:var(--t1); -webkit-text-security:disc; }
-#secret-edit .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-wrap:anywhere; }
-#secret-edit .actions { justify-content:flex-end; padding:0; margin-top:24px; }
+dialog .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-wrap:anywhere; }
+dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .secret-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:14px 16px; }
 .secret-row code { overflow-wrap:anywhere; color:var(--t2); }
-.service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 56px; align-items:center; gap:12px; padding:12px 16px; }
+.service-row { display:grid; grid-template-columns:96px 96px 72px minmax(0,1fr) 112px; align-items:center; gap:12px; padding:12px 16px; }
 .service-row>strong { overflow-wrap:anywhere; font-size:13.5px; }
 .service-row .status { font-size:12.5px; }
 .service-row .ready { font-weight:400; }
 .service-row.managed { background:var(--subtle); }
 .service-meta { text-align:right; font-size:12px; }
 .service-error { grid-column:1/-1; margin:0; font-size:12.5px; }
+.source-folders { margin-top:12px; }
+.source-folders .path { margin-top:8px; }
+.section-heading { display:flex; align-items:center; gap:16px; margin-bottom:12px; }
+.section-heading h2 { margin:0 auto 0 0; }
+.section-heading>.muted { font-size:12px; }
+.job-row { display:flex; align-items:center; gap:20px; padding:14px 16px; }
+.job-identity { flex:1; min-width:0; }
+.job-identity strong { font-size:13.5px; overflow-wrap:anywhere; }
+.job-note { margin:4px 0 0; font-size:12.5px; color:var(--t4); overflow-wrap:anywhere; }
+.job-hint { margin:10px 0 0; color:var(--t4); }
+.job-row>.status { font-size:12.5px; font-weight:400; }
+
 .overview .section { border-bottom:0; padding:0; margin-bottom:30px; }
 .overview .section-label { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
 .overview .section-label::after { content:''; flex:1; height:1px; background:var(--divider); }
@@ -660,7 +771,10 @@ input::placeholder { color:var(--t5); }
 .activity-row>div { min-width:0; }
 .activity-row code { display:block; margin:3px 0; }
 .activity-row p { margin:0; font-size:12.5px; }
-.attempt-picker { display:flex; gap:10px; align-items:center; margin-bottom:16px; color:var(--t4); font-size:12.5px; }
+.reset-row { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:16px; }
+.reset-row p { margin:0; font-size:12.5px; }
+.reset-resources { padding-left:20px; margin:16px 0; }
+.attempt-picker { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; color:var(--t4); font-size:12.5px; }
 select { min-width:0; max-width:100%; height:32px; padding:0 8px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t2); font-family:'Geist Mono',monospace; font-size:12px; }
 .logs,.configuration { border:1px solid var(--border); border-radius:8px; background:var(--subtle); padding:14px 16px; max-height:360px; overflow:auto; white-space:pre; line-height:1.9; font-size:12px; color:var(--t3); }
 .env-row { display:grid; grid-template-columns:180px 90px minmax(0,1fr); gap:14px; align-items:baseline; padding:11px 16px; }
@@ -683,7 +797,7 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
 @media (max-width:1100px) {
   .overview-row { grid-template-columns:minmax(0,1fr) 150px; gap:12px; }
   .row-actions { grid-column:1/-1; }
-  .service-row { grid-template-columns:80px 76px 64px minmax(0,1fr) 48px; gap:8px; padding:12px; }
+  .service-row { grid-template-columns:80px 76px 64px minmax(0,1fr) 112px; gap:8px; padding:12px; }
 }
 @media (max-width:760px) {
   header { padding:0 14px; gap:10px; }
@@ -710,7 +824,10 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   .overview-row { grid-template-columns:minmax(0,1fr) 130px; gap:10px; padding:12px; }
   .overview-state .status { font-size:12px; }
   .overview-state small { font-size:11px; }
-  .service-row { grid-template-columns:72px 66px minmax(0,1fr) 48px; }
+  .job-row { flex-wrap:wrap; gap:10px 16px; }
+  .job-row .row-actions { width:100%; }
+  .section-heading { flex-wrap:wrap; gap:10px; }
+  .service-row { grid-template-columns:72px 66px minmax(0,1fr) 104px; }
   .service-meta { grid-column:1/4; grid-row:auto; text-align:left; }
   .service-row>.button,.service-action { grid-column:4; }
   .service-row>.status { text-align:right; }

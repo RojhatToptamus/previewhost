@@ -15,7 +15,8 @@ Use previewhost when several coding agents or worktrees need separate running co
 Each task gets its own service ports and connections, without manual port assignments or changes to service URLs.
 
 Define services, commands, and connections in optional root `preview.yml`, or supply a spec directly through MCP or JSON stdin.
-previewhost starts services in dependency order and waits for them to become ready.
+previewhost runs setup jobs, then starts dependent services and waits for readiness.
+Use explicit [migration and seed jobs](docs/jobs.md) instead of embedding setup in server commands.
 
 When you replace a preview, its local URL stays the same.
 New requests switch to the replacement services only after they pass readiness checks.
@@ -188,9 +189,10 @@ The overview shows what is ready and what needs attention.
 | What you need | Dashboard control |
 | --- | --- |
 | Open the right worktree | Check its source path, then select **Open app**. |
-| Diagnose a failed update | Compare **Serving now** with **Latest update**, then open that attempt's **Logs**. |
+| Diagnose a failed update | Compare **Serving** with **Latest update**, then open the failed job's **Logs** or select an attempt in **Logs**. |
 | Cancel an unfinished update | Select **Cancel update**. The previous application keeps running. |
 | Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
+| Test with fresh managed data | Select **Reset data**, review the databases, then confirm. Setup runs again; deletion cannot be undone. |
 | Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
 | Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the dialog and save. |
 | Supply a missing secret | Select **Open private form** to approve access and enter values outside the chat. |

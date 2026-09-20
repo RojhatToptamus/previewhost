@@ -1,6 +1,6 @@
 export type {
   PreviewSpec, PreviewStatus, PreviewDescription, PreviewApi, RuntimeOptions,
-  AttemptSummary, AttemptResult, Failure, ErrorCode, LogResult, WaitOptions,
+  AttemptSummary, AttemptResult, Failure, ErrorCode, LogResult, LogOptions, DeleteDataOptions, WaitOptions,
   ServiceStatus, DataStatus, StopOptions, AuthorizationRequest,
   SecretRequirement, SecretSetupApi, SecretSetupStatus, SecretSetupSummary, PreviewManagementApi,
 } from './contracts.js';
