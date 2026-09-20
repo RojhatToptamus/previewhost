@@ -21,7 +21,7 @@ Use explicit [migration and seed jobs](docs/jobs.md) instead of embedding setup 
 When you replace a preview, its local URL stays the same.
 New requests switch to the replacement services only after they pass readiness checks.
 
-![Previewhost dashboard with a frontend, API, PostgreSQL and Redis in an isolated worktree](./assets/dashboard.png)
+![Previewhost dashboard showing a frontend, API, PostgreSQL, Redis, and completed migration and seed jobs](./assets/dashboard.png)
 
 Control environments through the CLI, MCP tools, or an embedded Node.js library:
 
@@ -203,9 +203,13 @@ In **Logs**, choose an attempt and source, then search its captured output. Sear
 A failed replacement leaves the previous application available. **Open app** still points to that serving attempt.
 
 <details>
-<summary>See a failed update with the previous application still available</summary>
+<summary>Inspect a failed update and its logs</summary>
 
 ![Failed update beside the serving attempt, with the frontend, API, PostgreSQL and Redis still ready](./assets/dashboard-update.png)
+
+Select a job's **Logs** to open its output.
+
+![Migration output with a missing-column error, log search, attempt selection, and source filtering](./assets/dashboard-logs.png)
 
 </details>
 
