@@ -4,6 +4,8 @@ This document records earlier design decisions and verification. For current beh
 including sidebar management and retained data after shutdown, see
 [dashboard operations](api.md#local-dashboard-operations) and the [design system](../dashboard/DESIGN.md).
 
+Storage descriptions also predate the encrypted keystore. See [stored secrets](api.md#stored-secrets).
+
 Research date: 14 September 2026. Baseline: `main` at `cf5326a`, after PR #7.
 Status: dashboard and explicit recipe saving implemented; configuration editing remains deferred.
 Branch: `codex/dashboard-research`.

@@ -107,7 +107,7 @@ Use literals only for non-secret configuration.
 Use `{fromEnv: NAME}` for a value selected by the daemon owner.
 Use `{secret: ID}` for a stored credential and the [private-entry workflow](api.md#stored-secrets) for approval and missing values.
 For new bindings, choose a project-specific reference: `API_SECRET: {secret: "my-project/dev/api"}`.
-Here, `API_SECRET` is the application variable. `my-project/dev/api` is the stored Keychain reference.
+Here, `API_SECRET` is the application variable. `my-project/dev/api` is the stored secret reference.
 Preserve existing references. Reuse an exact reference across projects or worktrees only for intentional sharing.
 A generic stored reference such as `API_SECRET` can select an unintended existing value after approval.
 previewhost does not automatically load `.env` files or inherit arbitrary host values.

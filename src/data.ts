@@ -9,7 +9,7 @@ import { limits, nameSchema, type DataStatus, type OwnedDatabaseSpec, type StopO
 import { PreviewError, failure, throwIfAborted } from './errors.js';
 import { Docker, object } from './docker.js';
 import { databaseRedactions, probeDatabase } from './database-connections.js';
-import { keychain } from './keychain.js';
+import { Keystore } from './keystore.js';
 
 export interface DatabaseBinding { url: string; redactions: string[] }
 export interface DataOwner {
@@ -28,24 +28,19 @@ const token = z.string().regex(/^[a-f0-9]{32}$/);
 // Persisted Docker names, ownership labels, and database names retain the previewd namespace.
 const objectName = z.string().regex(/^previewd-[a-f0-9]{32}-(?:data|db)$/);
 const containerId = z.string().regex(/^[a-f0-9]{64}$/);
-const resourceFields = {
+const resourceSchema = z.strictObject({
   name: nameSchema, type: z.enum(['postgres', 'redis']),
   volume: objectName.optional(),
   container: z.strictObject({ name: objectName, id: containerId.optional() }).optional(),
-};
-const legacyResourceSchema = z.strictObject({ ...resourceFields, password: z.string().regex(/^[a-f0-9]{64}$/) });
-const credentialRefSchema = z.string().regex(/^(?:[a-f0-9]{32}|[a-f0-9]{32}\/[a-z][a-z0-9-]{0,47}\/[a-z][a-z0-9-]{0,47})$/);
-const resourceSchema = z.strictObject({ ...resourceFields, credentialRef: credentialRefSchema });
-const recordFields = {
+  credentialRef: token,
+});
+const recordSchema = z.strictObject({
+  schema: z.literal(3), resources: z.array(resourceSchema).min(1).max(limits.environmentDatabases),
   name: nameSchema, owner: token,
   jobs: z.record(nameSchema, z.enum(['started', 'succeeded'])).refine(value => Object.keys(value).length <= limits.terminalRecords).optional(),
   engine: z.strictObject({ id: z.string().min(1).max(128), socket: z.string().min(1).max(4096) }),
   pending: z.strictObject({ operation: z.enum(['create-volume', 'create-container', 'start-container', 'remove-container', 'remove-volume', 'remove-credential']), resource: nameSchema }).optional(),
-};
-const recordSchema = z.discriminatedUnion('schema', [
-  z.strictObject({ ...recordFields, schema: z.literal(1), resources: z.array(legacyResourceSchema).min(1).max(limits.environmentDatabases) }),
-  z.strictObject({ ...recordFields, schema: z.literal(2), resources: z.array(resourceSchema).min(1).max(limits.environmentDatabases) }),
-]);
+});
 type RecordData = z.infer<typeof recordSchema>;
 type StoredResource = RecordData['resources'][number];
 type Operation = NonNullable<RecordData['pending']>['operation'];
@@ -56,18 +51,12 @@ interface Live {
 }
 const fresh = () => randomBytes(16).toString('hex');
 const cleanupError = (message: string) => new PreviewError('CLEANUP_INCOMPLETE', message);
-const legacyRef = (record: RecordData, resource: StoredResource) => `${record.owner}/${record.name}/${resource.name}`;
-const credential = (record: RecordData, resource: StoredResource) => {
-  const id = 'credentialRef' in resource ? resource.credentialRef : legacyRef(record, resource);
-  return { namespace: id.includes('/') ? 'migration' as const : 'database' as const, id };
-};
-
 async function retainedRecords(root: Awaited<ReturnType<typeof acquireRoot>>): Promise<RecordData[]> {
   const result: RecordData[] = [];
   for (const [filename, contents] of await root.records()) {
     let record: RecordData;
     try { record = recordSchema.parse(JSON.parse(contents)); }
-    catch { throw cleanupError('A retained database record is invalid.'); }
+    catch { throw cleanupError('This retained database record is unsupported or invalid. No data was changed. Use a new data directory; see the keystore reset instructions in README.md.'); }
     if (filename !== `${record.name}.json` || record.owner !== root.owner
       || new Set(record.resources.map((item) => item.name)).size !== record.resources.length
       || (record.pending && !record.resources.some((item) => item.name === record.pending!.resource))
@@ -82,15 +71,12 @@ async function retainedRecords(root: Awaited<ReturnType<typeof acquireRoot>>): P
         throw cleanupError('A retained database mutation is invalid.');
       }
     }
-    if (record.resources.some((item) => 'credentialRef' in item && item.credentialRef.includes('/') && item.credentialRef !== legacyRef(record, item))) {
-      throw cleanupError('A migrated credential reference has inconsistent ownership.');
-    }
     result.push(record);
   }
   return result;
 }
 
-/** Read ownership records under their existing lock without Docker recovery, Keychain access, or writes. */
+/** Read ownership records under their existing lock without Docker recovery, keystore access, or writes. */
 export async function withRetainedData<T>(directory: string, read: (records: Array<{ name: string; data: DataStatus }>) => Promise<T>): Promise<T> {
   if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Owned databases currently require macOS.');
   const root = await acquireRoot(directory, true);
@@ -108,9 +94,10 @@ export async function withRetainedData<T>(directory: string, read: (records: Arr
 }
 
 /** A retained data directory has one kernel-locked owner and one record per environment. */
-export async function createDataOwner(options: { directory: string; dockerSocket?: string }): Promise<DataOwner> {
+export async function createDataOwner(options: { directory: string; dockerSocket?: string; keystore?: Keystore }): Promise<DataOwner> {
   if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Owned databases currently require macOS.');
   if (!isAbsolute(options.directory)) throw new PreviewError('INVALID_INPUT', 'The data directory must be absolute.');
+  const keystore = options.keystore ?? new Keystore();
   const root = await acquireRoot(options.directory);
   const socketPath = options.dockerSocket ?? join(homedir(), '.docker/run/docker.sock');
   const entries = new Map<string, Entry>();
@@ -206,7 +193,7 @@ export async function createDataOwner(options: { directory: string; dockerSocket
   const resolvePending = async (record: RecordData, afterEngineRestart: boolean) => {
     const pending = record.pending;
     if (!pending) return;
-    if (pending.operation === 'remove-credential') return; // Only explicit deletion retries Keychain cleanup.
+    if (pending.operation === 'remove-credential') return; // Only explicit deletion retries the keystore cleanup.
     const resource = record.resources.find((item) => item.name === pending.resource)!;
     if (pending.operation === 'create-volume' || pending.operation === 'create-container') {
       const kind = pending.operation === 'create-volume' ? 'volume' : 'container';
@@ -234,7 +221,7 @@ export async function createDataOwner(options: { directory: string; dockerSocket
   const stopEntry = async (entry: Entry, stopOptions: StopOptions = {}) => {
     await stopLive(entry.record.name);
     if (entry.record.pending?.operation === 'remove-credential') {
-      entry.cleanup = { code: 'CLEANUP_INCOMPLETE', message: 'Database credential removal is pending. Retry explicit data deletion after unlocking Keychain.' };
+      entry.cleanup = { code: 'CLEANUP_INCOMPLETE', message: 'Database credential removal is pending. Retry explicit data deletion after unlocking the keystore.' };
       return;
     }
     try {
@@ -302,7 +289,7 @@ export async function createDataOwner(options: { directory: string; dockerSocket
         throwIfAborted(startOptions.signal);
         if (!entry) {
           if (entries.size >= limits.retainedEnvironments) throw new PreviewError('BUSY', 'The retained environment limit was reached.');
-          const record: Extract<RecordData, { schema: 2 }> = { schema: 2, name, owner: root.owner, engine: { id, socket: docker.socket },
+          const record: RecordData = { schema: 3, name, owner: root.owner, engine: { id, socket: docker.socket },
             resources: Object.entries(resources).map(([name, spec]) => ({ name, type: spec.type, credentialRef: fresh() })) };
           entry = { record };
           entries.set(name, entry);
@@ -310,36 +297,19 @@ export async function createDataOwner(options: { directory: string; dockerSocket
             for (const resource of record.resources) {
               throwIfAborted(startOptions.signal);
               const password = randomBytes(32).toString('hex');
-              if (!await keychain.add('database', resource.credentialRef, password, { signal: startOptions.signal })
-                || await keychain.get('database', resource.credentialRef, { signal: startOptions.signal }) !== password) {
+              if (!await keystore.add('database', resource.credentialRef, password, { signal: startOptions.signal })
+                || await keystore.get('database', resource.credentialRef, { signal: startOptions.signal }) !== password) {
                 throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'The database credential could not be stored and verified.');
               }
             }
             await save(record);
           } catch (error) { entries.delete(name); throw error; }
         }
-        if (entry.record.schema === 1) {
-          const legacy = entry.record;
-          const migrated: Extract<RecordData, { schema: 2 }> = { ...legacy, schema: 2, resources: [] };
-          for (const resource of legacy.resources) {
-            const credentialRef = legacyRef(legacy, resource);
-            await keychain.add('migration', credentialRef, resource.password, { signal: startOptions.signal });
-            if (await keychain.get('migration', credentialRef, { signal: startOptions.signal }) !== resource.password) {
-              throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'A copied database credential conflicts with the retained record. Migration was not published.');
-            }
-            const { password: _password, ...metadata } = resource;
-            migrated.resources.push({ ...metadata, credentialRef });
-          }
-          throwIfAborted(startOptions.signal);
-          await save(migrated);
-          entry.record = migrated;
-        }
         const record = entry.record;
         const passwords = new Map<string, string>();
         for (const resource of record.resources) {
-          const ref = credential(record, resource);
-          const password = await keychain.get(ref.namespace, ref.id, { signal: startOptions.signal });
-          if (password === undefined) throw new PreviewError('SECRET_REQUIRED', 'A retained database credential is missing. Restore its Keychain item before opening this data.');
+          const password = await keystore.get('database', resource.credentialRef, { signal: startOptions.signal });
+          if (password === undefined) throw new PreviewError('SECRET_REQUIRED', 'A retained database credential is missing. Restore the encrypted keystore backup before opening this data. Never generate a replacement password for retained data.');
           if (!/^[a-f0-9]{64}$/.test(password)) throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'A retained database credential is invalid.');
           passwords.set(resource.name, password);
         }
@@ -439,10 +409,9 @@ export async function createDataOwner(options: { directory: string; dockerSocket
         try {
           for (const resource of entry.record.resources) await removeVolume(entry.record, resource);
           for (const resource of entry.record.resources) {
-            const ref = credential(entry.record, resource);
             entry.record.pending = { operation: 'remove-credential', resource: resource.name };
             await save(entry.record);
-            await keychain.remove(ref.namespace, ref.id);
+            await keystore.remove('database', resource.credentialRef);
           }
           await root.remove(`${name}.json`);
           entries.delete(name);
@@ -457,7 +426,9 @@ export async function createDataOwner(options: { directory: string; dockerSocket
         let error: unknown;
         for (const entry of entries.values()) { try { await stopEntry(entry); } catch (cause) { error ??= cause; } }
         if (error) throw error;
-        await root.close(); closed = true;
+        await root.close();
+        if (!options.keystore) keystore.close();
+        closed = true;
       })().finally(() => { closing = undefined; });
       return closing;
     },

@@ -11,8 +11,7 @@ import { readBody } from './daemon.js';
 import { failure, PreviewError, throwIfAborted } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
 import { reviewStaleProject, removeStaleProject, projectRecordSchema, deleteOfflineData, offlinePreviews, removeOfflineProject, discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
-import { listSecrets } from './secrets.js';
-import { keychain } from './keychain.js';
+import { Keystore, unlockSchema } from './keystore.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
@@ -21,6 +20,8 @@ const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('reviewRemoval'), owner: ownerId }),
   z.strictObject({ action: z.literal('removeStale'), owner: ownerId, expected: projectRecordSchema, cleanupVerified: z.literal(true) }),
   z.strictObject({ action: z.literal('listSecrets') }),
+  unlockSchema.extend({ action: z.literal('unlockKeystore') }),
+  z.strictObject({ action: z.enum(['rememberKeystore', 'forgetKeystore']) }),
   z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('resetData'), owner: ownerId, resources: requestSchemas.deleteData.shape.expected.unwrap().shape.resources }).required({ expected: true }),
@@ -49,6 +50,7 @@ export async function startDashboard(options: {
   const clients = new Set<ReturnType<typeof connectPreviewDaemon>>();
   const controller = new AbortController();
   const updates = new Set<Promise<unknown>>();
+  const store = new Keystore();
   const server = createServer({ connectionsCheckingInterval: 1000 });
   server.maxConnections = 32;
   server.headersTimeout = limits.headerTimeoutMs;
@@ -112,15 +114,26 @@ export async function startDashboard(options: {
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
     const p = parsed.data;
-    if (p.action === 'listSecrets') return listSecrets({ signal });
+    if (['listSecrets', 'unlockKeystore', 'rememberKeystore', 'forgetKeystore'].includes(p.action)) {
+      const work = (async () => {
+        if (p.action === 'unlockKeystore') { const { action: _, ...input } = p; return store.unlock(input, { signal }); }
+        if (p.action === 'rememberKeystore') { await store.remember({ signal }); return {}; }
+        if (p.action === 'forgetKeystore') { await store.forget({ signal }); return {}; }
+        const keystore = await store.status({ signal });
+        return { ...(keystore.state === 'unlocked' ? await store.list({ signal }) : { ids: [], truncated: false }), keystore };
+      })();
+      updates.add(work);
+      try { return await work; } finally { updates.delete(work); }
+    }
     if (p.action === 'updateSecret') {
-      const update = keychain.update('user', p.id, p.value, { signal, interactive: true });
+      const update = store.update('user', p.id, p.value, { signal });
       updates.add(update);
       try {
         if (!await update) throw new PreviewError('SECRET_REQUIRED', 'This reference was removed. Refresh the list; its value was not recreated.');
         return { id: p.id };
       } finally { updates.delete(update); }
     }
+    if (!('owner' in p) && p.action !== 'list') throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action.');
     const owners = await discover();
     if (p.action === 'list') {
       const candidates = owners.filter(owner => !p.after || owner.id > p.after).sort((a, b) => a.id.localeCompare(b.id));
@@ -159,7 +172,7 @@ export async function startDashboard(options: {
     if (owner.retained) {
       const directory = dirname(owner.tokenFile);
       if (p.action === 'deleteData' || p.action === 'remove') {
-        const update = p.action === 'deleteData' ? deleteOfflineData(directory, p.name, { expected: p.expected }, signal) : removeOfflineProject(directory);
+        const update = p.action === 'deleteData' ? deleteOfflineData(directory, p.name, { expected: p.expected }, signal, store) : removeOfflineProject(directory);
         updates.add(update);
         try { return await update ?? null; } finally { updates.delete(update); }
       }
@@ -257,6 +270,7 @@ export async function startDashboard(options: {
     close: () => closing ??= (async () => {
       controller.abort();
       await Promise.all([Promise.allSettled(updates), ...[...clients].map(client => client.close())]);
+      store.close();
       await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
     })(),
   };

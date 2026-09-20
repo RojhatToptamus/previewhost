@@ -4,9 +4,10 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { request } from 'node:http';
 import { createPreviewRuntime } from './runtime.js';
-import { keychain, type KeychainOptions, type SecretNamespace } from './keychain.js';
-import { removeSecret, setSecret } from './secrets.js';
-import { testKeychain } from './testSupport/keychain.js';
+import { keystore } from './testSupport/keystore.js';
+import type { StoreOptions, SecretNamespace } from './keystore.js';
+import { removeSecret, setSecret } from './testSupport/keystore.js';
+import { testKeystore } from './testSupport/keystore.js';
 import type { PreviewSpec, PreviewStatus } from './contracts.js';
 
 const enabled = { skip: process.platform !== 'darwin', timeout: 60_000 };
@@ -32,11 +33,11 @@ async function outcome(runtime: Awaited<ReturnType<typeof createPreviewRuntime>>
 }
 
 test('selected references resolve once before effects, reach only declared recipients, and reread after edits', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
   await setSecret('shared', 'FAKE_shared ü\nnext'); await setSecret('other', 'FAKE_other');
-  const originalGet = keychain.get.bind(keychain);
-  const reads = t.mock.method(keychain, 'get', originalGet);
+  const originalGet = keystore.get.bind(fixture.store);
+  const reads = t.mock.method(keystore, 'get', originalGet);
   const oldAmbient = process.env.PREVIEWD_UNSELECTED_TEST;
   process.env.PREVIEWD_UNSELECTED_TEST = 'FAKE_ambient';
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['shared', 'other'],
@@ -84,8 +85,8 @@ test('selected references resolve once before effects, reach only declared recip
   }
 });
 
-test('explicit failed-start retry recovers an unlocked Keychain and repeats ordinary authorization', enabled, async t => {
-  const fixture = await testKeychain(t);
+test('explicit failed-start retry recovers an unlocked keystore and repeats ordinary authorization', enabled, async t => {
+  const fixture = await testKeystore(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
   await setSecret('retry-project/api', 'FAKE_retry');
   let authorizations = 0;
@@ -112,13 +113,13 @@ test('explicit failed-start retry recovers an unlocked Keychain and repeats ordi
 });
 
 test('unselected and canceled secret resolution create no listener or command', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
   await setSecret('selected', 'FAKE_value');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['selected'], authorize: () => true });
   const spec: PreviewSpec = { name: 'denied', type: 'command', cwd: fixture.directory, command: [process.execPath, 'app.mjs'], env: { VALUE: { secret: 'not-selected' } } };
   try {
-    const reads = t.mock.method(keychain, 'get', keychain.get.bind(keychain));
+    const reads = t.mock.method(keystore, 'get', keystore.get.bind(fixture.store));
     const denied = await outcome(runtime, await runtime.start(spec));
     assert.equal(denied.error?.code, 'SECRET_DENIED');
     assert.equal(reads.mock.callCount(), 0);
@@ -126,7 +127,7 @@ test('unselected and canceled secret resolution create no listener or command', 
     let entered!: () => void;
     const reading = new Promise<void>((resolve) => { entered = resolve; });
     reads.mock.restore();
-    t.mock.method(keychain, 'get', async (_namespace: SecretNamespace, _id: string, options: KeychainOptions = {}) => {
+    t.mock.method(keystore, 'get', async (_namespace: SecretNamespace, _id: string, options: StoreOptions = {}) => {
       entered();
       return new Promise<string>((_resolve, reject) => options.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
     });
@@ -141,7 +142,7 @@ test('unselected and canceled secret resolution create no listener or command', 
 });
 
 test('expanded inputs and external secret URLs are validated before listeners, commands, or managed data', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
   await setSecret('large', '界'.repeat(1365));
   await setSecret('invalid-url', 'FAKE_not_a_database_url');

@@ -8,7 +8,7 @@ export const secretsPage = `<!doctype html>
 <p id="message" role="status" aria-live="polite">Loading this request…</p>
 <dl id="context"></dl><form id="form" hidden autocomplete="off"><div id="fields"></div>
 <label class="reveal" id="reveal-label"><input type="checkbox" id="reveal"> Show values</label>
-<div class="actions"><button type="submit" id="submit" class="primary hero">Save to Keychain</button><button type="button" id="cancel" class="hero">Cancel</button></div><p id="scope"></p></form>
+<div class="actions"><button type="submit" id="submit" class="primary hero">Save secrets</button><button type="button" id="cancel" class="hero">Cancel</button></div><p id="scope"></p></form>
 <div id="result" class="notice" role="status" tabindex="-1"></div></main></body></html>`;
 
 export const secretsStyle = uiStyle + `
@@ -25,6 +25,7 @@ dd { margin:0; min-width:0; overflow-wrap:anywhere; }
 .field+.field { border-top:1px solid var(--divider); }
 label { display:block; }
 .recipient { display:block; font-size:12.5px; color:var(--t4); margin:4px 0 10px; overflow-wrap:anywhere; }
+input[type=password] { display:block; width:100%; margin-top:8px; padding:12px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t1); }
 textarea { width:100%; min-height:80px; padding:12px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t1); resize:vertical; -webkit-text-security:disc; }
 form.show textarea { -webkit-text-security:none; }
 .reveal { display:flex; align-items:center; gap:8px; color:var(--t4); font-size:13px; margin:8px 0 24px; }
@@ -54,8 +55,9 @@ export const secretsScript = "'use strict';" + themeScript + `
   const result = document.getElementById('result');
   let needsApproval = false;
   let editing = false;
+  let store;
   const controls = () => form.querySelectorAll('button,textarea,input');
-  const clear = () => { fields.querySelectorAll('textarea').forEach(field => { field.value = ''; }); };
+  const clear = () => { fields.querySelectorAll('textarea,input[type=password]').forEach(field => { field.value = ''; }); };
   async function call(route, body) {
     const response = await fetch('/secrets/' + route, { method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + capability }, body: JSON.stringify(body) });
@@ -73,11 +75,12 @@ export const secretsScript = "'use strict';" + themeScript + `
   function completion(request) {
     if (editing) {
       finish(request.state === 'complete' ? 'Secret updated' : 'Secret update needs attention', request.state === 'complete' ?
-        'Saved to Keychain. Future starts using this reference receive the new value. Running applications keep their current value. You can close this tab.' :
+        'Saved to the keystore. Future starts using this reference receive the new value. Running applications keep their current value. You can close this tab.' :
         (request.error?.message || 'The update did not finish.') + ' Open a new edit form when you are ready to retry.', request.state === 'complete' ? '' : 'warning');
       return;
     }
-    const saved = request.saved.length ? 'Saved: ' + request.saved.join(', ') + '. ' : '';
+    const warning = request.keystore?.warning ? request.keystore.warning + ' ' : '';
+    const saved = warning + (request.saved.length ? 'Saved: ' + request.saved.join(', ') + '. ' : '');
     const reused = request.alreadyPresent.length ? 'Reused existing entries: ' + request.alreadyPresent.join(', ') + '. Those values were kept; any input for them was not applied. ' : '';
     finish(request.state === 'complete' ? 'Secret setup complete' : 'Some entries still need attention', saved + reused + (request.state === 'complete' ?
       'No application was started. If your agent stopped waiting, return to it and send “Secrets saved—continue”.' :
@@ -113,6 +116,18 @@ export const secretsScript = "'use strict';" + themeScript + `
       } catch (error) { finish('Could not approve access', error.message + ' Check setup status in your client before retrying.', 'warning'); }
       return;
     }
+    if (store && store.state !== 'unlocked') {
+      const password = document.getElementById('password');
+      const input = { password: password.value, create: store.state === 'new',
+        confirmation: document.getElementById('confirmation')?.value, remember: document.getElementById('remember')?.checked || false };
+      clear(); controls().forEach(control => { control.disabled = true; });
+      try {
+        const unlocked = await call('unlock', input);
+        if (unlocked.state === 'pending') render(unlocked); else completion(unlocked);
+      } catch (error) { message.textContent = error.message; controls().forEach(control => { control.disabled = false; }); password.focus(); }
+      finally { input.password = ''; input.confirmation = ''; }
+      return;
+    }
     const values = Object.create(null);
     for (const field of fields.querySelectorAll('textarea')) {
       const value = field.value;
@@ -134,22 +149,44 @@ export const secretsScript = "'use strict';" + themeScript + `
   function render(request) {
     clear(); fields.replaceChildren(); document.getElementById('context').replaceChildren();
     editing = request.mode === 'edit';
+    store = request.keystore;
     document.getElementById('crumb').textContent = editing ? 'Edit secret' : 'Private setup';
     needsApproval = request.requirements.some(item => !item.selected);
     document.getElementById('title').textContent = needsApproval ? 'Allow these secret names?' : request.mode === 'edit' ? 'Replace a stored secret' : 'Add missing secrets';
-    message.textContent = needsApproval ? 'These exact Keychain names are shared across projects that select them. Existing values will be reused, never shown or overwritten.' :
+    message.textContent = needsApproval ? 'These exact stored references are shared across projects that select them. Existing values will be reused, never shown or overwritten.' :
       request.mode === 'edit' ? 'Replacement affects all future readers of this exact secret name. Existing values are never shown.' :
       'Enter only the missing values below. An entry created elsewhere while this form is open keeps its value.';
     document.getElementById('scope').textContent = needsApproval ?
       'Allow this runtime to use these names until it shuts down. Any execution-authorized preview on this runtime can bind an allowed name. This does not start an application.' :
-      editing ? 'Save replaces this exact reference in macOS Keychain. Running applications and access approvals stay unchanged.' :
-      'Save stores values in macOS Keychain without starting an application. Earlier access approvals last until this runtime shuts down.';
-    document.getElementById('submit').textContent = needsApproval ? 'Allow names' : 'Save to Keychain';
+      editing ? 'Save replaces this exact reference in the encrypted keystore. Running applications and access approvals stay unchanged.' :
+      'Save stores values in the encrypted keystore without starting an application. Earlier access approvals last until this runtime shuts down.';
+    document.getElementById('submit').textContent = needsApproval ? 'Allow names' : 'Save secrets';
     document.getElementById('reveal-label').hidden = needsApproval || editing;
     describe(editing ? 'Local address' : 'Runtime', location.origin, true);
     if (request.name) describe('Preview', request.name);
     for (const source of request.sources) describe('Source directory', source);
     describe('Expires', new Date(request.expiresAt).toLocaleTimeString(), true);
+    if (!needsApproval && store && store.state !== 'unlocked') {
+      const creating = store.state === 'new';
+      document.getElementById('title').textContent = creating ? 'Create your keystore' : 'Unlock your keystore';
+      message.textContent = store.warning || (creating ? 'Choose a password of at least 12 characters. Keep it somewhere safe; Previewhost cannot recover it.' : 'Enter your password to unlock this owner until it shuts down.');
+      document.getElementById('scope').textContent = 'Unlocking does not grant access to more secret references or start applications. Other owners need their own unlock.';
+      for (const [id, label] of [['password', 'Keystore password'], ...(creating ? [['confirmation', 'Confirm password']] : [])]) {
+        const wrapper = document.createElement('label'); wrapper.className = 'field'; wrapper.textContent = label;
+        const input = document.createElement('input'); input.id = id; input.type = 'password'; input.required = true; input.maxLength = 4096;
+        input.autocomplete = creating ? 'new-password' : 'current-password'; wrapper.append(input); fields.append(wrapper);
+      }
+      if (store.canRemember) {
+        const label = document.createElement('label'); label.className = 'reveal';
+        const input = document.createElement('input'); input.id = 'remember'; input.type = 'checkbox';
+        label.append(input, 'Remember unlock on this Mac'); fields.append(label);
+      }
+      document.getElementById('submit').textContent = creating ? 'Create keystore' : 'Unlock';
+      document.getElementById('reveal-label').hidden = true;
+      controls().forEach(control => { control.disabled = false; }); form.hidden = false;
+      document.getElementById('password').focus(); return;
+    }
+    if (store?.warning) message.textContent = store.warning;
     for (const id of request.remaining) {
       const requirement = request.requirements.find(item => item.id === id);
       const wrapper = document.createElement('div'); wrapper.className = 'field';

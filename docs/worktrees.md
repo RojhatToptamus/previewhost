@@ -178,7 +178,8 @@ See [recovery limits](security.md#recovery) before source removal after a crash.
 
 ## Secret names across worktrees
 
-The same exact `{secret: ID}` uses one Keychain value wherever that name is approved.
+The same exact `{secret: ID}` uses one keystore value wherever that name is approved.
+Each owner also needs password unlock unless automatic unlock was remembered on macOS.
 Each automatic worktree owner needs its own private approval, unless the name was explicitly selected at launch.
 Existing values are reused; the form collects only missing values. For a different worktree value, choose a different qualified ID and change that binding explicitly.
 Do not overwrite the shared entry or introduce a hidden worktree-specific copy. YAML remains optional.

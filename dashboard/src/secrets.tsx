@@ -18,13 +18,16 @@ import {
   FieldDescription,
   FieldError,
 } from "./components/ui/field";
+import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Spinner } from "./components/ui/spinner";
 import { EmptyState, Loading, Notice, SearchField } from "./components/shared";
 
-type SecretList = { ids: string[]; truncated: boolean };
+type StoreStatus = { state: "new" | "locked" | "unlocked"; canRemember: boolean; warning?: string };
+type SecretList = { ids: string[]; truncated: boolean; keystore: StoreStatus };
 export function SecretManager({ revision }: { revision: number }) {
+  const [unlockRevision, setUnlockRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [list, setList] = useState<SecretList>();
   const [error, setError] = useState("");
@@ -60,7 +63,7 @@ export function SecretManager({ revision }: { revision: number }) {
       controller.abort();
       clearInterval(timer);
     };
-  }, [revision, editing]);
+  }, [revision, editing, unlockRevision]);
   const ids =
     list?.ids.filter((id) =>
       id.toLowerCase().includes(query.trim().toLowerCase()),
@@ -71,13 +74,14 @@ export function SecretManager({ revision }: { revision: number }) {
       <p className="summary">
         Changes apply on the next start in every project using the reference.
       </p>
+      {list && <KeystoreControls status={list.keystore} onUnlock={() => setUnlockRevision(value => value + 1)} />}
       {error ? (
         <Notice title="Secrets unavailable" error>
           {error} Use Refresh to try again.
         </Notice>
       ) : !list ? (
         <Loading>Loading secret references…</Loading>
-      ) : !list.ids.length ? (
+      ) : list.keystore.state !== "unlocked" ? null : !list.ids.length ? (
         <EmptyState title="No stored secrets">
           Add secrets through private setup when your agent requests them.
         </EmptyState>
@@ -95,7 +99,7 @@ export function SecretManager({ revision }: { revision: number }) {
           </div>
           {list.truncated && (
             <p className="warning">
-              Showing the first 128 references returned by Keychain. Additional
+              Showing the first 128 references in the keystore. Additional
               entries are not listed.
             </p>
           )}
@@ -239,8 +243,7 @@ function SecretRow({
                   aria-describedby="secret-help secret-error"
                 />
                 <FieldDescription id="secret-help">
-                  Stored values are never shown. Saved securely in macOS
-                  Keychain.
+                  Stored values are never shown. Saved in your encrypted keystore.
                 </FieldDescription>
                 {error && <FieldError id="secret-error">{error}</FieldError>}
               </Field>
@@ -264,4 +267,61 @@ function SecretRow({
       </Dialog>
     </div>
   );
+}
+
+function KeystoreControls({ status, onUnlock }: { status: StoreStatus; onUnlock(): void }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const password = useRef<HTMLInputElement>(null);
+  const confirmation = useRef<HTMLInputElement>(null);
+  const remember = useRef<HTMLInputElement>(null);
+  const creating = status.state === "new";
+  useEffect(() => {
+    const clear = () => {
+      if (password.current) password.current.value = "";
+      if (confirmation.current) confirmation.current.value = "";
+    };
+    window.addEventListener("pagehide", clear);
+    return () => { clear(); window.removeEventListener("pagehide", clear); };
+  }, []);
+  async function submit(event: React.SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const input = { action: "unlockKeystore", create: creating, password: password.current!.value,
+      confirmation: confirmation.current?.value, remember: remember.current?.checked ?? false };
+    password.current!.value = "";
+    if (confirmation.current) confirmation.current.value = "";
+    setBusy(true); setError("");
+    try {
+      const result = await call<StoreStatus>(input);
+      setMessage(result.warning ?? ""); onUnlock();
+    } catch (error) { setError(errorMessage(error)); }
+    finally { input.password = ""; input.confirmation = ""; setBusy(false); password.current?.focus(); }
+  }
+  async function cache(action: "rememberKeystore" | "forgetKeystore") {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      await call({ action });
+      setMessage(action === "rememberKeystore" ? "Automatic unlock saved on this Mac. Keep your password for recovery." : "Automatic unlock removed. Already unlocked sessions remain unlocked until shutdown.");
+    } catch (error) { setError(errorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  return <section className="mb-6 flex max-w-xl flex-col gap-4">
+    {status.state !== "unlocked" ? <form onSubmit={submit} className="flex flex-col gap-4">
+      <h2>{creating ? "Create your keystore" : "Unlock your keystore"}</h2>
+      <p>{creating ? "Choose at least 12 characters. Keep your password safe; Previewhost cannot recover it." : "Unlock this dashboard session to manage stored values. Project owners unlock separately through private setup."}</p>
+      <Field><FieldLabel htmlFor="vault-password">Keystore password</FieldLabel>
+        <Input id="vault-password" ref={password} type="password" autoComplete={creating ? "new-password" : "current-password"} required maxLength={4096} disabled={busy} /></Field>
+      {creating && <Field><FieldLabel htmlFor="vault-confirm">Confirm password</FieldLabel>
+        <Input id="vault-confirm" ref={confirmation} type="password" autoComplete="new-password" required maxLength={4096} disabled={busy} /></Field>}
+      {status.canRemember && <label className="flex items-center gap-2"><input type="checkbox" ref={remember} disabled={busy} />Remember unlock on this Mac</label>}
+      <Button type="submit" disabled={busy} className="self-start">{busy ? "Working…" : creating ? "Create keystore" : "Unlock"}</Button>
+    </form> : status.canRemember ? <div className="flex flex-wrap gap-2">
+      <Button variant="outline" disabled={busy} onClick={() => void cache("rememberKeystore")}>Remember unlock on this Mac</Button>
+      <Button variant="outline" disabled={busy} onClick={() => void cache("forgetKeystore")}>Forget automatic unlock</Button>
+    </div> : null}
+    {(message || status.warning) && <p role="status">{message || status.warning}</p>}
+    {error && <FieldError>{error}</FieldError>}
+  </section>;
 }

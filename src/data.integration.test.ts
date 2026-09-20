@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -11,9 +11,7 @@ import { createClient } from 'redis';
 import { createDataOwner, type DatabaseBinding, type DataOwner } from './data.js';
 import { Docker } from './docker.js';
 import { probeDatabase } from './database-connections.js';
-import { testKeychain } from './testSupport/keychain.js';
-import { keychain } from './keychain.js';
-import { PreviewError } from './errors.js';
+import { testKeystore } from './testSupport/keystore.js';
 import { createPreviewRuntime } from './runtime.js';
 
 const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
@@ -22,7 +20,7 @@ const specs = { database: { type: 'postgres' as const }, cache: { type: 'redis' 
 const signal = () => new AbortController().signal;
 
 test('real owned PostgreSQL and Redis retain authenticated data across stop/reopen and report unexpected exit', enabled, async (t) => {
-  await testKeychain(t);
+  await testKeystore(t);
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-real-data-'));
   let owner = await createDataOwner({ directory, dockerSocket });
   const docker = await Docker.connect(dockerSocket!);
@@ -84,7 +82,7 @@ test('real owned PostgreSQL and Redis retain authenticated data across stop/reop
 });
 
 test('real owner SIGKILL releases the kernel lock; recovery removes only its containers and keeps database data', enabled, async (t) => {
-  const keychainFixture = await testKeychain(t);
+  const keystoreFixture = await testKeystore(t);
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-owner-crash-'));
   const otherDirectory = await mkdtemp(join(tmpdir(), 'previewhost-other-owner-'));
   let owner: DataOwner | undefined;
@@ -98,7 +96,7 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
     neighbor.on('error', () => {});
     await neighbor.connect(); await neighbor.set('neighbor-marker', marker); neighbor.destroy();
     const script = `
-      ${keychainFixture.installSource}
+      ${keystoreFixture.installSource}
       import {createDataOwner} from ${JSON.stringify(new URL('./data.js', import.meta.url).href)};
       import {Client} from ${JSON.stringify(import.meta.resolve('pg'))};
       import {createClient} from ${JSON.stringify(import.meta.resolve('redis'))};
@@ -138,71 +136,8 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
   }
 });
 
-test('legacy migration retries exact copied passwords and preserves real PostgreSQL/Redis authentication and data', enabled, async (t) => {
-  const fixture = await testKeychain(t);
-  const directory = join(fixture.directory, 'data');
-  let owner = await createDataOwner({ directory, dockerSocket });
-  const marker = randomBytes(16).toString('hex');
-  try {
-    const bindings = await owner.open('legacy', specs, { signal: signal(), onFailure(error) { assert.fail(error); } });
-    await clients(bindings, async (pg, redis) => {
-      await pg.query('CREATE TABLE legacy_marker(value text NOT NULL)');
-      await pg.query('INSERT INTO legacy_marker VALUES($1)', [marker]);
-      await redis.set('legacy-marker', marker);
-    });
-    await owner.stop('legacy'); await owner.close();
-    const filename = join(directory, 'legacy.json');
-    const current = JSON.parse(await readFile(filename, 'utf8'));
-    const legacy = { ...current, schema: 1, resources: [] as Array<Record<string, string>> };
-    for (const resource of current.resources) {
-      const { credentialRef, ...metadata } = resource;
-      const password = await fixture.store.get('database', credentialRef);
-      assert.ok(password);
-      legacy.resources.push({ ...metadata, password });
-      await fixture.store.remove('database', credentialRef);
-    }
-    const original = `${JSON.stringify(legacy)}\n`;
-    await writeFile(filename, original, { mode: 0o600 });
-    await fixture.control('lock');
-    owner = await createDataOwner({ directory, dockerSocket });
-    await owner.stop('legacy'); // Metadata recovery never asks Keychain to unlock.
-    await assert.rejects(owner.open('legacy', specs, { signal: signal(), onFailure() {} }), { code: 'SECRET_STORE_UNAVAILABLE' });
-    assert.equal(await readFile(filename, 'utf8'), original);
-    await fixture.control('unlock');
-    const add = keychain.add.bind(keychain);
-    const interrupted = t.mock.method(keychain, 'add', async (...args: Parameters<typeof add>) => {
-      if (args[1].endsWith('/cache')) throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Synthetic interrupted migration.');
-      return add(...args);
-    });
-    await assert.rejects(owner.open('legacy', specs, { signal: signal(), onFailure() {} }), { code: 'SECRET_STORE_UNAVAILABLE' });
-    interrupted.mock.restore();
-    assert.equal(await readFile(filename, 'utf8'), original);
-    assert.equal(await fixture.store.get('migration', `${legacy.owner}/legacy/database`), legacy.resources[0].password);
-    await fixture.store.add('migration', `${legacy.owner}/legacy/cache`, 'f'.repeat(64));
-    await assert.rejects(owner.open('legacy', specs, { signal: signal(), onFailure() {} }), { code: 'SECRET_STORE_UNAVAILABLE' });
-    assert.equal(await readFile(filename, 'utf8'), original);
-    await fixture.store.update('migration', `${legacy.owner}/legacy/cache`, legacy.resources[1].password);
-    const migrated = await owner.open('legacy', specs, { signal: signal(), onFailure(error) { assert.fail(error); } });
-    const record = JSON.parse(await readFile(filename, 'utf8'));
-    assert.equal(record.schema, 2);
-    assert.deepEqual(record.resources.map((item: { credentialRef: string }) => item.credentialRef),
-      [`${legacy.owner}/legacy/database`, `${legacy.owner}/legacy/cache`]);
-    for (const resource of legacy.resources) assert.ok(!JSON.stringify(record).includes(resource.password));
-    await clients(migrated, async (pg, redis) => {
-      assert.equal((await pg.query('SELECT value FROM legacy_marker')).rows[0].value, marker);
-      assert.equal(await redis.get('legacy-marker'), marker);
-    });
-    await fixture.control('lock');
-    await owner.stop('legacy'); await owner.close();
-    await fixture.control('unlock');
-    owner = await createDataOwner({ directory, dockerSocket });
-    await owner.deleteData('legacy');
-    for (const resource of record.resources) assert.equal(await fixture.store.has('migration', resource.credentialRef), false);
-  } finally { await fixture.control('unlock'); await cleanup(owner, directory); }
-});
-
 test('missing retained credentials never regenerate; locked deletion persists exact debt and remains retryable after restart', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const directory = join(fixture.directory, 'data');
   const filename = join(directory, 'retained.json');
   const database = { cache: { type: 'redis' as const } };

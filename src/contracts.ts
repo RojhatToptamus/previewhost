@@ -38,7 +38,7 @@ const directory = z.string().min(1).max(4096)
 const envKey = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(128);
 const literal = z.string().max(4096).refine((value) => !value.includes('\0'), 'Values cannot contain NUL.');
 export const secretIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'Use a secret name of 1–128 letters, numbers, dots, dashes, underscores or slashes.')
-  .describe('Stored Keychain reference, not the application environment-variable name. For a new binding, choose a project-specific reference, for example API_SECRET: {secret: "my-project/dev/api"}. Preserve existing references. Use an existing exact reference only for intentional sharing; matching references share one value across projects and worktrees after approval.');
+  .describe('Stored secret reference, not the application environment-variable name. For a new binding, choose a project-specific reference, for example API_SECRET: {secret: "my-project/dev/api"}. Preserve existing references. Use an existing exact reference only for intentional sharing; matching references share one value across projects and worktrees after approval.');
 const inputReferenceSchema = z.strictObject({ fromEnv: envKey.describe('Environment input explicitly selected by the daemon owner; not an arbitrary client or shell variable.') });
 export const scalarValueSchema = z.union([literal, inputReferenceSchema, z.strictObject({ secret: secretIdSchema })]);
 export type ScalarValue = z.output<typeof scalarValueSchema>;
@@ -131,6 +131,7 @@ export interface SecretSetupStatus extends SecretSetupContext {
   alreadyPresent: string[];
   remaining: string[];
   error?: Failure;
+  keystore?: import('./keystore.js').KeystoreStatus;
 }
 export interface SecretSetupApi {
   secretsSetup(spec: PreviewSpec, options?: { reopen?: boolean; signal?: AbortSignal }): Promise<SecretSetupStatus>;

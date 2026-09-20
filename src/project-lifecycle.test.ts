@@ -13,14 +13,14 @@ import { startDashboard } from './dashboard.js';
 import { reviewStaleProject, removeStaleProject, writeProjectRecord, connectProject, deleteOfflineData, discoverProjectOwners, lockProject, offlinePreviews, projectOwnerDirectory, readProjectRecord, removeOfflineProject } from './project.js';
 import { createDataOwner } from './data.js';
 import { SecretSetup } from './secrets-setup.js';
-import { testKeychain } from './testSupport/keychain.js';
+import { testKeystore } from './testSupport/keystore.js';
 import type { PreviewSpec } from './contracts.js';
 
 const execute = promisify(execFile);
 const mac = { skip: process.platform !== 'darwin' };
 
 test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', mac, async t => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
   const tokenFile = join(fixture.directory, 'control/token');
   const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
@@ -56,7 +56,7 @@ test('entry removal preserves neighbors and refuses active, stale, and private-s
 });
 
 test('an empty owner can clear canceled secret editing without deleting the saved reference', mac, async t => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   await fixture.store.add('user', 'disposable/shared', 'FAKE');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['disposable/shared'], authorize: () => true });
   const tokenFile = join(fixture.directory, 'control/token');
@@ -140,12 +140,12 @@ const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
 test('offline projects keep real PostgreSQL data discoverable and delete only explicitly confirmed resources', {
   skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000,
 }, async t => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-offline-project-')));
   const ownerDirectory = projectOwnerDirectory(project);
   const dataDirectory = join(fixture.directory, 'retained');
   const hook = join(fixture.directory, 'preload.mjs');
-  await writeFile(hook, fixture.installSource.replace('/.local/test-build/keychain.js', '/dist/keychain.js'));
+  await writeFile(hook, fixture.installSource.replaceAll('/.local/test-build/', '/dist/'));
   await fixture.store.add('user', 'disposable/shared/api', 'FAKE_SHARED');
   const pg = JSON.stringify(import.meta.resolve('pg'));
   const spec: PreviewSpec = { name: 'app', type: 'environment', primary: 'web', services: {
@@ -187,14 +187,35 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
     await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}, canceled.signal), { code: 'CLOSED' });
     await fixture.control('lock');
     await assert.rejects(authorized.deleteData('app', { expected: { attemptId: null, resources: data.resources } }), { code: 'SECRET_STORE_UNAVAILABLE' });
-    assert.equal((await offlinePreviews(record))[0].data!.cleanup?.operation, 'remove-credential');
+    assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined, 'A locked store must block deletion before Docker changes.');
+    const id = createHash('sha256').update(project).digest('hex');
+    let launch = '';
+    const dashboard = await startDashboard({
+      discover: async () => [{ id, tokenFile: join(ownerDirectory, 'token'), retained: record }],
+      openBrowser: async url => { launch = url; },
+    });
+    try {
+      await dashboard.open();
+      const post = async (body: object, status = 200) => {
+        const response = await fetch(dashboard.endpoint + '/api', { method: 'POST', headers: {
+          origin: dashboard.endpoint, authorization: 'Bearer ' + new URL(launch).hash.slice(1), 'content-type': 'application/json',
+        }, body: JSON.stringify(body) });
+        assert.equal(response.status, status);
+        return response.json();
+      };
+      const deletion = { action: 'deleteData', owner: id, name: 'app', expected: { attemptId: null, resources: data.resources } };
+      assert.equal((await post(deletion, 400)).error.code, 'SECRET_STORE_UNAVAILABLE');
+      assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined);
+      assert.equal((await post({ action: 'unlockKeystore', password: 'FAKE_fixture_password' })).result.state, 'unlocked');
+      assert.equal((await post(deletion)).error, undefined);
+    } finally { await dashboard.close(); }
     await fixture.control('unlock');
-    await authorized.deleteData('app', { expected: { attemptId: null, resources: data.resources } });
     assert.deepEqual(await client.list(), []);
     assert.equal(await fixture.store.has('user', 'disposable/shared/api'), true);
     await client.remove();
     assert.equal(await readProjectRecord(ownerDirectory), undefined);
   } finally {
+    await fixture.control('unlock');
     await client.shutdown().catch(() => {});
     const record = await readProjectRecord(ownerDirectory).catch(() => undefined);
     if (record && !record.endpoint) for (const p of await offlinePreviews(record)) await deleteOfflineData(ownerDirectory, p.name, {});

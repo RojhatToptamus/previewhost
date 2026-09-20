@@ -8,13 +8,11 @@ static NSDictionary *perform(NSDictionary *input, SecKeychainRef keychain) {
     NSString *operation = input[@"operation"];
     NSString *space = input[@"namespace"];
     NSString *account = input[@"id"];
-    NSSet *operations = [NSSet setWithArray:@[@"get", @"has", @"add", @"update", @"remove", @"list"]];
-    NSSet *spaces = [NSSet setWithArray:@[@"user", @"database", @"migration"]];
+    NSSet *operations = [NSSet setWithArray:@[@"get", @"add", @"update", @"remove"]];
+    NSSet *spaces = [NSSet setWithArray:@[@"unlock"]];
     if (![operation isKindOfClass:NSString.class] || ![operations containsObject:operation]
         || ![space isKindOfClass:NSString.class] || ![spaces containsObject:space]) return result(errSecParam);
-    BOOL listing = [operation isEqualToString:@"list"];
-    if (listing && ![space isEqualToString:@"user"]) return result(errSecParam);
-    if (!listing && (![account isKindOfClass:NSString.class] || account.length == 0 || account.length > 512
+    if ((![account isKindOfClass:NSString.class] || account.length == 0 || account.length > 512
         || [account rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location != NSNotFound)) return result(errSecParam);
     BOOL writing = [@[@"add", @"update", @"remove"] containsObject:operation];
     BOOL interactive = writing && [input[@"interactive"] isEqual:@YES];
@@ -27,7 +25,7 @@ static NSDictionary *perform(NSDictionary *input, SecKeychainRef keychain) {
     NSString *service = [@"dev.previewhost." stringByAppendingString:space];
     NSMutableDictionary *query = [@{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrService: service, (__bridge id)kSecMatchSearchList: @[(__bridge id)keychain] } mutableCopy];
-    if (!listing) query[(__bridge id)kSecAttrAccount] = account;
+    query[(__bridge id)kSecAttrAccount] = account;
     if ([operation isEqualToString:@"remove"]) return result(SecItemDelete((__bridge CFDictionaryRef)query));
     if ([operation isEqualToString:@"add"] || [operation isEqualToString:@"update"]) {
         NSString *value = input[@"data"];
@@ -44,29 +42,14 @@ static NSDictionary *perform(NSDictionary *input, SecKeychainRef keychain) {
         query[(__bridge id)kSecAttrLabel] = [@"previewhost: " stringByAppendingString:account];
         return result(SecItemAdd((__bridge CFDictionaryRef)query, NULL));
     }
-    query[(__bridge id)kSecMatchLimit] = listing ? @129 : (__bridge id)kSecMatchLimitOne;
-    BOOL readValue = [operation isEqualToString:@"get"];
-    query[(__bridge id)(readValue ? kSecReturnData : kSecReturnAttributes)] = @YES;
+    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+    query[(__bridge id)kSecReturnData] = @YES;
     CFTypeRef found = NULL;
     status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &found);
     id value = CFBridgingRelease(found);
     if (status) return result(status);
-    if (readValue) {
-        if (![value isKindOfClass:NSData.class] || [value length] == 0 || [value length] > 4096) return result(errSecDecode);
-        NSString *text = [[NSString alloc] initWithData:value encoding:NSUTF8StringEncoding];
-        if (!text || memchr([value bytes], 0, [value length])) return result(errSecDecode);
-        // JSON string parsing can discard a leading U+FEFF. Transport the original bytes.
-        return @{ @"status": @0, @"data": [value base64EncodedStringWithOptions:0] };
-    }
-    if (!listing) return result(errSecSuccess);
-    if (![value isKindOfClass:NSArray.class] || [value count] > 129) return result(errSecDecode);
-    NSMutableArray *names = [NSMutableArray array];
-    for (NSDictionary *item in value) {
-        NSString *name = item[(__bridge id)kSecAttrAccount];
-        if (![name isKindOfClass:NSString.class] || name.length > 512) return result(errSecDecode);
-        if (names.count < 128) [names addObject:name];
-    }
-    return @{ @"status": @0, @"ids": names, @"truncated": [NSNumber numberWithBool:[value count] > 128] };
+    if (![value isKindOfClass:NSData.class] || [value length] != 64) return result(errSecDecode);
+    return @{ @"status": @0, @"data": [value base64EncodedStringWithOptions:0] };
 }
 
 int main(int argc, const char *argv[]) {

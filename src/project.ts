@@ -13,6 +13,7 @@ import { limits, secretIdSchema, type Failure, type DeleteDataOptions, type Prev
 import { PreviewError, failure } from './errors.js';
 import { canonicalDirectory, isWithin } from './spec.js';
 import { createDataOwner, withRetainedData } from './data.js';
+import { Keystore } from './keystore.js';
 
 export interface ProjectOptions extends ClientOptions {
   projectDirectory?: string;
@@ -183,7 +184,7 @@ export async function offlinePreviews(record: ProjectRecord): Promise<PreviewSta
   return withRetainedData(record.dataDirectory, async records => records.map(({ name, data }) => ({ name, busy: false, data })));
 }
 
-export async function deleteOfflineData(directory: string, name: string, options: DeleteDataOptions, signal?: AbortSignal) {
+export async function deleteOfflineData(directory: string, name: string, options: DeleteDataOptions, signal?: AbortSignal, keystore?: Keystore) {
   return manageOfflineProject(directory, async record => {
     const previews = await offlinePreviews(record);
     const data = previews.find(p => p.name === name)?.data;
@@ -193,9 +194,15 @@ export async function deleteOfflineData(directory: string, name: string, options
     }
     if (data.cleanup && data.cleanup.operation !== 'remove-credential') throw new PreviewError('CLEANUP_INCOMPLETE', data.cleanup.message);
     if (signal?.aborted) throw new PreviewError('CLOSED', 'Data deletion was canceled before it began.');
-    const owner = await createDataOwner({ directory: record.dataDirectory!, dockerSocket: record.dockerSocket });
-    try { await owner.deleteData(name); }
-    finally { await owner.close(); }
+    const store = keystore ?? new Keystore();
+    try {
+      if ((await store.status({ signal })).state !== 'unlocked') {
+        throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Unlock Secret Manager in the dashboard, then retry Delete data there. CLI deletion needs automatic unlock on macOS. No data was deleted.');
+      }
+      const owner = await createDataOwner({ directory: record.dataDirectory!, dockerSocket: record.dockerSocket, keystore: store });
+      try { await owner.deleteData(name); }
+      finally { await owner.close(); }
+    } finally { if (!keystore) store.close(); }
     return { name, busy: false };
   });
 }

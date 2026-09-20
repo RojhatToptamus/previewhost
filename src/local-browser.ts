@@ -5,8 +5,10 @@ import { PreviewError } from './errors.js';
 export async function openLocalBrowser(url: string, signal: AbortSignal): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const env: NodeJS.ProcessEnv = {};
-    for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) env[key] = process.env[key];
-    const child = spawn('/usr/bin/open', [url], { stdio: 'ignore', env });
+    for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'SystemRoot']) if (process.env[key] !== undefined) env[key] = process.env[key];
+    const command = process.platform === 'darwin' ? '/usr/bin/open' : process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
+    const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
+    const child = spawn(command, args, { stdio: 'ignore', env });
     let failed = false;
     const abort = () => { failed = true; child.kill('SIGKILL'); };
     const timer = setTimeout(abort, 5000);

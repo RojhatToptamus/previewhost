@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { limits, type PreviewSpec, type SecretSetupContext, type SecretSetupStatus, type WaitOptions } from './contracts.js';
 import { failure, PreviewError, throwIfAborted } from './errors.js';
-import { keychain, validateSecretValue } from './keychain.js';
+import { validateSecretValue, unlockSchema } from './keystore.js';
 import type { PreparedSecretSetup, PreviewRuntime } from './runtime.js';
 
 interface Entry {
@@ -34,15 +34,17 @@ export class SecretSetup {
     this.prune();
     if (this.closed) throw new PreviewError('CLOSED', 'The daemon is shutting down.');
     const { context, approve } = await this.runtime.prepareSecretSetup(input, signal);
-    const { alreadyPresent, remaining } = await this.presence(context, signal);
+    const { alreadyPresent, remaining, keystore } = await this.presence(context, signal);
+    const needsForm = remaining.length > 0 || keystore.state !== 'unlocked';
     throwIfAborted(signal);
     this.prune();
     if (this.closed) throw new PreviewError('CLOSED', 'The daemon is shutting down.');
     const concurrent = this.findPending(context);
     if (concurrent) {
-      if (concurrent.work || JSON.stringify(concurrent.status.remaining) === JSON.stringify(remaining)) {
+      if (concurrent.work || (needsForm && JSON.stringify(concurrent.status.remaining) === JSON.stringify(remaining))) {
         if (!concurrent.work) {
           concurrent.status.requirements = context.requirements;
+          concurrent.status.keystore = keystore;
           concurrent.approve = approve;
         }
         if (reopen && !concurrent.work) await this.launch(concurrent, signal);
@@ -55,10 +57,10 @@ export class SecretSetup {
     if ([...this.entries.values()].filter((entry) => ['pending', 'saving'].includes(entry.status.state)).length >= limits.secretRequests) {
       throw new PreviewError('BUSY', 'At most eight secret forms can be pending. Close or cancel an earlier form.');
     }
-    if (remaining.length && performance.now() - this.lastLaunch < 1000) throw new PreviewError('BUSY', 'Wait one second before opening another secret form.');
-    const status: SecretSetupStatus = { ...context, id: randomUUID(), state: remaining.length ? 'pending' : 'complete',
-      expiresAt: new Date(Date.now() + limits.secretSetupMs).toISOString(), browser: 'not-needed', saved: [], alreadyPresent, remaining };
-    const entry: Entry = { status, approve, ...(remaining.length ? { capability: randomBytes(32).toString('hex') } : {}) };
+    if (needsForm && performance.now() - this.lastLaunch < 1000) throw new PreviewError('BUSY', 'Wait one second before opening another secret form.');
+    const status: SecretSetupStatus = { ...context, id: randomUUID(), state: needsForm ? 'pending' : 'complete',
+      expiresAt: new Date(Date.now() + limits.secretSetupMs).toISOString(), browser: 'not-needed', saved: [], alreadyPresent, remaining, keystore };
+    const entry: Entry = { status, approve, ...(needsForm ? { capability: randomBytes(32).toString('hex') } : {}) };
     this.entries.set(status.id, entry);
     if (entry.capability) await this.launch(entry, signal);
     this.prune();
@@ -149,7 +151,7 @@ export class SecretSetup {
         const presence = await this.presence(context, controller.signal);
         throwIfAborted(controller.signal);
         Object.assign(entry.status, presence);
-        entry.status.state = presence.remaining.length ? 'pending' : 'complete';
+        entry.status.state = presence.remaining.length || presence.keystore.state !== 'unlocked' ? 'pending' : 'complete';
         if (entry.status.state === 'complete') delete entry.capability;
       } catch (error) {
         delete entry.capability; delete entry.approve;
@@ -158,6 +160,24 @@ export class SecretSetup {
       }
       return structuredClone(entry.status);
     })().finally(() => { clearTimeout(deadline); delete entry.controller; delete entry.work; this.prune(); });
+    return entry.work;
+  }
+
+  async unlock(authorization: string, input: unknown): Promise<SecretSetupStatus> {
+    const entry = this.authorized(authorization);
+    if (entry.approve) throw new PreviewError('SECRET_DENIED', 'Approve the requested names before unlocking this owner.');
+    const parsed = unlockSchema.safeParse(input);
+    if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Supply a password through this private form.');
+    const controller = new AbortController();
+    entry.controller = controller;
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    entry.work = (async () => {
+      const unlocked = await this.runtime.keystore.unlock(parsed.data, { signal: controller.signal });
+      Object.assign(entry.status, await this.presence(entry.status, controller.signal));
+      entry.status.keystore = unlocked;
+      if (!entry.status.remaining.length) { entry.status.state = 'complete'; delete entry.capability; }
+      return structuredClone(entry.status);
+    })().finally(() => { clearTimeout(timer); delete entry.controller; delete entry.work; });
     return entry.work;
   }
 
@@ -184,12 +204,12 @@ export class SecretSetup {
       for (const id of [...ids]) {
         try {
           throwIfAborted(controller.signal);
-          const options = { signal: controller.signal, interactive: true };
+          const options = { signal: controller.signal };
           if (entry.status.mode === 'missing') {
-            const added = await keychain.add('user', id, values[id] as string, options);
+            const added = await this.runtime.keystore.add('user', id, values[id] as string, options);
             (added ? entry.status.saved : entry.status.alreadyPresent).push(id);
           } else {
-            if (!await keychain.update('user', id, values[id] as string, options)) {
+            if (!await this.runtime.keystore.update('user', id, values[id] as string, options)) {
               throw new PreviewError('SECRET_REQUIRED', 'This entry was removed before the edit. Its value was not recreated.');
             }
             entry.status.saved.push(id);
@@ -243,15 +263,17 @@ export class SecretSetup {
   private async presence(context: SecretSetupContext, signal: AbortSignal) {
     const alreadyPresent: string[] = [];
     const remaining: string[] = [];
+    const keystore = await this.runtime.keystore.status({ signal });
+    if (keystore.state !== 'unlocked') return { alreadyPresent, remaining: context.requirements.map(item => item.id), keystore };
     for (const item of context.requirements) {
-      // An unselected name reveals no Keychain metadata before private approval.
+      // An unselected name reveals no keystore metadata before private approval.
       if (!item.selected) { remaining.push(item.id); continue; }
-      const exists = await keychain.has('user', item.id, { signal });
+      const exists = await this.runtime.keystore.has('user', item.id, { signal });
       if (context.mode === 'edit' && !exists) throw new PreviewError('SECRET_REQUIRED', 'This entry no longer exists. Use missing-value setup or the owner set command.');
       if (exists && context.mode === 'missing') alreadyPresent.push(item.id);
       else remaining.push(item.id);
     }
-    return { alreadyPresent, remaining };
+    return { alreadyPresent, remaining, keystore };
   }
 
   private authorized(header: string): Entry {
