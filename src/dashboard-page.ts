@@ -40,6 +40,7 @@ function mountDashboard() {
   let secretError: string | undefined;
   let selection: { owner: string; name?: string } | undefined;
   let snapshot = '';
+  let logQuery = '';
   let loading = false;
   let acting = false;
   let connectionNotice = false;
@@ -126,7 +127,7 @@ function mountDashboard() {
   function select(entry?: Entry) {
     if (secretManager) search.value = '';
     secretManager = false;
-    announce(''); selection = entry ? { owner: entry.owner.id, name: entry.name } : undefined; panel = { tab: 'activity' };
+    announce(''); logQuery = ''; selection = entry ? { owner: entry.owner.id, name: entry.name } : undefined; panel = { tab: 'activity' };
     document.body.classList.toggle('show-detail', !!entry); render();
     for (const node of document.querySelectorAll('#main, .tab-body')) { node.scrollTop = 0; node.scrollLeft = 0; }
     const heading = detail.querySelector('h1'); if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
@@ -375,6 +376,7 @@ function mountDashboard() {
     if (p.active && jobs.some(([, job]) => job.state === 'failed')) node.append(el('p', 'Stop the preview to rerun a job.', 'job-hint'));
   }
   function openLogs(entry: Entry, attempt: AttemptSummary, source?: string) {
+    logQuery = '';
     // Focus the newly selected view immediately; a late response must never steal focus.
     void loadPanel(entry, 'logs', attempt, source);
     document.getElementById('tab-logs')?.focus({ preventScroll: true });
@@ -478,13 +480,40 @@ function mountDashboard() {
     }
     const refreshPanel = button(panel.loading ? 'Refreshing…' : 'Refresh', () => { void loadPanel(entry, panel.tab, selected, panel.source); }, 'small', 'refresh-panel');
     refreshPanel.disabled ||= !!panel.loading; choose.append(refreshPanel); panelNode.prepend(choose);
+    if (panel.tab === 'logs') renderLogs(!panel.error && panel.attemptId === selected.id ? panel.logs : undefined, choose, content);
     if (panel.loading && !panel.logs && !panel.description) { content.append(el('p', 'Loading…', 'muted')); return; }
     if (panel.error) { message('Details unavailable', panel.error, 'error', content); return; }
     if (panel.attemptId !== selected.id) { content.append(el('p', 'The selected attempt changed. Refresh to load its details.', 'muted')); return; }
-    if (panel.tab === 'logs' && panel.logs) {
-      choose.append(el('p', panel.logs.truncated ? 'Earlier output omitted' : 'Log tail', 'log-note'));
-      content.append(el('pre', panel.logs.text || 'No output captured.', 'logs'));
-    } else if (panel.description) renderConfiguration(entry, selected, content, panel.description, panelNode);
+    if (panel.tab === 'configuration' && panel.description) renderConfiguration(entry, selected, content, panel.description, panelNode);
+  }
+  function renderLogs(logs: LogResult | undefined, toolbar: HTMLElement, content: HTMLElement) {
+    toolbar.classList.add('logs-toolbar');
+    const field = el('div', '', 'log-search');
+    const input = el('input'); input.type = 'search'; input.placeholder = 'Search logs…'; input.value = logQuery;
+    input.setAttribute('aria-label', 'Search logs'); input.setAttribute('aria-describedby', 'log-search-summary');
+    input.autocomplete = 'off'; input.spellcheck = false; input.dataset.focus = 'log-search';
+    const clear = button('Clear', () => { input.value = ''; update(true); input.focus(); }, 'small', 'clear-log-search');
+    clear.setAttribute('aria-label', 'Clear log search'); clear.hidden = !logQuery;
+    input.disabled = clear.disabled = !logs;
+    field.append(input, clear); toolbar.prepend(field);
+    const summary = el('p', '', 'log-note'); summary.id = 'log-search-summary'; summary.setAttribute('role', 'status');
+    toolbar.append(summary);
+    if (!logs) return;
+    const captured = logs;
+    const output = el('pre', '', 'logs'); content.append(output);
+    function update(resetScroll = false) {
+      logQuery = input.value; clear.hidden = !logQuery;
+      // Search only the owner's bounded, already-redacted output; keep original line order.
+      const query = logQuery.toLowerCase();
+      const matches = query ? captured.text.split('\n').filter(line => line.toLowerCase().includes(query)) : [];
+      output.textContent = logQuery ? matches.join('\n') || 'No matching lines in captured output.' : captured.text || 'No output captured.';
+      summary.textContent = (logQuery ? `${matches.length} matching ${matches.length === 1 ? 'line' : 'lines'}` : 'Captured output') +
+        (captured.truncated ? ' · Earlier output omitted' : '');
+      if (resetScroll) { content.scrollTop = 0; content.scrollLeft = 0; }
+    }
+    input.addEventListener('input', () => update(true));
+    input.addEventListener('keydown', event => { if (event.key === 'Escape' && input.value) { event.preventDefault(); input.value = ''; update(true); } });
+    update();
   }
   const editDialog = document.querySelector<HTMLDialogElement>('#secret-edit')!;
   const editForm = document.querySelector<HTMLFormElement>('#secret-edit-form')!;
@@ -599,7 +628,9 @@ function mountDashboard() {
     detail.classList.add('preview-detail'); renderTabs(entry);
   }
   function render() {
-    const focus = (document.activeElement as HTMLElement)?.dataset.focus;
+    const active = document.activeElement;
+    const focus = (active as HTMLElement)?.dataset.focus;
+    const selectionRange = active instanceof HTMLInputElement && active.selectionStart !== null ? [active.selectionStart, active.selectionEnd!] : undefined;
     // Renders replace DOM nodes, but background refreshes must not move the reader.
     const scroll = [...document.querySelectorAll<HTMLElement>('#main, #projects, [data-scroll]')]
       .map(node => ({ key: node.dataset.scroll ?? node.id, top: node.scrollTop, left: node.scrollLeft }));
@@ -611,7 +642,11 @@ function mountDashboard() {
       const previous = scroll.find(item => item.key === (node.dataset.scroll ?? node.id));
       if (previous) { node.scrollTop = previous.top; node.scrollLeft = previous.left; }
     }
-    if (focus) document.querySelector<HTMLElement>('[data-focus="' + CSS.escape(focus) + '"]')?.focus({ preventScroll: true });
+    if (focus) {
+      const target = document.querySelector<HTMLElement>('[data-focus="' + CSS.escape(focus) + '"]');
+      target?.focus({ preventScroll: true });
+      if (target instanceof HTMLInputElement && selectionRange) target.setSelectionRange(selectionRange[0], selectionRange[1]);
+    }
   }
   function updateElapsed() {
     for (const node of document.querySelectorAll<HTMLElement>('[data-elapsed]')) node.textContent = Math.max(0, Math.floor((Date.now() - Date.parse(node.dataset.elapsed!)) / 1000)) + 's elapsed';
@@ -795,6 +830,12 @@ select { min-width:0; max-width:100%; height:32px; padding:0 8px; border:1px sol
 .logs,.configuration { background:var(--subtle); padding:16px 24px; white-space:pre; line-height:1.9; font-size:12px; color:var(--t3); }
 .logs { margin:0; min-height:100%; width:max-content; min-width:100%; }
 .configuration { border:1px solid var(--border); border-radius:8px; overflow-x:auto; }
+.log-search { display:flex; align-items:center; flex:1; min-width:180px; height:32px; border:1px solid var(--border-2); border-radius:6px; background:var(--subtle); }
+.log-search:focus-within { outline:2px solid var(--t2); outline-offset:2px; }
+.log-search input { min-width:0; border:0; background:none; outline:none; }
+.log-search input::-webkit-search-cancel-button { display:none; }
+.log-search button { height:24px; margin-right:4px; border:0; background:none; color:var(--t4); }
+.logs-toolbar>span { display:none; }
 .log-note { margin:0 0 0 auto; font-size:12px; color:var(--t4); }
 .env-row { display:grid; grid-template-columns:180px 90px minmax(0,1fr); gap:14px; align-items:baseline; padding:11px 16px; }
 .env-row>* { overflow-wrap:anywhere; font-size:12px; }
@@ -842,7 +883,10 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   .tab-body { padding:16px; }
   .attempt-picker { padding:10px 16px; }
   .tab-content>.save-row { padding:10px 16px; }
-  .log-note { width:100%; margin:0; }
+  .logs-toolbar { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .log-search { grid-column:1/-1; min-width:0; }
+  .logs-toolbar [data-focus=refresh-panel] { justify-self:start; }
+  .log-note { margin:0; font-size:11px; text-align:right; }
   h1 { font-size:26px; }
   .section>.path,.definition-row>.path,.source-folders>.path { flex-wrap:wrap; }
   .section>.path .path-tail,.definition-row>.path .path-tail,.source-folders .path-tail { white-space:normal; overflow-wrap:anywhere; flex-shrink:1; }

@@ -185,6 +185,7 @@ Each worktree has its own preview, service connections, and managed database dat
 The overview shows what is ready and what needs attention.
 Open a preview to switch between **Activity**, **Logs**, and **Configuration** at the top.
 Activity shows services, setup jobs, and recovery actions. Logs and Configuration have their own scrollable views.
+In **Logs**, choose an attempt and source, then search its captured output. Search ignores letter case; **Clear** or Escape restores all captured lines.
 
 ![Three Storefront worktrees with separate previews and an update that needs attention](./assets/dashboard-worktrees.png)
 
