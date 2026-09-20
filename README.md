@@ -183,6 +183,8 @@ Private secret forms use the same design and theme control. Browser preferences 
 
 Each worktree has its own preview, service connections, and managed database data.
 The overview shows what is ready and what needs attention.
+Open a preview to switch between **Activity**, **Logs**, and **Configuration** at the top.
+Activity shows services, setup jobs, and recovery actions. Logs and Configuration have their own scrollable views.
 
 ![Three Storefront worktrees with separate previews and an update that needs attention](./assets/dashboard-worktrees.png)
 
@@ -192,7 +194,7 @@ The overview shows what is ready and what needs attention.
 | Diagnose a failed update | Compare **Serving** with **Latest update**, then open the failed job's **Logs** or select an attempt in **Logs**. |
 | Cancel an unfinished update | Select **Cancel update**. The previous application keeps running. |
 | Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
-| Test with fresh managed data | Select **Reset data**, review the databases, then confirm. Setup runs again; deletion cannot be undone. |
+| Test with fresh managed data | In **Activity**, select **Reset data**, review the databases, then confirm. Setup runs again; deletion cannot be undone. |
 | Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
 | Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the dialog and save. |
 | Supply a missing secret | Select **Open private form** to approve access and enter values outside the chat. |
@@ -217,7 +219,7 @@ Secret Manager lists reference names, never values. Updating a shared reference 
 The dashboard lists live automatic project owners created through the CLI or MCP.
 Standalone `serve` instances and embedded library runtimes are not automatically listed.
 It does not start owners or grant execution permissions.
-Use your editor or the CLI/MCP to edit configuration, delete retained data, or shut down an owner.
+Use your editor or the CLI/MCP to edit configuration or shut down an owner.
 See [dashboard operations](docs/api.md#local-dashboard-operations) for lifecycle and permission details.
 
 ## Use the CLI

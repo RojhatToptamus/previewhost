@@ -8,7 +8,7 @@ export const dashboardPage = `<!doctype html>
 <span id="connection">Connecting…</span><button id="theme" aria-label="Switch to dark theme">Dark</button><button id="refresh">Refresh</button></header>
 <div id="notice" role="status" hidden></div>
 <div class="workspace"><aside><label class="search"><span class="sr-only">Search projects and previews</span><input id="search" placeholder="Search" type="search"></label>
-<button id="overview" class="nav-overview">All previews<span id="attention-count"></span></button>
+<button id="overview" class="nav-overview">All previews<span id="preview-count"></span></button>
 <button id="secret-manager" class="nav-overview">Secret Manager</button>
 <nav id="projects" aria-label="Projects and previews"></nav><p class="scope">Closing this window leaves previews running.</p></aside>
 <main id="main"><article id="detail" aria-label="Preview details"><p class="muted">Connecting to local previews…</p></article></main></div>
@@ -70,17 +70,16 @@ function mountDashboard() {
   }
   function pathText(path: string) {
     const node = el('span', '', 'path'); node.title = path;
-    const parts = path.split('/'); const tail = parts.splice(-2).join('/');
-    node.append(el('span', parts.length ? parts.join('/') + '/' : '', 'path-parent'), el('span', tail, 'path-tail'));
+    const parts = path.split('/'); const folder = parts.pop()!; const directory = parts.pop();
+    const tail = el('span', '', 'path-tail');
+    tail.append(el('span', directory === undefined ? '' : directory + '/', 'path-directory'), el('span', folder, 'path-folder'));
+    node.append(el('span', parts.length ? parts.join('/') + '/' : '', 'path-parent'), tail);
     return node;
   }
   function scrollList(label: string) {
     const node = el('div', '', 'row-list scroll-list');
     node.tabIndex = 0; node.setAttribute('role', 'region'); node.setAttribute('aria-label', label); node.dataset.scroll = label; node.dataset.focus = 'scroll-' + label;
     return node;
-  }
-  function pathBar(path: string) {
-    const node = el('div', '', 'path-bar'); node.append(pathText(path), copy(path)); return node;
   }
   async function call<T>(body: object): Promise<T> {
     const response = await fetch('/api', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + capability }, body: JSON.stringify(body) });
@@ -129,7 +128,7 @@ function mountDashboard() {
     secretManager = false;
     announce(''); selection = entry ? { owner: entry.owner.id, name: entry.name } : undefined; panel = { tab: 'activity' };
     document.body.classList.toggle('show-detail', !!entry); render();
-    document.querySelector('#main')!.scrollTop = 0;
+    for (const node of document.querySelectorAll('#main, .tab-body')) { node.scrollTop = 0; node.scrollLeft = 0; }
     const heading = detail.querySelector('h1'); if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }
   function urlLink(url: string, label: string, className = 'endpoint') {
@@ -155,7 +154,9 @@ function mountDashboard() {
   }
   function actions(entry: Entry): Action[] {
     const { owner, preview: p, name } = entry; const result: Action[] = [];
-    for (const request of pending(entry)) if (request.state === 'pending') result.push({ label: 'Open private form', run: () => {
+    // The header opens the first pending request; Activity retains every exact request.
+    const request = pending(entry).find(request => request.state === 'pending');
+    if (request) result.push({ label: 'Open private form', run: () => {
       void mutate({ action: 'secretsOpen', owner: owner.id, id: request.id }, 'Private form requested in your system browser.');
     } });
     if (!p) return result;
@@ -168,8 +169,7 @@ function mountDashboard() {
     if (!p.active && !p.busy && !p.candidate && ['stopped', 'failed'].includes(p.latest?.state ?? '') && !owner.legacy && !needsCleanup(p)) result.push({ label: p.latest?.state === 'failed' ? 'Retry start' : 'Start preview', run: () => {
       void mutate({ action: 'startAgain', owner: owner.id, name, attemptId: p.latest!.id }, 'Startup requested with the same configuration and current source.');
     } });
-    // Several pending requests may use the same label. The detail's private section retains each exact request.
-    return result.filter((action, i) => result.findIndex(other => other.label === action.label) === i);
+    return result;
   }
   function renderList() {
     projects.replaceChildren();
@@ -177,15 +177,14 @@ function mountDashboard() {
     document.querySelector('#secret-manager')!.setAttribute('aria-current', String(secretManager));
     search.placeholder = secretManager ? 'Search references' : 'Search';
     document.querySelector('.search .sr-only')!.textContent = secretManager ? 'Search secret references' : 'Search projects and previews';
-    const attention = owners.flatMap(entries).filter(e => e.owner.error || e.owner.configuration?.error || ['error', 'warning'].includes(state(e).tone)).length;
-    document.querySelector('#attention-count')!.textContent = attention ? String(attention) : '';
+    document.querySelector('#preview-count')!.textContent = String(owners.flatMap(entries).length);
     for (const owner of owners) {
       const list = visibleEntries(owner); if (!list.length) continue;
-      const group = el('section', '', 'project'); const heading = el('h2', shortProject(owner), 'section-label'); heading.title = owner.project ?? ''; group.append(heading);
+      const group = el('section', '', 'project'); const heading = el('h2', shortProject(owner), 'section-label'); heading.title = owner.project ?? ''; if (list.length > 1) group.append(heading);
       for (const entry of list) {
         const row = navButton('', () => select(entry), 'preview-row', owner.id + (entry.name ?? ''));
         row.setAttribute('aria-current', String(!secretManager && selection?.owner === owner.id && selection.name === entry.name));
-        const text = el('span', '', 'nav-identity'); text.append(el('strong', entry.name ?? 'Project'), pathText(owner.project ?? 'Unverified record'));
+        const text = el('span', '', 'nav-identity'); text.append(el('strong', entry.name ?? shortProject(owner)), pathText(owner.project ?? 'Unverified record'));
         row.append(text, el('span', owner.error ? 'Unavailable' : state(entry).label, 'status ' + (owner.error ? 'error' : state(entry).tone)));
         group.append(row);
       }
@@ -203,20 +202,11 @@ function mountDashboard() {
     }
     const running = all.filter(e => e.preview?.active).length;
     const starting = all.filter(e => e.preview?.candidate).length;
-    const attention = list.filter(e => e.owner.error || e.owner.configuration?.error || ['error', 'warning'].includes(state(e).tone));
     detail.append(el('p', `${running} running · ${starting} starting · ${all.filter(e => e.owner.error || e.owner.configuration?.error || ['error', 'warning'].includes(state(e).tone)).length} need attention`, 'summary'));
     if (!list.length) { detail.append(el('p', 'No matching previews.', 'empty')); return; }
-    if (attention.length) {
-      const region = el('div', '', 'attention-list');
-      attention.forEach((entry, i) => {
-        const row = el('div', '', 'notice attention-row');
-        const text = el('div'); text.append(el('h2', `${shortProject(entry.owner)} — ${entry.owner.error ? 'status unavailable' : entry.owner.configuration?.error ? 'preview.yml needs attention' : state(entry).note.toLowerCase()}`), el('p', entry.owner.error ? 'Other projects remain available.' : entry.preview?.active ? 'Keep using the running app, or review what needs attention.' : 'Review this worktree before continuing.'));
-        row.append(text, navButton('Review', () => select(entry), i === 0 ? 'primary' : '')); region.append(row);
-      }); detail.append(region);
-    }
+    const table = el('div', '', 'row-list overview-list'); detail.append(table);
     for (const owner of owners) {
       const rows = visibleEntries(owner); if (!rows.length) continue;
-      const group = section(shortProject(owner)); const table = el('div', '', 'row-list');
       for (const entry of rows) {
         const row = el('div', '', 'overview-row'); const identity = el('div', '', 'row-identity');
         identity.append(el('strong', entry.name ?? shortProject(owner)), pathText(owner.project ?? 'Unverified record'));
@@ -227,7 +217,6 @@ function mountDashboard() {
         controls.append(navButton('Details', () => select(entry), '', owner.id + (entry.name ?? '') + '-details'));
         row.append(identity, status, controls); table.append(row);
       }
-      group.append(table);
     }
   }
   function hint(entry: Entry) {
@@ -261,7 +250,7 @@ function mountDashboard() {
       node.append(row);
     }
   }
-  function renderAttempts(p: PreviewStatus) {
+  function renderAttempts(p: PreviewStatus, parent: HTMLElement) {
     const latest = p.candidate ?? p.latest;
     if (!latest && !p.active) return;
     if (p.active && latest && p.active.id !== latest.id) {
@@ -273,20 +262,20 @@ function mountDashboard() {
         const id = el('code', attempt.id.slice(0, 8), 'attempt-id'); id.title = attempt.id;
         const column = el('div'); column.append(el('p', label, 'muted'), id, el('span', attempt.state[0].toUpperCase() + attempt.state.slice(1), 'status ' + (attempt.state === 'failed' ? 'error' : attempt.state === 'ready' ? 'ready' : 'muted'))); split.append(column);
       }
-      detail.append(split);
+      parent.append(split);
     } else {
       const attempt = p.active ?? latest!; const row = el('div', '', 'attempt-line');
       const id = el('code', attempt.id.slice(0, 8), 'attempt-id'); id.title = attempt.id;
-      row.append(el('span', p.active ? 'Serving' : 'Latest attempt', 'section-label'), id); detail.append(row);
+      row.append(el('span', p.active ? 'Serving' : 'Latest attempt', 'section-label'), id); parent.append(row);
     }
   }
-  function renderServices(entry: Entry) {
+  function renderServices(entry: Entry, parent: HTMLElement) {
     const p = entry.preview!;
     const attempt = p.active ?? p.candidate ?? p.latest;
     if (!attempt && !p.data) return;
-    const node = section('Services');
+    const node = section('Services', parent);
     if (p.active && p.candidate) node.append(el('p', 'Serving services are shown below; the update is still starting.', 'muted'));
-    const table = scrollList('Services');
+    const table = el('div', '', 'row-list');
     const managed = new Set(p.data?.resources.map(r => r.name) ?? []);
     const dataLabel = p.data?.cleanup?.operation === 'remove-credential' ? 'Data deleted' : p.data?.cleanup ? 'Check data' : 'Data retained';
     const typeLabels = { command: 'HTTP', static: 'Static', attach: 'Attached HTTP', postgres: 'PostgreSQL', redis: 'Redis', 'external-postgres': 'PostgreSQL', 'external-redis': 'Redis' };
@@ -343,11 +332,11 @@ function mountDashboard() {
     dialog.append(title, pathText(entry.owner.project ?? ''), hint, list, el('p', 'External databases and saved secrets are not deleted.', 'muted'), controls);
     dialog.addEventListener('close', () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
   }
-  function renderJobs(entry: Entry) {
+  function renderJobs(entry: Entry, parent: HTMLElement) {
     const p = entry.preview!; const attempt = p.candidate ?? p.latest ?? p.active;
     const jobs = Object.entries(attempt?.services ?? {}).filter(([, s]) => s.type === 'job');
     if (!jobs.length || !attempt) return;
-    const node = section('Setup jobs'); const list = scrollList('Setup jobs');
+    const node = section('Setup jobs', parent); const list = el('div', '', 'row-list');
     const heading = el('div', '', 'section-heading'); heading.append(node.firstElementChild!);
     if (p.active && p.active.id !== attempt.id) heading.append(el('span', 'Latest update', 'muted'));
     node.append(heading);
@@ -385,11 +374,10 @@ function mountDashboard() {
     node.append(list);
     if (p.active && jobs.some(([, job]) => job.state === 'failed')) node.append(el('p', 'Stop the preview to rerun a job.', 'job-hint'));
   }
-  function openLogs(entry: Entry, attempt: AttemptSummary, source: string) {
-    void loadPanel(entry, 'logs', attempt, source).then(() => {
-      const content = document.getElementById('tab-content');
-      if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'nearest' }); }
-    });
+  function openLogs(entry: Entry, attempt: AttemptSummary, source?: string) {
+    // Focus the newly selected view immediately; a late response must never steal focus.
+    void loadPanel(entry, 'logs', attempt, source);
+    document.getElementById('tab-logs')?.focus({ preventScroll: true });
   }
   async function loadPanel(entry: Entry, tab: Tab, attempt?: AttemptSummary, source?: string) {
     const previous = panel.tab === tab && panel.attemptId === attempt?.id && panel.source === source ? panel : undefined;
@@ -403,18 +391,19 @@ function mountDashboard() {
     finally { if (panel === current) { panel.loading = false; render(); } }
   }
   function renderConfiguration(entry: Entry, attempt: AttemptSummary, parent: HTMLElement, description: PreviewDescription, footer: HTMLElement) {
-    parent.append(el('p', 'Requested configuration. Read-only — stored secret values are not included.', 'muted'));
+    parent.append(el('p', 'Read-only configuration. Stored values are not included.', 'muted'));
     const env = section('Environment variables', parent); const rows = el('div', '', 'row-list');
     const bindingKeys = new Set([...description.envKeys, ...(description.secrets ?? []).flatMap(secret => secret.bindings.map(binding => (binding.service ? binding.service + '.' : '') + binding.key))]);
     for (const key of bindingKeys) {
       const secret = description.secrets?.find(s => s.bindings.some(b => (b.service ? b.service + '.' : '') + b.key === key));
       const [service, envKey] = key.split('.');
       const binding = description.spec.type === 'environment' ? description.spec.services[service]?.bindings?.[envKey] : undefined;
-      const kind = secret ? 'secret ref' : binding ? Object.keys(binding)[0] : 'value omitted';
-      const value = secret ? secret.id + (secret.selected ? ' · approved for this owner' : ' · approval required') : binding ? String(Object.values(binding)[0]) : 'Literal value is not included.';
+      const kind = secret ? 'Secret' : binding ? Object.keys(binding)[0] : 'Literal';
+      const value = secret ? secret.id + (secret.selected ? ' · approved for this owner' : ' · approval required') : binding ? String(Object.values(binding)[0]) : 'Not included';
       const row = el('div', '', 'env-row'); row.append(el('code', key), el('span', kind, 'muted'), el('span', value, 'machine muted')); rows.append(row);
     }
     if (!rows.children.length) rows.append(el('p', 'No environment variables declared.', 'empty-list')); env.append(rows);
+    if (entry.owner.configuration) parent.append(el('p', 'preview.yml exists. This view shows the selected runtime attempt.', 'muted'));
     const definitions = section('Service definitions', parent); const spec = description.spec;
     if (spec.type === 'environment') {
       const list = el('div', '', 'row-list');
@@ -429,7 +418,7 @@ function mountDashboard() {
       definitions.append(list);
     }
     const raw = el('details'); raw.dataset.disclosure = 'configuration'; raw.append(el('summary', 'Full requested configuration'), el('pre', JSON.stringify(spec, null, 2), 'configuration')); definitions.append(raw);
-    const save = el('div', '', 'save-row'); save.append(el('p', 'Save this configuration as preview.yml so the next agent starts from it. Existing files are never overwritten.'), button('Save as preview.yml', () => {
+    const save = el('div', '', 'save-row'); save.append(el('p', 'Save this attempt as preview.yml. Existing files are never overwritten.'), button('Save as preview.yml', () => {
       void mutate<{ file: string; externalSources: string[] }>({ action: 'saveConfiguration', owner: entry.owner.id, name: entry.name, attemptId: attempt.id }, result => `Saved ${result.file}. The running preview is unchanged.` + (result.externalSources.length ? ' Sources outside this project keep absolute paths: ' + result.externalSources.join(', ') : ''));
     })); footer.append(save);
   }
@@ -454,12 +443,13 @@ function mountDashboard() {
     const content = el('div', '', 'tab-body'); content.tabIndex = 0; content.dataset.scroll = 'panel-' + panel.tab; content.dataset.focus = content.dataset.scroll;
     panelNode.append(content); node.append(tabs, panelNode); detail.append(node);
     if (panel.tab === 'activity') {
-      content.append(el('p', 'Retained runtime attempts · source files remain live.', 'muted'));
+      renderActivity(entry, content);
+      const history = section('Recent attempts', content);
       for (const attempt of retained) {
         const row = el('div', '', 'activity-row'); row.append(el('time', new Date(attempt.startedAt).toLocaleTimeString(), 'machine muted'));
-        const text = el('div'); text.append(el('strong', attempt.id === p?.active?.id ? 'Serving now' : 'Attempt ' + attempt.state), el('code', attempt.id, 'attempt-id'), el('p', attempt.error?.message ?? (attempt.readyAt ? 'Startup checks passed at ' + new Date(attempt.readyAt).toLocaleTimeString() : 'Started at the time shown.'), attempt.error ? 'error' : 'muted')); row.append(text); content.append(row);
+        const text = el('div'); text.append(el('strong', attempt.id === p?.active?.id ? 'Serving now' : 'Attempt ' + attempt.state), el('code', attempt.id, 'attempt-id'), el('p', attempt.error?.message ?? (attempt.readyAt ? 'Startup checks passed at ' + new Date(attempt.readyAt).toLocaleTimeString() : 'Started at the time shown.'), attempt.error ? 'error' : 'muted')); row.append(text); history.append(row);
       }
-      if (!retained.length) content.append(el('p', 'No retained attempts. Start through your agent or CLI.', 'muted'));
+      if (!retained.length) history.append(el('p', 'No retained attempts. Start through your agent or CLI.', 'muted'));
       if (p?.cleanup?.length || p?.data?.cleanup) {
         const cleanup = message('Cleanup needs attention', deletionNeedsRetry(p) ? 'Database credential removal is incomplete.' : 'Keep these source directories until cleanup succeeds.', 'error', content);
         for (const item of p.cleanup ?? []) cleanup.append(el('p', item.error.message), ...item.sources.map(pathText));
@@ -492,7 +482,8 @@ function mountDashboard() {
     if (panel.error) { message('Details unavailable', panel.error, 'error', content); return; }
     if (panel.attemptId !== selected.id) { content.append(el('p', 'The selected attempt changed. Refresh to load its details.', 'muted')); return; }
     if (panel.tab === 'logs' && panel.logs) {
-      content.append(el('p', panel.logs.truncated ? 'Log tail · earlier output omitted' : 'Log tail', 'muted'), el('pre', panel.logs.text || 'No output captured.', 'logs'));
+      choose.append(el('p', panel.logs.truncated ? 'Earlier output omitted' : 'Log tail', 'log-note'));
+      content.append(el('pre', panel.logs.text || 'No output captured.', 'logs'));
     } else if (panel.description) renderConfiguration(entry, selected, content, panel.description, panelNode);
   }
   const editDialog = document.querySelector<HTMLDialogElement>('#secret-edit')!;
@@ -540,8 +531,8 @@ function mountDashboard() {
     }
   });
   function renderSecretManager() {
-    detail.append(el('h1', 'Secret Manager'), el('p', 'Manage the secret references stored in your macOS Keychain. Values are never shown.', 'summary'));
-    detail.append(el('p', 'Editing a shared reference changes its value for future starts in every project that uses it. Running apps and access approvals stay unchanged.', 'hint'));
+    detail.append(el('h1', 'Secret Manager'), el('p', 'Stored Keychain references. Values are never shown.', 'summary'));
+    detail.append(el('p', 'Changes apply on the next start in every project using the reference.', 'hint'));
     if (secretError) { message('Secrets unavailable', secretError + ' Use Refresh to try again.', 'error'); return; }
     if (!secretList) { detail.append(el('p', 'Loading secret references…', 'empty')); return; }
     if (!secretList.ids.length) {
@@ -550,7 +541,6 @@ function mountDashboard() {
       detail.append(empty); return;
     }
     const group = section('Stored references');
-    group.append(el('p', 'Reference names are separate from application environment-variable names. Select Edit to enter a replacement value.', 'muted'));
     if (secretList.truncated) group.append(el('p', 'Showing the first 128 references returned by Keychain. Additional entries are not listed.', 'warning'));
     const ids = secretList.ids.filter(id => id.toLowerCase().includes(search.value.trim().toLowerCase()));
     if (!ids.length) { group.append(el('p', 'No matching references.', 'empty')); return; }
@@ -563,52 +553,50 @@ function mountDashboard() {
     }
     group.append(rows);
   }
-  function renderDetail() {
-    detail.replaceChildren(); detail.classList.remove('overview');
-    document.querySelector('#crumb')!.textContent = secretManager ? 'Secret Manager' : selection ? 'Preview details' : 'All previews';
-    if (secretManager) { renderSecretManager(); return; }
-    if (!selection) { renderOverview(); return; }
-    const owner = owners.find(o => o.id === selection!.owner);
-    if (!owner) { message('Project no longer listed', 'Its owner may have shut down. Stored database data remains separate; start through your agent or CLI to reconnect.'); return; }
-    const entry: Entry = { owner, name: selection.name, preview: owner.previews?.find(p => p.name === selection!.name) };
-    const p = entry.preview; const status = state(entry);
-    const crumb = el('div', '', 'breadcrumb'); crumb.append(navButton('All previews', () => select(), 'text-button'), el('span', '/', 'slash'), el('span', shortProject(owner))); detail.append(crumb);
-    const title = el('div', '', 'title-row'); const identity = el('div'); identity.append(el('h1', shortProject(owner)), el('p', entry.name ?? 'Project', 'muted'));
-    title.append(identity); if (!owner.error) title.append(el('span', status.label, 'status ' + status.tone)); detail.append(title);
-    if (owner.project) detail.append(pathBar(owner.project));
-    if (owner.error) { message('Status unavailable', owner.error.message + ' Other projects remain available.', 'error'); return; }
+  function renderActivity(entry: Entry, parent: HTMLElement) {
+    const { owner, preview: p } = entry;
     const availableActions = actions(entry); const taken = new Set(availableActions.map(a => a.label));
     const addNotice = (heading: string, body: string, tone = '', extra?: Action) => {
-      const node = message(heading, body, tone);
+      const node = message(heading, body, tone, parent);
       if (extra && !taken.has(extra.label)) { node.append(button(extra.label, extra.run)); taken.add(extra.label); }
     };
     if (deletionNeedsRetry(p)) addNotice('Data reset incomplete', 'Managed data was deleted, but its database credential could not be removed. Resolve the Keychain error, then choose Reset data to finish and start again.', 'error');
     else if (needsCleanup(p)) addNotice('Cleanup needs attention', 'Some owned resources could not be confirmed stopped. Inspect the details before retrying cleanup.', 'error');
     else if (pending(entry).length) addNotice('Private setup requested', 'Approve access and enter any missing values in the separate private form. Cancellation stays in that form.', 'warning');
-    else if (!p?.candidate && p?.latest?.state === 'failed' && !Object.values(p.latest.services ?? {}).some(service => service.type === 'job' && service.state === 'failed')) addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => { void loadPanel(entry, 'logs', p.latest); const content = document.getElementById('tab-content'); if (content) { content.tabIndex = -1; content.focus(); content.scrollIntoView({ block: 'start' }); } } });
+    else if (!p?.candidate && p?.latest?.state === 'failed' && !Object.values(p.latest.services ?? {}).some(service => service.type === 'job' && service.state === 'failed')) addNotice(p.active ? 'The update failed. Your previous version is still running.' : 'Startup failed. Your app is not running.', p.latest.error?.message ?? 'Review the latest attempt for details.', 'error', { label: 'View error log', run: () => openLogs(entry, p.latest!) });
     else if (!p?.candidate && p?.latest?.state === 'canceled') addNotice(p.active ? 'The update was canceled. Your previous version is still running.' : 'Startup was canceled.', 'Nothing was started again automatically. Ask your agent to continue only when you are ready.');
     if (owner.legacy) addNotice('Owner update needed', 'This owner runs an older build. New controls require an explicit owner upgrade; this page will not restart it.');
-    const row = el('div', '', 'actions');
+    if (!p?.active || p.candidate || needsCleanup(p)) parent.append(el('p', hint(entry), 'activity-hint'));
+    if (p) { renderAttempts(p, parent); renderServices(entry, parent); renderJobs(entry, parent); }
+    if (owner.configuration?.error) message('preview.yml needs attention', owner.configuration.error.message + (p?.active ? ' The running app is unchanged.' : ''), 'error', parent);
+    if (owner.legacy && p?.active) message('Stop through the CLI', `Run previewhost stop ${p.name} from this project.`, '', parent);
+  }
+  function renderDetail() {
+    detail.replaceChildren(); detail.classList.remove('overview', 'preview-detail');
+    document.querySelector('#crumb')!.textContent = secretManager ? 'Secret Manager' : selection ? 'Preview details' : 'All previews';
+    if (secretManager) { renderSecretManager(); return; }
+    if (!selection) { renderOverview(); return; }
+    const owner = owners.find(o => o.id === selection!.owner);
+    if (!owner) { message('Project no longer listed', 'Its owner may have shut down. Start through your agent or CLI to reconnect.'); return; }
+    const entry: Entry = { owner, name: selection.name, preview: owner.previews?.find(p => p.name === selection!.name) };
+    const p = entry.preview; const status = state(entry);
+    const header = el('div', '', 'preview-header'); const identity = el('div', '', 'preview-identity');
+    const title = el('div', '', 'preview-title'); title.append(el('h1', entry.name ?? shortProject(owner)));
+    title.append(el('span', owner.error ? 'Unavailable' : status.label, 'status ' + (owner.error ? 'error' : status.tone)));
+    identity.append(title);
+    if (owner.project) { const path = el('div', '', 'identity-path'); path.append(pathText(owner.project), copy(owner.project)); identity.append(path); }
+    if (p?.active && (p.latest?.state === 'failed' || p.candidate)) identity.append(el('p', 'Previous version serving', 'context-note'));
+    else if (owner.configuration?.error) identity.append(el('p', 'preview.yml needs attention', 'context-note warning'));
+    const row = el('div', '', 'header-actions');
     const canOpen = !!(p?.active && p.url); let primaryTaken = canOpen;
-    if (canOpen) {
-      row.append(urlLink(p!.url!, 'Open app', 'button primary hero'));
-      const url = el('div', '', 'url-chip'); url.append(el('code', p!.url!), copy(p!.url!)); row.append(url);
-    }
-    const controls = el('div', '', 'secondary-actions');
-    for (const action of availableActions) {
+    if (canOpen) row.append(urlLink(p!.url!, 'Open app', 'button primary'), copy(p!.url!, 'Copy URL'));
+    for (const action of actions(entry)) {
       const primary = !primaryTaken && !action.danger; if (primary) primaryTaken = true;
-      const control = button(action.label, action.run, primary ? 'primary hero' : action.danger ? 'danger' : '');
-      if (primary) row.append(control); else controls.append(control);
+      row.append(button(action.label, action.run, primary ? 'primary' : action.danger ? 'danger' : ''));
     }
-    if (!canOpen && !primaryTaken && p?.candidate) { const waiting = el('button', 'Waiting for URL', 'hero'); waiting.disabled = true; row.append(waiting); }
-    row.append(controls); detail.append(row, el('p', hint(entry), 'hint'));
-    if (p) { renderAttempts(p); renderServices(entry); renderJobs(entry); }
-    if (owner.configuration?.error) addNotice('preview.yml needs attention', owner.configuration.error.message + (p?.active ? ' The running app is unchanged. Its Configuration tab shows the serving attempt.' : ' Ask your agent to resolve this configuration error before starting.'), 'error');
-    else if (owner.configuration) detail.append(el('p', 'preview.yml is available for the next agent startup. Start again uses the retained attempt configuration.', 'muted'));
-
-    if (owner.legacy && p?.active) message('Stop through the CLI', `Run previewhost stop ${p.name} from the project directory shown above; this owner cannot guard a stale dashboard action.`);
-    if (!p?.active && !p?.candidate && !availableActions.length && !pending(entry).length && !needsCleanup(p)) detail.append(el('p', `Ask your agent to start ${entry.name ?? 'an application'} in this worktree.`, 'muted'));
-    renderTabs(entry);
+    header.append(identity, row); detail.append(header);
+    if (owner.error) { message('Status unavailable', owner.error.message + ' Other projects remain available.', 'error'); return; }
+    detail.classList.add('preview-detail'); renderTabs(entry);
   }
   function render() {
     const focus = (document.activeElement as HTMLElement)?.dataset.focus;
@@ -666,7 +654,7 @@ function mountDashboard() {
   document.querySelector('#secret-manager')!.addEventListener('click', () => {
     announce(''); secretManager = true; selection = undefined; search.value = '';
     document.body.classList.add('show-detail'); render(); void refresh();
-    document.querySelector('#main')!.scrollTop = 0;
+    for (const node of document.querySelectorAll('#main, .tab-body')) { node.scrollTop = 0; node.scrollLeft = 0; }
     const heading = detail.querySelector('h1'); if (heading) { heading.tabIndex = -1; heading.focus(); }
   });
   document.querySelector('#refresh')!.addEventListener('click', () => { snapshot = ''; void refresh(); });
@@ -679,16 +667,16 @@ export const dashboardStyle = uiStyle + `
 #connection { margin-left:auto; color:var(--t5); font-size:12.5px; }
 body { height:100dvh; display:flex; flex-direction:column; }
 #notice { padding:10px 20px; border-bottom:1px solid var(--border); background:var(--subtle); color:var(--t3); font-size:13px; }
-.workspace { display:grid; grid-template-columns:236px minmax(0,1fr); flex:1; min-height:0; }
+.workspace { display:grid; grid-template-columns:220px minmax(0,1fr); flex:1; min-height:0; }
 aside { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--border); }
 .search { display:block; padding:14px 14px 10px; }
 input { width:100%; height:32px; padding:0 11px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--t1); font-size:13px; }
 input::placeholder { color:var(--t5); }
 .nav-overview { margin:0 10px 8px; justify-content:space-between; border:0; height:34px; padding:0 9px; }
 .nav-overview[aria-current=true] { background:var(--sel); }
-#attention-count { color:var(--t5); font-family:'Geist Mono',monospace; font-size:11.5px; }
+#preview-count { color:var(--t5); font-family:'Geist Mono',monospace; font-size:11.5px; }
 #projects { flex:1; min-height:0; overflow-y:auto; padding:4px 10px 16px; }
-.project { margin-bottom:16px; }
+.project { margin-bottom:8px; }
 .project>.section-label { margin:0; padding:6px 8px 5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .preview-row { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:8px; row-gap:1px; height:auto; width:100%; padding:7px 9px; border:0; margin-top:1px; white-space:normal; text-align:left; }
 .preview-row:hover,.nav-overview:hover { background:var(--hover); }
@@ -696,26 +684,31 @@ input::placeholder { color:var(--t5); }
 .nav-identity { display:contents; }
 .nav-identity strong { display:block; min-width:0; grid-column:1; grid-row:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13.5px; font-weight:500; }
 .nav-identity .path { grid-column:1/-1; grid-row:2; font-size:11px; margin-top:1px; }
-.nav-identity .path-tail { max-height:3em; overflow:hidden; max-width:100%; white-space:normal; overflow-wrap:anywhere; color:var(--t2); }
+.nav-identity .path-tail { display:flex; min-width:0; max-width:100%; color:var(--t4); }
+.path-directory { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.path-folder { flex-shrink:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
 .nav-identity .path-parent { display:none; }
 .preview-row>.status { grid-column:2; grid-row:1; font-size:11.5px; }
 .preview-row>.ready,.preview-row>.muted { color:var(--t5); font-weight:400; }
 .scope { border-top:1px solid var(--border); margin:0; padding:12px 16px; font-size:12px; color:var(--t5); line-height:1.45; }
 #main { min-width:0; min-height:0; overflow-y:auto; scrollbar-gutter:stable; scroll-padding-top:16px; }
-#detail { padding:28px 32px 32px; max-width:1120px; }
+#detail { padding:24px; }
+#detail.preview-detail { height:100%; min-height:0; padding:0; display:flex; flex-direction:column; }
+#main:has(.preview-detail) { overflow:hidden; }
+.preview-header { display:flex; align-items:flex-start; gap:24px; padding:16px 24px 8px; flex:none; }
+.preview-identity { flex:1; min-width:0; }
+.preview-title { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 16px; }
+.preview-title h1 { min-width:0; font-size:22px; line-height:1.3; letter-spacing:-.5px; margin:0; }
+.preview-title .status { flex:none; }
+.identity-path { display:flex; align-items:center; gap:8px; margin-top:4px; }
+.identity-path .path { min-width:0; font-size:12px; }
+.identity-path .path-tail { display:flex; flex:none; min-width:0; max-width:100%; }
+.identity-path button { height:24px; padding:0 6px; border-color:transparent; color:var(--t4); }
+.header-actions { display:flex; align-items:center; gap:8px; flex:none; }
+.header-actions button,.header-actions .button { height:32px; }
+.context-note { color:var(--t4); font-size:12px; margin:4px 0 0; }
+.activity-hint { color:var(--t4); margin:0 0 16px; font-size:13px; }
 .overview>h1 { font-size:26px; letter-spacing:-.6px; }
-.breadcrumb { display:flex; align-items:baseline; gap:9px; margin-bottom:10px; font-size:13px; color:var(--t5); }
-.text-button { min-height:28px; border:0; padding:0; background:none; color:var(--t4); font-weight:400; }
-.title-row { display:flex; align-items:flex-start; gap:20px; margin-bottom:14px; }
-.title-row>div { flex:1; min-width:0; }
-.title-row>.status { font-size:14px; padding-top:6px; }
-.title-row p { margin:0; font-size:13px; }
-.path-bar { display:flex; align-items:center; gap:10px; padding:9px 12px; border:1px solid var(--border); border-radius:7px; background:var(--subtle); margin-bottom:20px; }
-.path-bar>.path { flex:1; }
-.secondary-actions { display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; }
-.url-chip { display:flex; align-items:center; gap:12px; min-width:0; max-width:100%; height:36px; padding:0 13px; border:1px solid var(--border); border-radius:6px; background:var(--subtle); }
-.url-chip code { color:var(--t2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.url-chip button { border:0; padding:0; background:none; color:var(--t5); }
 .hint { margin:0; padding-bottom:20px; border-bottom:1px solid var(--border); color:var(--t4); font-size:13px; line-height:1.6; }
 .section { padding:20px 0; border-bottom:1px solid var(--border); }
 .section>.section-label { margin-bottom:12px; }
@@ -724,7 +717,7 @@ input::placeholder { color:var(--t5); }
 .attempt-line { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:18px 0; border-bottom:1px solid var(--border); }
 .attempt-line>.section-label { width:110px; }
 .attempt-id { font-size:12px; overflow-wrap:anywhere; }
-.attempt-split { margin-top:24px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.attempt-split { margin:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .attempt-split>div { padding:16px 18px; min-width:0; }
 .attempt-split>div+div { border-left:1px solid var(--border); }
 .attempt-split .attempt-id { display:block; margin:6px 0; }
@@ -733,6 +726,7 @@ input::placeholder { color:var(--t5); }
 .scroll-list { max-height:360px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .show-secrets #detail { height:100%; display:flex; flex-direction:column; }
 .show-secrets #detail>h1,.show-secrets .summary,.show-secrets .hint { flex:none; }
+.show-secrets .summary { margin-bottom:8px; }
 .show-secrets #detail>.section { flex:1; min-height:180px; display:flex; flex-direction:column; border:0; padding-bottom:0; }
 .show-secrets .section>h2,.show-secrets .section>p { flex:none; }
 .secret-list { flex:0 1 auto; min-height:0; max-height:520px; }
@@ -746,7 +740,7 @@ dialog h2 { font-size:22px; margin-bottom:8px; }
 #secret-value { width:100%; min-height:100px; padding:12px; border:1px solid var(--border-2); border-radius:6px; resize:vertical; background:var(--subtle); color:var(--t1); -webkit-text-security:disc; }
 dialog .muted,#secret-edit-error { font-size:12.5px; margin-top:10px; overflow-wrap:anywhere; }
 dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
-.secret-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:14px 16px; }
+.secret-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:9px 16px; }
 .secret-row code { overflow-wrap:anywhere; color:var(--t2); }
 .service-row { display:grid; grid-template-columns:144px 96px 88px minmax(0,1fr) 112px; align-items:center; gap:12px; padding:12px 16px; }
 .service-row>strong { overflow-wrap:anywhere; font-size:13.5px; }
@@ -755,7 +749,7 @@ dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .service-row.managed { background:var(--subtle); }
 .service-meta { text-align:right; font-size:12px; }
 .service-error { grid-column:1/-1; margin:0; font-size:12.5px; }
-.source-folders { margin-top:12px; }
+.source-folders { margin:12px 0 0; }
 .source-folders .path { margin-top:8px; }
 .section-heading { display:flex; align-items:center; gap:16px; margin-bottom:12px; }
 .section-heading h2 { margin:0 auto 0 0; }
@@ -767,16 +761,7 @@ dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .job-hint { margin:10px 0 0; color:var(--t4); }
 .job-row>.status { font-size:12.5px; font-weight:400; }
 
-.overview .section { border-bottom:0; padding:0; margin-bottom:30px; }
-.overview .section-label { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-.overview .section-label::after { content:''; flex:1; height:1px; background:var(--divider); }
 .summary { color:var(--t4); margin:6px 0 26px; }
-.attention-list { display:flex; flex-direction:column; gap:10px; margin-bottom:30px; }
-.attention-row { display:flex; align-items:center; gap:16px; padding:14px 16px; margin:0; }
-.attention-row>div { flex:1; min-width:0; }
-.attention-row h2 { font-size:14px; font-weight:500; letter-spacing:0; }
-.attention-row p { font-size:13px; }
-.attention-row button { margin:0; }
 .overview-row { display:grid; grid-template-columns:minmax(0,1fr) 160px 164px; align-items:center; gap:20px; padding:14px 16px; }
 .row-identity { min-width:0; }
 .row-identity>.path { font-size:11.5px; margin-top:2px; }
@@ -785,15 +770,16 @@ dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .overview-state small { display:block; font-size:12px; color:var(--t5); margin-top:2px; }
 .row-actions { display:flex; justify-content:flex-end; gap:8px; }
 .row-actions button,.row-actions .button { height:30px; padding:0 12px; }
-.tabs-section { padding-top:20px; }
-.tabs { display:flex; align-items:center; gap:24px; border-bottom:1px solid var(--border); background:var(--bg); position:sticky; top:0; z-index:1; }
-.tabs button { border:0; border-radius:0; padding:0; height:40px; color:var(--t4); background:none; font-weight:400; }
+.tabs-section { display:flex; flex-direction:column; flex:1; min-height:0; }
+.tabs { display:flex; align-items:center; gap:24px; flex:none; height:44px; padding:0 24px; border-bottom:1px solid var(--border); }
+.tabs button { border:0; border-radius:0; padding:0; height:44px; color:var(--t4); background:none; font-weight:400; }
 .tabs button[aria-selected=true] { border-bottom:2px solid var(--t1); color:var(--t1); font-weight:500; }
-.tab-content { height:clamp(300px,52dvh,480px); display:flex; flex-direction:column; min-width:0; }
-.tab-body { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:16px 0; }
-.tab-body>.section { padding-top:0; border:0; }
+.tab-content { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
+.tab-body { flex:1; min-height:0; min-width:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:20px 24px; }
+.tab-body:has(.logs) { padding:0; background:var(--subtle); }
+.tab-body>.section:last-child { border-bottom:0; }
 .tab-body>.notice { margin-bottom:0; }
-.tab-content>.save-row { flex:none; border:0; border-top:1px solid var(--border); border-radius:0; padding:12px 0 0; background:var(--bg); }
+.tab-content>.save-row { flex:none; border:0; border-top:1px solid var(--border); border-radius:0; padding:8px 24px; background:var(--bg); }
 .activity-row { display:flex; align-items:baseline; gap:16px; padding:12px 0; }
 .activity-row+.activity-row { border-top:1px solid var(--divider-2); }
 .activity-row time { width:90px; flex:none; font-size:12px; }
@@ -803,12 +789,13 @@ dialog .actions { justify-content:flex-end; padding:0; margin-top:24px; }
 .reset-row { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:16px; }
 .reset-row p { margin:0; font-size:12.5px; }
 .reset-resources { padding-left:20px; margin:16px 0; }
-.attempt-picker { display:flex; flex:none; flex-wrap:wrap; gap:10px; align-items:center; padding:12px 0; margin:0; border-bottom:1px solid var(--border); color:var(--t4); font-size:12.5px; }
+.attempt-picker { display:flex; flex:none; flex-wrap:wrap; gap:10px; align-items:center; padding:8px 24px; margin:0; border-bottom:1px solid var(--border); color:var(--t4); font-size:12.5px; }
 .attempt-picker [data-focus=refresh-panel] { min-width:94px; height:32px; }
 select { min-width:0; max-width:100%; height:32px; padding:0 8px; border:1px solid var(--border-2); border-radius:6px; background:var(--bg); color:var(--t2); font-family:'Geist Mono',monospace; font-size:12px; }
-.logs,.configuration { background:var(--subtle); padding:14px 16px; white-space:pre; line-height:1.9; font-size:12px; color:var(--t3); }
+.logs,.configuration { background:var(--subtle); padding:16px 24px; white-space:pre; line-height:1.9; font-size:12px; color:var(--t3); }
 .logs { margin:0; min-height:100%; width:max-content; min-width:100%; }
-.configuration { border:1px solid var(--border); border-radius:8px; max-height:360px; overflow:auto; }
+.configuration { border:1px solid var(--border); border-radius:8px; overflow-x:auto; }
+.log-note { margin:0 0 0 auto; font-size:12px; color:var(--t4); }
 .env-row { display:grid; grid-template-columns:180px 90px minmax(0,1fr); gap:14px; align-items:baseline; padding:11px 16px; }
 .env-row>* { overflow-wrap:anywhere; font-size:12px; }
 .definition-row { padding:13px 16px; }
@@ -843,13 +830,20 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   #projects { display:none; }
   .show-detail:not(.show-secrets) aside .search { display:none; }
   #main { flex:1; }
-  #detail { padding:20px 16px 24px; }
-  .title-row { gap:10px; }
+  #detail { padding:20px 16px; }
+  .preview-header { padding:16px 16px 8px; flex-direction:column; gap:10px; }
+  .preview-identity { width:100%; }
+  .preview-title { gap:12px; }
+  .preview-title h1 { font-size:20px; }
+  .preview-title .status { font-size:12px; }
+  .header-actions { flex-wrap:wrap; max-width:100%; }
+  .header-actions button,.header-actions .button { height:30px; }
+  .tabs { padding:0 16px; }
+  .tab-body { padding:16px; }
+  .attempt-picker { padding:10px 16px; }
+  .tab-content>.save-row { padding:10px 16px; }
+  .log-note { width:100%; margin:0; }
   h1 { font-size:26px; }
-  .title-row>.status { font-size:12px; }
-  .path-bar>.path { flex-wrap:wrap; }
-  .path-bar .path-parent { flex-basis:100%; }
-  .path-bar .path-tail { white-space:normal; overflow-wrap:anywhere; flex:1; }
   .section>.path,.definition-row>.path,.source-folders>.path { flex-wrap:wrap; }
   .section>.path .path-tail,.definition-row>.path .path-tail,.source-folders .path-tail { white-space:normal; overflow-wrap:anywhere; flex-shrink:1; }
   .attempt-split { grid-template-columns:1fr; }
@@ -874,8 +868,6 @@ summary { cursor:pointer; color:var(--t4); font-size:13px; }
   .tab-content>.save-row button { margin-left:auto; }
   .reset-row { align-items:flex-start; }
   .secret-row { gap:12px; padding:12px; }
-  .secondary-actions { margin-left:0; }
-  .attention-row { align-items:flex-start; padding:14px; }
   .activity-row { flex-wrap:wrap; gap:4px; }
   .activity-row>div { width:100%; }
 }
