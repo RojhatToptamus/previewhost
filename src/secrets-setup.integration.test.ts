@@ -10,11 +10,11 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { connectPreviewDaemon } from './client.js';
 import { createPreviewRuntime } from './runtime.js';
 import { startDaemon } from './daemon.js';
-import { keychain } from './keychain.js';
-import { setSecret, removeSecret } from './secrets.js';
+import { keystore } from './testSupport/keystore.js';
+import { setSecret, removeSecret } from './testSupport/keystore.js';
 import { SecretSetup } from './secrets-setup.js';
 import { PreviewError } from './errors.js';
-import { testKeychain } from './testSupport/keychain.js';
+import { testKeystore } from './testSupport/keystore.js';
 import type { AttemptResult, PreviewSpec, PreviewStatus, SecretSetupStatus } from './contracts.js';
 
 const enabled = { skip: process.platform !== 'darwin', timeout: 60_000 };
@@ -29,7 +29,7 @@ async function browserCall(origin: string, capability: string, operation: string
 }
 
 test('MCP missing → private save → status → ordinary retry keeps values and write permission off the public transport', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
   const opened: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
@@ -104,13 +104,13 @@ test('MCP missing → private save → status → ordinary retry keeps values an
 });
 
 test('MCP requests unselected names, private approval reuses a shared entry, and status resumes ordinary startup', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
   await setSecret('shop/dev/shared', 'FAKE_shared_value');
   const opened: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
-  const has = keychain.has.bind(keychain);
-  const presence = t.mock.method(keychain, 'has', has);
+  const has = keystore.has.bind(fixture.store);
+  const presence = t.mock.method(keystore, 'has', has);
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
   const tokenFile = join(fixture.directory, 'control', 'token');
   const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
@@ -167,7 +167,7 @@ test('MCP requests unselected names, private approval reuses a shared entry, and
 });
 
 test('private approval revalidates sources, unions concurrent names within the limit, and keeps grants after form cancellation', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const source = join(fixture.directory, 'worktree'); await mkdir(source);
   const opened: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
@@ -208,7 +208,7 @@ test('private approval revalidates sources, unions concurrent names within the l
 });
 
 test('setup rechecks CLI input, edit never recreates a deleted entry, and partial writes retain accurate results', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const opened: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
   let now = 0;
@@ -237,8 +237,8 @@ test('setup rechecks CLI input, edit never recreates a deleted entry, and partia
     assert.equal(setup.status(edit.id).state, 'partial');
     await removeSecret('two'); now += 1001;
     const partial = await setup.setup(spec, signal);
-    const add = keychain.add.bind(keychain);
-    t.mock.method(keychain, 'add', async (...args: Parameters<typeof add>) => {
+    const add = keystore.add.bind(fixture.store);
+    t.mock.method(keystore, 'add', async (...args: Parameters<typeof add>) => {
       if (args[1] === 'two') throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'A dispatched write has an unknown result.', { outcome: 'unknown' });
       return add(...args);
     });
@@ -253,7 +253,7 @@ test('setup rechecks CLI input, edit never recreates a deleted entry, and partia
 });
 
 test('private form routes reject duplicate authority headers and control bearers cannot save', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const opened: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['one'], authorize: () => true });
@@ -288,7 +288,7 @@ test('private form routes reject duplicate authority headers and control bearers
 });
 
 test('browser launch passes only the private URL and normal OS environment, without ambient credential values', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory] });
   const setup = new SecretSetup(runtime, 'http://127.0.0.1:9999');
   const spawn = childProcess.spawn;
@@ -310,8 +310,8 @@ test('browser launch passes only the private URL and normal OS environment, with
   }
 });
 
-test('setup authorization precedes Keychain access and shutdown joins pending preparation and saving', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+test('setup authorization precedes keystore access and shutdown joins pending preparation and saving', enabled, async (t) => {
+  const fixture = await testKeystore(t);
   let allowed = false;
   const opened: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
@@ -319,7 +319,7 @@ test('setup authorization precedes Keychain access and shutdown joins pending pr
   const setup = new SecretSetup(runtime, 'http://127.0.0.1:9999');
   const spec: PreviewSpec = { name: 'shutdown', type: 'command', cwd: fixture.directory, command: ['false'], env: { ONE: { secret: 'one' } } };
   const signal = new AbortController().signal;
-  const has = t.mock.method(keychain, 'has', async () => false);
+  const has = t.mock.method(keystore, 'has', async () => false);
   let releaseSave = () => {};
   let releasePreparation = () => {};
   try {
@@ -332,7 +332,7 @@ test('setup authorization precedes Keychain access and shutdown joins pending pr
     const saveEntered = new Promise<void>((resolve) => { enterSave = resolve; });
     const saveRelease = new Promise<void>((resolve) => { releaseSave = resolve; });
     let saveSignal: AbortSignal | undefined;
-    t.mock.method(keychain, 'add', async (_namespace: string, _id: string, _value: string, options: { signal: AbortSignal }) => {
+    t.mock.method(keystore, 'add', async (_namespace: string, _id: string, _value: string, options: { signal: AbortSignal }) => {
       saveSignal = options.signal; enterSave(); await saveRelease;
       throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'The dispatched write has an unknown result.', { outcome: 'unknown' });
     });
@@ -342,7 +342,7 @@ test('setup authorization precedes Keychain access and shutdown joins pending pr
     const prepareEntered = new Promise<void>((resolve) => { enterPreparation = resolve; });
     const prepareRelease = new Promise<void>((resolve) => { releasePreparation = resolve; });
     let prepareSignal: AbortSignal | undefined;
-    t.mock.method(keychain, 'has', async (_namespace: string, _id: string, options: { signal: AbortSignal }) => {
+    t.mock.method(keystore, 'has', async (_namespace: string, _id: string, options: { signal: AbortSignal }) => {
       prepareSignal = options.signal; enterPreparation(); await prepareRelease; return false;
     });
     const preparation = assert.rejects(setup.setup(spec, signal), { code: 'CLOSED' });
@@ -364,7 +364,7 @@ test('setup authorization precedes Keychain access and shutdown joins pending pr
 });
 
 test('expired grants lose write permission and pending form capacity is recovered without background polling', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const opened: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened.push(url); });
   let elapsed = 0;
@@ -394,11 +394,11 @@ test('expired grants lose write permission and pending form capacity is recovere
   } finally { await setup.close(); await runtime.close(); }
 });
 
-test('management lists metadata and reopens only pending private requests without additional Keychain reads or approval', enabled, async t => {
-  const fixture = await testKeychain(t);
+test('management lists metadata and reopens only pending private requests without additional keystore reads or approval', enabled, async t => {
+  const fixture = await testKeystore(t);
   let opened = '';
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { opened = url; });
-  const has = t.mock.method(keychain, 'has', async () => { throw new Error('Unapproved names must not be checked'); });
+  const has = t.mock.method(keystore, 'has', async () => { throw new Error('Unapproved names must not be checked'); });
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
   const tokenFile = join(fixture.directory, 'management', 'token');
   const daemon = await startDaemon({ runtime, tokenFile, port: 0 });

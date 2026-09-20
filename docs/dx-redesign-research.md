@@ -1,5 +1,8 @@
 # Developer experience redesign
 
+Storage descriptions and recorded checks in this historical report predate the encrypted keystore.
+For current behavior, see [stored secrets](api.md#stored-secrets).
+
 Implementation status: September 14, 2026. Branch: `codex/dx-workflow`, based on `origin/main` at `ec36175`.
 
 This report now describes the implemented design and its verified limits. The September 12 proposal was treated as guidance. Existing runtime, configuration, authorization, Keychain and cleanup mechanisms remain the basis of the system.

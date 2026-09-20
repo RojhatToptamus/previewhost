@@ -1,5 +1,8 @@
 # Integrations and tested support
 
+Storage descriptions and recorded checks in this historical report predate the encrypted keystore.
+For current behavior, see [stored secrets](api.md#stored-secrets).
+
 ## Platforms and interfaces
 
 Applications can call the ESM library, execute the CLI, send local HTTP requests,

@@ -189,7 +189,7 @@ listed above but no per-service `name`. Owned resource types are `postgres` and
 | --- | --- |
 | `"literal"` | The supplied string. |
 | `{fromEnv: "NAME"}` | An exact key from `RuntimeOptions.inputs`. |
-| `{secret: "ID"}` | One selected user Keychain entry, read once for this attempt. |
+| `{secret: "ID"}` | One selected user keystore entry, read once for this attempt. |
 | `{service: "api"}` | The candidate HTTP origin or database connection URL. This reference waits for that service. |
 | `{publicUrl: "web"}` | The stable numeric URL. Only the primary service supports this reference. |
 | `{browserUrl: "api"}` | The stable browser alias for an HTTP service. |
@@ -352,7 +352,7 @@ CLI commands default to the current canonical Git worktree root, or cwd outside 
 Automatic MCP tools select the `project` supplied with each call.
 `--project DIR` selects another project. Each project has one persistent owner with a dynamic loopback port.
 Start, replace, and secret setup/edit can start it. Read/status/cleanup commands never create an owner.
-Inspection validates offline before an owner exists. It does not open managed storage or resolve Keychain values.
+Inspection validates offline before an owner exists. It does not open managed storage or resolve keystore values.
 MCP discovery needs no owner or skill installation.
 
 `mcp`, `inspect`, `start`, `replace`, and `secrets setup/edit` accept `--root`, `--allow-exec`, `--env`, `--secret`, `--data-dir`, and `--docker-socket`.
@@ -397,7 +397,8 @@ If an owner already runs with different settings, follow the [owner restart inst
 
 ## Stored secrets
 
-Stored secrets require macOS 13 or later and the packaged Keychain helper.
+Stored secrets use a password-backed encrypted keystore on macOS, Windows, and Linux.
+Optional automatic unlock uses the existing macOS Keychain helper. Native commands, automatic owners, and managed databases still require macOS.
 Commands below use `previewhost` from PATH, or `./node_modules/.bin/previewhost` from your application directory.
 `shop/dev/token` is an example name, bound with `{secret: shop/dev/token}` in a direct spec or optional file.
 For cold setup, use `--allow-exec`. The private form can approve unselected names. Explicit edit still requires an already selected name.
@@ -406,7 +407,7 @@ Replace `REQUEST_ID` with the ID from setup or edit.
 Select exact names through `RuntimeOptions.secretIds` or repeated `serve --secret ID`.
 The initial selection is copied at owner creation and defaults to empty.
 Private setup can add exact names after browser approval. Grants last until owner shutdown.
-The same exact name reuses one Keychain value across worktrees and projects that approve it.
+The same exact name reuses one keystore value across worktrees and projects that approve it.
 Use a distinct explicit reference for a different value; missing-value setup never overwrites shared entries. Names match
 `[A-Za-z0-9][A-Za-z0-9._/-]{0,127}`. Slashes have no inheritance or filesystem meaning.
 Specs bind these names to standalone command fields, environment command fields,
@@ -415,7 +416,7 @@ Setup checks neither presence nor values for an unselected name until private ap
 Approval revalidates source scope and unions selected names within the existing 128-name limit.
 
 Inspect returns `secrets: [{id, selected, bindings: [{service?, key}]}]` without
-reading Keychain values. Start/replace resolves each required ID once, after
+reading keystore values. Start/replace resolves each required ID once, after
 authorization and source checks, before candidate resources or databases start.
 Only declared recipients receive each value. Failed replacement preserves active routes.
 
@@ -424,6 +425,9 @@ previewhost secrets setup --file preview.yml --allow-exec
 previewhost secrets setup --file preview.yml --allow-exec --reopen
 previewhost secrets edit shop/dev/token
 previewhost secrets status REQUEST_ID --timeout-ms 25000
+previewhost secrets init [--remember]
+previewhost secrets remember
+previewhost secrets forget
 previewhost secrets set shop/dev/token
 previewhost secrets set shop/dev/token --stdin
 previewhost secrets list
@@ -431,8 +435,15 @@ previewhost secrets remove shop/dev/token
 ```
 
 Setup/edit/status use the daemon and accept `--endpoint` and `--token-file`.
-Set/list/remove operate directly on user entries without a daemon and never change
+Init/remember/forget/set/list/remove operate directly on user entries without a daemon and never change
 its selection. They cannot modify internal database credentials.
+
+Commands unlock their own session through hidden password input when needed.
+`init` requires a password of at least 12 characters and confirmation.
+`remember` enables automatic unlock on macOS. `forget` removes it without locking existing sessions.
+Private setup unlocks its project owner. Dashboard unlock applies only to the dashboard.
+For piped `set --stdin`, automatic unlock must already work. Otherwise, use hidden terminal entry or private setup.
+Unattended previews can use explicitly selected environment inputs without opening the keystore.
 
 Set creates or replaces one item. Hidden terminal entry supports backspace, Ctrl-U,
 Ctrl-C, and bracketed paste. Enter submits outside a paste. `--stdin` requires a
@@ -445,13 +456,13 @@ Missing-value setup adds only absent entries. Explicit edit requires an existing
 If the entry disappeared, edit fails. Every field is validated before saving begins.
 
 Writes are atomic per item, with no cross-item transaction or ordering guarantee.
-Partial results keep successful writes. A dispatched write without a confirmed
-response reports `error.outcome: "unknown"`. An absent response does not imply rollback.
+Partial results keep successful writes. An absent response does not imply rollback.
+Automatic-unlock helper writes can report `error.outcome: "unknown"`.
 
 The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id, {timeoutMs?, signal?})`, and
 `secretsEdit(id, {signal?})`. Results include public `id`, `mode`, optional `name`,
 `sources`, `requirements`, `expiresAt`, `browser`, `state`, `saved`, `alreadyPresent`,
-`remaining`, and optional `error`. No result contains a private URL or capability.
+`remaining`, optional `error`, and keystore availability (`new`, `locked`, or `unlocked`). No result contains a private URL or capability.
 
 | Setup result | Meaning and next action |
 | --- | --- |
@@ -492,7 +503,7 @@ After use, stop the preview.
 Shut down its daemon.
 To remove the example entry, run `previewhost secrets remove shop/dev/token`.
 
-See [Keychain permissions and recovery](security.md#stored-secrets-and-private-entry).
+See [Keystore unlock and recovery](security.md#stored-secrets-and-private-entry).
 
 ## HTTP and MCP
 
@@ -576,13 +587,14 @@ Control bodies and responses have a 1 MiB limit. The daemon permits 32 active
 requests, including at most 16 waits, with two slots reserved for cleanup.
 
 At most 128 IDs can be selected or required per attempt. Metadata listing returns
-up to 128 names with `truncated`. Keychain work permits four helpers and 32 queued
-operations. Reads have a 10-second deadline. Explicit interactive writes have 30 seconds.
+up to 128 names with `truncated`. The encrypted payload has a 16 MiB limit.
+SQLite write contention waits at most three seconds before returning `BUSY`.
+Optional Keychain access permits four helpers and 32 queued operations. Reads have a 10-second deadline; interactive writes have 30 seconds.
 
 Forms expire after five minutes, with eight pending/saving forms and 32 recent
 results. Browser launches are limited to one per second. A save has a 30-second
 deadline and retains partial or uncertain outcomes. Ordinary status and preview
-traffic perform no Keychain reads.
+traffic never returns keystore values.
 
 After a lost response to start, replace, cancel, stop, or delete-data, read `get` or `list` before another attempt.
 A transport failure does not prove that the original operation failed.
@@ -600,7 +612,7 @@ authority. Private secret forms continue to keep their capabilities only in memo
 If session storage is unavailable, the initial launch works but reload needs a new launch.
 
 Secret Manager works without a running owner. It lists up to 128 user-secret references
-from Keychain and indicates when the list is truncated. Edit opens a dialog with a blank, masked
+from the unlocked keystore and indicates when the list is truncated. Edit opens a dialog with a blank, masked
 field. Save sends the replacement to the authenticated local dashboard; the response
 contains only its reference name. Cancel clears the field without sending a value.
 Save updates only an existing entry and never recreates one removed during editing.
@@ -609,7 +621,7 @@ The dashboard cannot change bindings or grant runtime access to references.
 The authenticated owner client also supports:
 
 - `describe(name, attemptId)`: redacted requested configuration for a retained attempt,
-  including secret reference metadata without checking Keychain presence.
+  including secret reference metadata without checking keystore presence.
 - `startAgain(name, attemptId)`: rerun the current stopped or failed attempt's declaration
   through ordinary startup, source validation, and authorization. Existing active,
   busy, and cleanup checks still apply. No YAML is reloaded. The dashboard labels a
@@ -640,9 +652,9 @@ shutdown or history eviction. Start again may allocate a different URL and keeps
 managed data. A later agent Start remains authorized after a human Stop: this is not
 a permanent pause or a new agent-approval lifecycle.
 In the dashboard, use Retry start after resolving the failure. It creates no
-private setup request and does not bypass secret approval or Keychain access checks.
+private setup request and does not bypass secret approval or keystore unlock.
 
-Saving keeps secret/input references unexpanded. It never reads Keychain values or
+Saving keeps secret/input references unexpanded. It never reads keystore values or
 exports the raw declaration through the dashboard response. Sources inside the project
 become relative paths; external sources keep absolute paths and appear in `externalSources`.
 Existing files and symlinks win: saving returns `ALREADY_EXISTS` without overwriting them.

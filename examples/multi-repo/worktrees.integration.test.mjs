@@ -11,7 +11,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createPreviewRuntime } from '../../.local/test-build/runtime.js';
 import { startDaemon } from '../../.local/test-build/daemon.js';
-import { testKeychain } from '../../.local/test-build/testSupport/keychain.js';
+import { testKeystore } from '../../.local/test-build/testSupport/keystore.js';
 
 const execute = promisify(execFile);
 const example = fileURLToPath(new URL('.', import.meta.url));
@@ -56,7 +56,7 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
   // Five sequential attempts have independent 60-second startup deadlines, plus fixture setup and cleanup.
   skip: process.platform !== 'darwin' || !dockerSocket, timeout: 360_000,
 }, async (t) => {
-  await testKeychain(t);
+  await testKeystore(t);
   const root = await mkdtemp(join(tmpdir(), 'previewhost-task-worktrees-'));
   const frontend = join(root, 'frontend task');
   const backend = join(root, 'backend task');

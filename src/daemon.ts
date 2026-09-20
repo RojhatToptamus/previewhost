@@ -200,7 +200,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       if (req.headers.host !== authority || headerCount('host') !== 1) {
         throw new PreviewError('UNAUTHORIZED', 'Requests require the exact numeric loopback Host.');
       }
-      const browser = ['/secrets/form', '/secrets/approve', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
+      const browser = ['/secrets/form', '/secrets/unlock', '/secrets/approve', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
       const asset: [string | Buffer, string] | undefined = req.url === '/secrets' ? [secretsPage, 'text/html; charset=utf-8'] : req.url === '/secrets.js' ? [secretsScript, 'text/javascript; charset=utf-8'] :
         req.url === '/secrets.css' ? [secretsStyle, 'text/css; charset=utf-8'] :
         req.url === '/fonts/geist.woff2' ? [geist, 'font/woff2'] : req.url === '/fonts/geist-mono.woff2' ? [geistMono, 'font/woff2'] : undefined;
@@ -238,7 +238,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       const value = await readBody(req, controller.signal);
       if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The control request was closed.');
       if (browser) {
-        const result = method === 'secrets/save' ? await secrets.save(supplied, value) : (parse(requestSchemas.list, value),
+        const result = method === 'secrets/unlock' ? await secrets.unlock(supplied, value) : method === 'secrets/save' ? await secrets.save(supplied, value) : (parse(requestSchemas.list, value),
           method === 'secrets/cancel' ? secrets.cancel(supplied) : method === 'secrets/approve' ? await secrets.approve(supplied) : secrets.form(supplied));
         send(res, 200, { result });
       } else if (method === 'info') {

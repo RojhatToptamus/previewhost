@@ -42,11 +42,9 @@ use isolated Unix sockets to exercise interrupted database operations and owners
 Each real test creates its own containers and volumes, then removes only those
 objects. Do not point verification at a shared or remote database.
 
-Secret and database tests use disposable Keychains through a test-only helper.
-The fixture restores and checks the original Keychain search list immediately.
-It never reads personal credentials.
-For tests that open managed data or secrets, use `src/testSupport/keychain.ts`.
-The production binary accepts no test Keychain selector.
+Secret and database tests use disposable encrypted keystores through `src/testSupport/keystore.ts`.
+Automatic-unlock tests use disposable macOS Keychains through `src/testSupport/keychain.ts`.
+They never read personal credentials. The production helper accepts no test Keychain selector.
 
 ## Dashboard development
 

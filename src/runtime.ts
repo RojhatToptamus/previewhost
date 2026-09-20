@@ -14,6 +14,7 @@ import type { Resource } from './resources.js';
 import { startEnvironment } from './environment.js';
 import { createDataOwner, type DataOwner } from './data.js';
 import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
+import { Keystore } from './keystore.js';
 import { savePreviewSpec } from './config.js';
 
 interface Attempt {
@@ -41,6 +42,7 @@ interface Slot {
 }
 
 export interface PreviewRuntime extends PreviewApi {
+  readonly keystore: Keystore;
   sourceRoots(): string[];
   allowSources(directories: string[], signal: AbortSignal): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
@@ -76,8 +78,9 @@ export async function createPreviewRuntime(options: RuntimeOptions): Promise<Pre
     throw new PreviewError('INVALID_INPUT', 'Owner inputs must be at most 128 named strings of at most 4096 characters.');
   }
   if (options.dockerSocket && !options.dataDirectory) throw new PreviewError('INVALID_INPUT', 'dockerSocket requires a dataDirectory.');
-  const data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket }) : undefined;
-  return new Runtime(roots, options.authorize, inputs, secretIds, data);
+  const keystore = new Keystore();
+  const data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket, keystore }) : undefined;
+  return new Runtime(roots, options.authorize, inputs, secretIds, data, keystore);
 }
 
 class Runtime implements PreviewRuntime {
@@ -87,8 +90,9 @@ class Runtime implements PreviewRuntime {
   private closing?: Promise<void>;
   constructor(
     private readonly roots: string[], private readonly authorize: RuntimeOptions['authorize'],
-    private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data?: DataOwner,
+    private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data: DataOwner | undefined, readonly keystore: Keystore,
   ) {
+    this.privateDirectories.add(keystore.directory);
     if (data) this.privateDirectories.add(data.directory);
     for (const name of data?.names() ?? []) this.slots.set(name, { name, cleanup: new Set() });
   }
@@ -341,6 +345,7 @@ class Runtime implements PreviewRuntime {
         throw new PreviewError('CLEANUP_INCOMPLETE', 'Some preview resources could not be verified as stopped. Inspect status and retry stop.');
       }
       await this.data?.close();
+      this.keystore.close();
     })();
     try { await this.closing; }
     catch (error) { this.closing = undefined; throw error; }
@@ -389,7 +394,7 @@ class Runtime implements PreviewRuntime {
         throw new PreviewError('SOURCE_DENIED', 'The source directory changed during authorization.');
       }
       this.admitted(slot, attempt);
-      secrets = await resolveSecrets(secretRequirements(spec, this.secretIds), signal);
+      secrets = await resolveSecrets(secretRequirements(spec, this.secretIds), signal, this.keystore);
       validateResolvedInputs(spec, this.inputs, secrets);
       this.admitted(slot, attempt);
       if (!slot.gateway) {

@@ -6,7 +6,8 @@ import { limits, type AttemptResult, type PreviewSpec } from './contracts.js';
 import { loadPreviewSpec, readPreviewSpec } from './config.js';
 import { startDaemon } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
-import { listSecrets, removeSecret, setSecret, validateSecretId } from './secrets.js';
+import { validateSecretId } from './secrets.js';
+import { Keystore } from './keystore.js';
 import { readSecretInput } from './secret-input.js';
 import { connectProject, projectDirectory, type ProjectOptions } from './project.js';
 import { version } from './version.js';
@@ -40,6 +41,9 @@ Secrets:
   previewhost secrets edit ID
   previewhost secrets status REQUEST_ID [--timeout-ms 25000]
   previewhost secrets set ID [--stdin]
+  previewhost secrets init [--remember]
+  previewhost secrets remember
+  previewhost secrets forget
   previewhost secrets list
   previewhost secrets remove ID
 
@@ -60,10 +64,10 @@ of status. Managed PostgreSQL/Redis require private storage and local Docker ima
 --docker-socket selects a local Engine socket. Automatic project owners default
 to private per-project data storage; --data-dir overrides that location.
 Foreground serve still requires --data-dir for managed databases.
---secret ID selects an exact macOS Keychain entry for {secret: ID} bindings.
+--secret ID selects an exact stored reference for {secret: ID} bindings.
 --allow-exec selects no secrets by itself. Private browser setup/edit needs owner
 authorization. The private form approves unselected names for this owner lifetime,
-then collects only missing values. Shared names reuse one Keychain value.
+then collects only missing values. Shared names reuse one keystore value.
 Save starts nothing; check status and retry the ordinary preview operation afterward.
 Set/list/remove work without a daemon. Set uses hidden terminal input or bounded
 UTF-8 stdin, never an argument value. Stdin preserves whitespace and newlines.
@@ -253,30 +257,48 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
   const command = positionals[0];
   const accepted: Record<string, string[]> = {
     setup: ['file', 'endpoint', 'token-file', 'reopen'], edit: ['endpoint', 'token-file'], status: ['endpoint', 'token-file', 'timeout-ms'],
-    set: ['stdin'], list: [], remove: [],
+    set: ['stdin'], list: [], remove: [], init: ['remember'], remember: [], forget: [],
   };
   for (const name of ['setup', 'edit', 'status']) accepted[name].push('project');
   for (const name of ['setup', 'edit']) accepted[name].push(...launchFlags);
   if (!Object.hasOwn(accepted, command) || Object.keys(values).some((key) => !accepted[command].includes(key))
-    || positionals.length !== (['setup', 'list'].includes(command) ? 1 : 2)) {
+    || positionals.length !== (['setup', 'list', 'init', 'remember', 'forget'].includes(command) ? 1 : 2)) {
     throw new PreviewError('INVALID_INPUT', 'Invalid secrets command arguments. Values belong only in hidden terminal input or --stdin. Run previewhost --help.');
   }
   if (['set', 'edit', 'remove'].includes(command)) validateSecretId(positionals[1]);
   const controller = new AbortController();
   let client: ReturnType<typeof connectPreviewDaemon> | undefined;
+  const store = new Keystore();
   const interrupt = () => { process.exitCode = 130; controller.abort(); void client?.close(); };
   process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
   try {
     let result: unknown;
-    if (command === 'set') {
-      const value = await readSecretInput(values.stdin === true, controller.signal);
-      await setSecret(positionals[1], value, { signal: controller.signal, interactive: true });
-      result = { saved: positionals[1] };
-    } else if (command === 'remove') {
-      await removeSecret(positionals[1], { signal: controller.signal, interactive: true });
-      result = { removed: positionals[1] };
-    } else if (command === 'list') result = await listSecrets({ signal: controller.signal });
-    else {
+    if (['init', 'set', 'remove', 'list', 'remember', 'forget'].includes(command)) {
+      if (command === 'forget') {
+        await store.forget({ signal: controller.signal });
+        result = { forgotten: true, message: 'Future sessions need your password. Already unlocked owners remain unlocked until shutdown.' };
+      } else {
+        const status = await store.status({ signal: controller.signal });
+        let warning: string | undefined;
+        if (command === 'init' || status.state !== 'unlocked') {
+          if (command === 'init' && status.state !== 'new') throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'A keystore already exists. Use secrets set, list, or remember to unlock it. Nothing was reset.');
+          if (status.state === 'new' && command !== 'init') throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Run previewhost secrets init or use private setup to create the keystore first.');
+          if (!process.stdin.isTTY) throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Keystore password entry requires a terminal or private browser setup. Unattended previews can use explicitly selected environment inputs.');
+          const password = await readSecretInput(false, controller.signal, 'Keystore password (hidden): ');
+          const confirmation = command === 'init' ? await readSecretInput(false, controller.signal, 'Confirm password (hidden): ') : undefined;
+          warning = (await store.unlock({ password, confirmation, create: command === 'init', remember: values.remember === true }, { signal: controller.signal })).warning;
+        }
+        if (command === 'set') {
+          const value = await readSecretInput(values.stdin === true, controller.signal);
+          await store.set('user', positionals[1], value, { signal: controller.signal });
+          result = { saved: positionals[1], message: 'Future starts use the new value. Running applications are unchanged.' };
+        } else if (command === 'remove') {
+          await store.remove('user', positionals[1], { signal: controller.signal }); result = { removed: positionals[1] };
+        } else if (command === 'list') result = await store.list({ signal: controller.signal });
+        else if (command === 'remember') { await store.remember({ signal: controller.signal }); result = { remembered: true }; }
+        else result = { created: true, ...(warning ? { warning } : {}) };
+      }
+    } else {
       const project = await projectDirectory(values.project);
       client = connectProject(projectOptions(values, project));
       result = command === 'setup' ? await client.secretsSetup(await readSpec(values.file, controller.signal, project), { reopen: values.reopen, signal: controller.signal }) :
@@ -288,6 +310,7 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
   } finally {
     process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt);
     await client?.close();
+    store.close();
   }
 }
 
@@ -296,7 +319,7 @@ function parseCliArgs() {
     help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' }, project: { type: 'string' }, root: { type: 'string', multiple: true },
     'allow-exec': { type: 'boolean' }, port: { type: 'string' },
     env: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'data-dir': { type: 'string' }, 'docker-socket': { type: 'string' },
-    stdin: { type: 'boolean' }, reopen: { type: 'boolean' },
+    stdin: { type: 'boolean' }, remember: { type: 'boolean' }, reopen: { type: 'boolean' },
     'after-engine-restart': { type: 'boolean' },
     endpoint: { type: 'string' }, 'token-file': { type: 'string' },
     file: { type: 'string', short: 'f' }, 'no-wait': { type: 'boolean' },

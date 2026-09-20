@@ -148,9 +148,9 @@ test('a hung owner is bounded without blocking healthy-owner results', { timeout
   assert.ok(performance.now() - start < 6000);
 });
 
-test('Secret Manager updates existing references through the authenticated dashboard without reading values or changing approvals', { skip: process.platform !== 'darwin', timeout: 15_000 }, async t => {
-  const { testKeychain } = await import('./testSupport/keychain.js');
-  const fixture = await testKeychain(t);
+test('Secret Manager updates existing references through the authenticated dashboard without returning values or changing approvals', { skip: process.platform !== 'darwin', timeout: 15_000 }, async t => {
+  const { testKeystore } = await import('./testSupport/keystore.js');
+  const fixture = await testKeystore(t);
   const opened: string[] = [];
   const dashboard = await startDashboard({
     discover: async () => { throw new Error('Secret Manager must not need a project owner.'); },
@@ -169,17 +169,16 @@ test('Secret Manager updates existing references through the authenticated dashb
   };
   const list = () => post({ action: 'listSecrets' });
   const update = (id: string, value: string) => post({ action: 'updateSecret', id, value });
-  assert.deepEqual((await list()).result, { ids: [], truncated: false });
+  assert.deepEqual((await list()).result, { ids: [], truncated: false, keystore: { state: 'unlocked', canRemember: process.platform === 'darwin' } });
   await fixture.store.add('user', 'shop/dev/api', 'FAKE_original');
   await fixture.store.add('user', 'another/dev/api', 'FAKE_other');
-  await fixture.store.add('database', 'private-database', 'FAKE_internal');
-  await fixture.store.add('migration', 'private-migration', 'FAKE_internal');
-  assert.deepEqual((await list()).result, { ids: ['another/dev/api', 'shop/dev/api'], truncated: false });
+  await fixture.store.add('database', 'a'.repeat(32), 'FAKE_internal');
+  assert.deepEqual((await list()).result, { ids: ['another/dev/api', 'shop/dev/api'], truncated: false, keystore: { state: 'unlocked', canRemember: process.platform === 'darwin' } });
   const change = { action: 'updateSecret', id: 'shop/dev/api', value: 'FAKE_forbidden' };
   assert.equal((await post(change, 'invalid')).status, 401);
   assert.equal((await post(change, token, 'http://evil.example')).status, 401);
   assert.equal((await update('missing', 'FAKE_missing')).error.code, 'SECRET_REQUIRED');
-  assert.equal((await update('private-database', 'FAKE_internal')).error.code, 'SECRET_REQUIRED');
+  assert.equal((await update('a'.repeat(32), 'FAKE_internal')).error.code, 'SECRET_REQUIRED');
   assert.equal((await update('invalid space', 'FAKE_invalid')).error.code, 'INVALID_INPUT');
   for (const value of ['', 'FAKE_\0', '🙂'.repeat(1025)]) {
     assert.equal((await update('shop/dev/api', value)).error.code, 'INVALID_INPUT');
@@ -206,7 +205,7 @@ test('Secret Manager updates existing references through the authenticated dashb
   assert.ok(responses.every(text => !text.includes('FAKE_') && !text.includes(token)));
   assert.equal(opened.length, 0, 'Editing never launches another browser page');
   await fixture.control('lock');
-  assert.equal((await list()).error.code, 'SECRET_STORE_UNAVAILABLE');
+  assert.equal((await list()).result.keystore.state, 'locked');
   await fixture.control('unlock');
   assert.deepEqual((await list()).result.ids, ['another/dev/api']);
   await dashboard.close();
@@ -214,8 +213,8 @@ test('Secret Manager updates existing references through the authenticated dashb
   assert.equal(await fixture.store.get('user', 'another/dev/api'), 'FAKE_another');
 });
 
-test('dashboard shutdown cancels and joins an in-flight Keychain update', async t => {
-  const { keychain } = await import('./keychain.js');
+test('dashboard shutdown cancels and joins an in-flight keystore update', async t => {
+  const { keystore } = await import('./testSupport/keystore.js');
   let launch = '';
   const dashboard = await startDashboard({ openBrowser: async url => { launch = url; } });
   t.after(() => dashboard.close());
@@ -224,7 +223,7 @@ test('dashboard shutdown cancels and joins an in-flight Keychain update', async 
   const entered = new Promise<void>(resolve => { enter = resolve; });
   const canceled = new Promise<void>(resolve => { cancel = resolve; });
   const completed = new Promise<boolean>(resolve => { complete = resolve; });
-  t.mock.method(keychain, 'update', (...args: Parameters<typeof keychain.update>) => {
+  t.mock.method(keystore, 'update', (...args: Parameters<typeof keystore.update>) => {
     args[3]!.signal!.addEventListener('abort', cancel, { once: true });
     enter();
     return completed;

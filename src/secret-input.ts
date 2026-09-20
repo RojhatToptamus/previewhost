@@ -1,9 +1,9 @@
 import { limits } from './contracts.js';
 import { PreviewError, throwIfAborted } from './errors.js';
-import { validateSecretValue } from './keychain.js';
+import { validateSecretValue } from './keystore.js';
 
 /** Reads owner input without placing its value in arguments, prompts or diagnostics. */
-export async function readSecretInput(stdin: boolean, signal: AbortSignal): Promise<string> {
+export async function readSecretInput(stdin: boolean, signal: AbortSignal, prompt = 'Secret value (hidden; Enter to save): '): Promise<string> {
   throwIfAborted(signal);
   if (!stdin && !process.stdin.isTTY) throw new PreviewError('INVALID_INPUT', 'Use --stdin for piped secret bytes or run set in a terminal.');
   if (stdin && process.stdin.isTTY) throw new PreviewError('INVALID_INPUT', '--stdin requires a pipe. Omit it for hidden terminal entry.');
@@ -68,7 +68,7 @@ export async function readSecretInput(stdin: boolean, signal: AbortSignal): Prom
     }
     if (!stdin) {
       process.stdin.setRawMode(true);
-      process.stderr.write('Secret value (hidden; Enter to save): \x1b[?2004h');
+      process.stderr.write(prompt + '\x1b[?2004h');
     }
     process.stdin.on('data', data); process.stdin.once('end', end); process.stdin.once('error', error);
     signal.addEventListener('abort', abort, { once: true });

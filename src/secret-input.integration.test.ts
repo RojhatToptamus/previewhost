@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
-import { writeFile } from 'node:fs/promises';
-import { testKeychain } from './testSupport/keychain.js';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { testKeystore } from './testSupport/keystore.js';
 
 const enabled = { skip: process.platform !== 'darwin', timeout: 30_000 };
 const execute = promisify(execFile);
@@ -15,13 +16,25 @@ test('hidden terminal entry, cancellation, paste overflow, and TTY misuse never 
   assert.equal(result.stderr, '');
 });
 
+test('CLI creates, unlocks, edits and removes encrypted entries through private terminal input', enabled, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-cli-keystore-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const driver = join(directory, 'cli.mjs');
+  await writeFile(driver, `import {keychain} from ${JSON.stringify(new URL('./keychain.js', import.meta.url).href)};
+    keychain.get=async()=>undefined; await import(${JSON.stringify(new URL('./cli.js', import.meta.url).href)});`);
+  const result = await execute('/usr/bin/python3', [resolve('src/secret-input.pty.py'), process.execPath,
+    new URL('./secret-input.js', import.meta.url).href, driver, directory], { timeout: 20_000 });
+  assert.deepEqual(JSON.parse(result.stdout), { checks: 7, hiddenInput: true, terminalRestored: true });
+  assert.equal(result.stderr, '');
+});
+
 test('CLI stdin preserves exact UTF-8 bytes in the shared store and rejects invalid bytes, value arguments, and oversize input', enabled, async (t) => {
-  const fixture = await testKeychain(t);
+  const fixture = await testKeystore(t);
   const driver = join(fixture.directory, 'cli-fixture.mjs');
   await writeFile(driver, `${fixture.installSource}\nawait import(${JSON.stringify(new URL('./cli.js', import.meta.url).href)});`);
   function cli(args: string[], input = Buffer.alloc(0)): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolveResult, reject) => {
-      const child = spawn(process.execPath, [driver, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', driver, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
       let stdout = ''; let stderr = '';
       const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);
       child.stdout.on('data', (chunk) => { stdout += chunk; }); child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -33,7 +46,7 @@ test('CLI stdin preserves exact UTF-8 bytes in the shared store and rejects inva
   const value = '\ufeff FAKE_opaque_ü\nsecond line \n';
   const saved = await cli(['secrets', 'set', 'owner/value', '--stdin'], Buffer.from(value));
   assert.equal(saved.code, 0, saved.stderr);
-  assert.deepEqual(JSON.parse(saved.stdout), { saved: 'owner/value' });
+  assert.deepEqual(JSON.parse(saved.stdout), { saved: 'owner/value', message: 'Future starts use the new value. Running applications are unchanged.' });
   assert.equal(saved.stderr, '');
   assert.equal(await fixture.store.get('user', 'owner/value'), value);
   const replaced = await cli(['secrets', 'set', 'owner/value', '--stdin'], Buffer.from('FAKE_replacement'));

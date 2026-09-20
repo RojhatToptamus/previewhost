@@ -1,5 +1,5 @@
 import test, { beforeEach } from 'node:test';
-import { testKeychain } from './testSupport/keychain.js';
+import { testKeystore } from './testSupport/keystore.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -14,8 +14,8 @@ import type { PreviewSpec, PreviewStatus } from './contracts.js';
 
 const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
 beforeEach(async (t) => {
-  assert.ok('mock' in t, 'The isolated Keychain must belong to a test context.');
-  if (process.platform === 'darwin' && dockerSocket) await testKeychain(t);
+  assert.ok('mock' in t, 'The isolated keystore must belong to a test context.');
+  if (process.platform === 'darwin' && dockerSocket) await testKeystore(t);
 });
 const enabled = { skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000 };
 const signal = () => new AbortController().signal;

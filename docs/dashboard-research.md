@@ -1,5 +1,8 @@
 # Previewhost local dashboard: research and proposal
 
+Storage descriptions and recorded checks in this historical report predate the encrypted keystore.
+For current behavior, see [stored secrets](api.md#stored-secrets).
+
 Research date: 14 September 2026. Baseline: `main` at `cf5326a`, after PR #7.
 Status: dashboard and explicit recipe saving implemented; configuration editing remains deferred.
 Branch: `codex/dashboard-research`.

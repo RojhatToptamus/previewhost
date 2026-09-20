@@ -35,8 +35,10 @@ Control environments through the CLI, MCP tools, or an embedded Node.js library:
 
 Previewhost supports macOS and requires Node.js 22.23 or later.
 Development servers require the macOS `ps` and `lsof` tools.
-Stored secrets and managed databases require macOS 13 or later.
-Linux and Windows remain unverified.
+The encrypted keystore works on macOS, Windows, and Linux.
+Automatic unlock and managed databases currently require macOS 13 or later.
+Native commands, automatic project owners, and managed databases still require macOS.
+Password-only keystore tests also run on Linux. Windows remains unverified.
 
 For CLI and MCP use, install the package globally:
 
@@ -395,12 +397,55 @@ The [troubleshooting guide](docs/troubleshooting.md) covers connection and clean
 
 ## Handle secrets
 
-Recipes can reference selected environment variables and secrets stored in macOS Keychain.
-The private browser form first approves access to unselected names for this owner lifetime, then collects missing values.
-The same exact name shares one Keychain value across worktrees that approve it; use a distinct name for a different value.
-Keep their values out of recipes and agent chat.
-previewhost does not automatically load `.env` files.
-See the [secrets guide](docs/api.md#stored-secrets) for setup.
+Recipes can bind selected environment inputs and stored secret references.
+`API_TOKEN` is an application variable. In `API_TOKEN: {secret: shop/dev/api}`, `shop/dev/api` is the stored reference.
+The exact reference shares one value across projects and worktrees that approve it.
+A different reference has a different value. Slashes do not create access scopes.
+
+Private setup first approves exact references, then creates or unlocks the keystore, then collects missing values.
+Unlocking does not approve additional references or authorize execution.
+Each owner and dashboard keeps its own unlocked session until shutdown.
+Edits affect future starts and replacements. Running applications keep their existing values.
+
+```sh
+previewhost secrets init              # hidden password and confirmation
+previewhost secrets set shop/dev/api  # hidden password, then secret value
+previewhost secrets list
+previewhost secrets remember          # optional automatic unlock on macOS
+previewhost secrets forget            # remove automatic unlock
+```
+
+The dashboard also supports creation, password unlock, remember/forget, and editing.
+“Forget” affects future sessions. It does not lock owners that are already unlocked.
+On Windows and Linux, use your password. Unattended previews can use explicitly selected `--env NAME` inputs with `{fromEnv: NAME}`.
+Previewhost does not automatically load `.env` files. Applications can load them.
+Keep passwords and secret values out of recipes, command arguments, and agent chat.
+
+The keystore lives at `~/.local/share/previewhost/keystore/secrets.sqlite` on all platforms.
+It contains one AES-256-GCM encrypted payload with an scrypt-derived key.
+Node's built-in SQLite provides transactions across processes and recovery after interrupted writes. No extra dependency is required.
+Node 22 can print an experimental SQLite warning on first access.
+The optional macOS Keychain item contains only an unlock key. The password remains necessary for recovery and other platforms.
+
+### Reset required for earlier installations
+
+This release does not read or migrate earlier Keychain secrets or retained-data records.
+It does not delete them. There is no automatic conversion or destructive reset.
+
+1. Stop earlier Previewhost owners before using this release.
+2. Create the new keystore and enter required user secrets through private input.
+3. For new managed databases, choose a fresh `--data-dir`.
+4. Keep old data directories, Docker volumes, and Keychain items until you decide how to retain them.
+
+For valuable old database data, use the earlier release to access and export it first.
+Delete old data only through an explicit, authorized cleanup with the earlier release.
+Removing a record or generating a new password does not recover its retained database.
+
+For credential recovery, stop owners, dashboard sessions, and secret commands, then copy the complete keystore directory and retained-data directories.
+Back up database contents separately; these directories do not contain Docker volume data.
+Keep the keystore password separately. Restore complete backups while Previewhost is stopped.
+Without the password, a usable remembered key, or a backup with a known password, Previewhost cannot recover the secrets.
+See the [secrets guide](docs/api.md#stored-secrets) for setup and [recovery instructions](docs/troubleshooting.md).
 
 ## Build from source
 

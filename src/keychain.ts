@@ -4,28 +4,12 @@ import { z } from 'zod';
 import { limits } from './contracts.js';
 import { PreviewError, throwIfAborted } from './errors.js';
 
-export type SecretNamespace = 'user' | 'database' | 'migration';
 export interface KeychainOptions { signal?: AbortSignal; interactive?: boolean }
-interface NativeRequest {
-  operation: 'get' | 'has' | 'add' | 'update' | 'remove' | 'list';
-  namespace: SecretNamespace;
-  id?: string;
-  value?: string;
-}
-const replySchema = z.strictObject({
-  status: z.number().int(), data: z.string().max(Math.ceil(limits.secretBytes / 3) * 4).optional(),
-  ids: z.array(z.string().max(512)).max(limits.secrets).optional(), truncated: z.boolean().optional(),
-});
+interface NativeRequest { operation: 'get' | 'add' | 'update' | 'remove'; namespace: 'unlock'; id: string; value?: string }
+const replySchema = z.strictObject({ status: z.number().int(), data: z.string().max(128).optional() });
 type NativeReply = z.infer<typeof replySchema>;
 const missing = -25300;
 const duplicate = -25299;
-
-export function validateSecretValue(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || !value.length || value.includes('\0')
-    || Buffer.byteLength(value) > limits.secretBytes || Buffer.from(value).toString('utf8') !== value) {
-    throw new PreviewError('INVALID_INPUT', 'A secret must contain 1–4096 valid UTF-8 bytes without NUL.');
-  }
-}
 
 /** One concrete native bridge. Each operation owns and joins its helper process. */
 export class Keychain {
@@ -36,7 +20,7 @@ export class Keychain {
     private readonly arguments_: string[] = [],
   ) {}
 
-  async get(namespace: SecretNamespace, id: string, options: KeychainOptions = {}): Promise<string | undefined> {
+  async get(namespace: 'unlock', id: string, options: KeychainOptions = {}): Promise<string | undefined> {
     const reply = await this.invoke({ operation: 'get', namespace, id }, options);
     if (reply.status === missing) return undefined;
     this.check(reply);
@@ -45,38 +29,25 @@ export class Keychain {
       const bytes = Buffer.from(reply.data, 'base64');
       if (bytes.toString('base64') !== reply.data) throw new Error();
       const value = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-      validateSecretValue(value);
+      if (!/^[a-f0-9]{64}$/.test(value)) throw new Error();
       return value;
     } catch { throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Keychain returned invalid credential data.'); }
   }
-  async has(namespace: SecretNamespace, id: string, options: KeychainOptions = {}): Promise<boolean> {
-    const reply = await this.invoke({ operation: 'has', namespace, id }, options);
-    if (reply.status === missing) return false;
-    this.check(reply);
-    return true;
-  }
-  async list(options: KeychainOptions = {}): Promise<{ ids: string[]; truncated: boolean }> {
-    const reply = await this.invoke({ operation: 'list', namespace: 'user' }, options);
-    if (reply.status === missing) return { ids: [], truncated: false };
-    this.check(reply);
-    if (!reply.ids || reply.truncated === undefined) throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Keychain returned an invalid inventory.');
-    return { ids: reply.ids.sort(), truncated: reply.truncated };
-  }
-  async add(namespace: SecretNamespace, id: string, value: string, options: KeychainOptions = {}): Promise<boolean> {
-    validateSecretValue(value);
+  async add(namespace: 'unlock', id: string, value: string, options: KeychainOptions = {}): Promise<boolean> {
+    if (!/^[a-f0-9]{64}$/.test(value)) throw new PreviewError('INVALID_INPUT', 'Invalid keystore unlock key.');
     const reply = await this.invoke({ operation: 'add', namespace, id, value }, options);
     if (reply.status === duplicate) return false;
     this.check(reply);
     return true;
   }
-  async update(namespace: SecretNamespace, id: string, value: string, options: KeychainOptions = {}): Promise<boolean> {
-    validateSecretValue(value);
+  async update(namespace: 'unlock', id: string, value: string, options: KeychainOptions = {}): Promise<boolean> {
+    if (!/^[a-f0-9]{64}$/.test(value)) throw new PreviewError('INVALID_INPUT', 'Invalid keystore unlock key.');
     const reply = await this.invoke({ operation: 'update', namespace, id, value }, options);
     if (reply.status === missing) return false;
     this.check(reply);
     return true;
   }
-  async remove(namespace: SecretNamespace, id: string, options: KeychainOptions = {}): Promise<void> {
+  async remove(namespace: 'unlock', id: string, options: KeychainOptions = {}): Promise<void> {
     const reply = await this.invoke({ operation: 'remove', namespace, id }, options);
     if (reply.status !== missing) this.check(reply);
   }
@@ -91,7 +62,7 @@ export class Keychain {
 
   // Kept on the concrete bridge so integration fixtures can target a disposable Keychain.
   async invoke(request: NativeRequest, options: KeychainOptions = {}): Promise<NativeReply> {
-    if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Stored secrets currently require macOS Keychain.');
+    if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Automatic unlock requires macOS Keychain.');
     const { signal } = options;
     if (signal) throwIfAborted(signal);
     await this.acquire(signal);

@@ -65,7 +65,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
       'Owner authority is separate from host tool approval. Private secret approval lasts until owner shutdown and permits ' +
       'any execution-authorized preview on that owner to bind those exact shared names. Saving secrets starts no code. ' +
       'Re-read file-based specs after private entry. If your turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue”. ' +
-      'A locked Keychain needs owner unlock. Never retry through another interface to bypass a denial.',
+      'A locked keystore needs owner password entry through private setup. Unlocking never approves names or execution. Never retry through another interface to bypass a denial.',
 
   });
   let active = 0;
@@ -155,11 +155,11 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     inputSchema, annotations: write,
   }, (input, context) => run('request', input, async (client, project) => client.secretsSetup(await loadForStartup(input, project, client, context.mcpReq.signal), { signal: context.mcpReq.signal })));
   server.registerTool('preview_secrets_status', {
-    description: 'Read or wait up to 25000ms for the public result of private secret setup. canceled is terminal: stop and wait for an explicit user request before new setup or startup. Do not assume accidental closure or ask for values in the canceled form. pending or saving after a wait timeout means setup is still in progress; keep the same request ID. An interrupted status wait leaves the form available. expired is terminal; ask before new setup. browser: failed reports launch failure, not cancellation. No values are read or returned. Complete records access approval and observed presence, not credential validity or future Keychain access. Check current preview state before startup with the current spec. Partial is terminal: its private form cannot be reused. After the owner fixes the reported issue, request fresh setup; do not keep waiting on a partial result or ask the owner to resubmit the old form. Retain this request ID with its original project. If the turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue” to resume.',
+    description: 'Read or wait up to 25000ms for the public result of private secret setup. canceled is terminal: stop and wait for an explicit user request before new setup or startup. Do not assume accidental closure or ask for values in the canceled form. pending or saving after a wait timeout means setup is still in progress; keep the same request ID. An interrupted status wait leaves the form available. expired is terminal; ask before new setup. browser: failed reports launch failure, not cancellation. No values are read or returned. Complete records access approval and observed presence, not credential validity or future keystore access. Check current preview state before startup with the current spec. Partial is terminal: its private form cannot be reused. After the owner fixes the reported issue, request fresh setup; do not keep waiting on a partial result or ask the owner to resubmit the old form. Retain this request ID with its original project. If the turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue” to resume.',
     inputSchema: secretRequestSchemas.status.extend(scope), annotations: read,
   }, (input, context) => run(input.timeoutMs ? 'wait' : 'request', input, client => client.secretsStatus(input.id, { timeoutMs: input.timeoutMs, signal: context.mcpReq.signal })));
   server.registerTool('preview_shutdown', {
-    description: 'Shut down this project owner and stop every preview it owns. Preserves managed data and stored Keychain values. Ends runtime secret access approvals and private forms. Use only when the user requests owner teardown.',
+    description: 'Shut down this project owner and stop every preview it owns. Preserves managed data and stored keystore values. Ends runtime secret access approvals and private forms. Use only when the user requests owner teardown.',
     inputSchema: requestSchemas.list.extend(scope), annotations: cleanup,
   }, input => run('cleanup', input, async client => { await client.shutdown(); return { stopped: true }; }));
   return { server, close: async () => { closed = true; access?.close(); await Promise.all([...clients].map(client => client.close())); } };
