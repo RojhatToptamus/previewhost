@@ -185,7 +185,7 @@ Unlock the owner’s keystore through private setup first. The browser can creat
 previewhost secrets setup --file environment.yaml --token-file .local/token
 ```
 
-This stores generated database passwords in the encrypted keystore. It starts no application.
+This unlocks storage for generated database passwords. It starts no application.
 Then start the environment:
 
 ```sh

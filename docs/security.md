@@ -117,7 +117,7 @@ Offline status reads validated ownership records without Docker recovery or keys
 Explicit offline deletion holds the project lock, checks the selected resources, then reuses
 the existing data owner’s deletion checks. The dashboard requires its private session and
 confirmation; CLI offline deletion requires `--allow-exec`.
-Deletion requires an unlocked keystore before it changes Docker resources. The dashboard uses its Secret Manager session; offline CLI deletion needs macOS automatic unlock.
+Offline deletion requires an unlocked keystore before it changes Docker resources. The dashboard uses its Secret Manager session; offline CLI deletion needs macOS automatic unlock.
 Removing an entry is blocked while work, private setup, data, or cleanup remains.
 An empty automatic owner closes after its last entry is removed, ending dynamic approvals.
 A crash or failed cleanup keeps the connection record. An unreachable listener does not prove application cleanup.
