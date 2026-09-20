@@ -44,6 +44,9 @@ interface Slot {
 export interface PreviewRuntime extends PreviewApi {
   readonly keystore: Keystore;
   sourceRoots(): string[];
+  /** Forget stopped history only; resource deletion is a separate authorized operation. */
+  remove(name: string | undefined, attemptId: string | null): boolean;
+  isEmpty(): boolean;
   allowSources(directories: string[], signal: AbortSignal): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
@@ -204,6 +207,22 @@ class Runtime implements PreviewRuntime {
     return this.begin(slot, spec, 'replace');
   }
 
+  isEmpty(): boolean { return this.slots.size === 0; }
+
+  remove(name: string | undefined, attemptId: string | null): boolean {
+    this.assertOpen();
+    if (!requestSchemas.remove.safeParse({ name, attemptId }).success) throw new PreviewError('INVALID_INPUT', 'Invalid entry removal request.');
+    if (name === undefined) {
+      if (this.slots.size) throw new PreviewError('BUSY', 'Remove this project’s previews first.');
+      return false;
+    }
+    const slot = this.slots.get(name);
+    if ((slot?.latest?.summary.id ?? null) !== attemptId) throw new PreviewError('STALE_ATTEMPT', 'This preview changed. Review it before removing its entry.');
+    if (slot && isLive(slot)) throw new PreviewError('BUSY', 'Stop the preview and resolve cleanup before removing its entry.');
+    if (this.data?.status(name)) throw new PreviewError('BUSY', 'Delete the retained managed data before removing its entry.');
+    return this.slots.delete(name);
+  }
+
   async list(): Promise<PreviewStatus[]> { return [...this.slots.values()].map((slot) => this.status(slot)); }
   async get(name: string): Promise<PreviewStatus> { return this.status(this.slot(name)); }
 
@@ -315,7 +334,7 @@ class Runtime implements PreviewRuntime {
     if (options.expected) {
       const expected = options.expected;
       const resources = data.resources;
-      if (slot.latest?.summary.id !== expected.attemptId || resources.length !== expected.resources.length ||
+      if ((slot.latest?.summary.id ?? null) !== expected.attemptId || resources.length !== expected.resources.length ||
           resources.some(resource => !expected.resources.some(item => item.name === resource.name && item.type === resource.type))) {
         throw new PreviewError('STALE_ATTEMPT', 'The preview or managed databases changed. Review them before deleting data.');
       }

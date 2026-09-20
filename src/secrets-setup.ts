@@ -80,6 +80,23 @@ export class SecretSetup {
       ({ id, name, mode, state, browser, expiresAt }));
   }
 
+  assertRemovable(name?: string): void {
+    this.prune();
+    if (this.preparing.size || [...this.entries.values()].some(entry =>
+      (name === undefined || entry.status.name === name) && ['pending', 'saving'].includes(entry.status.state))) {
+      throw new PreviewError('BUSY', 'Finish or cancel private setup before removing this entry.');
+    }
+    if (name === undefined && [...this.entries.values()].some(entry => entry.status.name !== undefined)) throw new PreviewError('BUSY', 'Remove this project’s preview entries first.');
+  }
+
+  remove(name?: string): boolean {
+    let removed = false;
+    for (const [id, entry] of this.entries) if (entry.status.name === name) { this.entries.delete(id); removed = true; }
+    return removed;
+  }
+
+  isEmpty(): boolean { return this.entries.size === 0 && this.preparing.size === 0; }
+
   async reopen(id: string, signal: AbortSignal): Promise<SecretSetupStatus> {
     throwIfAborted(signal);
     this.prune();

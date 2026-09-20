@@ -9,7 +9,7 @@ import { failure, PreviewError } from './errors.js';
 import { validateSecretId } from './secrets.js';
 import { Keystore } from './keystore.js';
 import { readSecretInput } from './secret-input.js';
-import { connectProject, projectDirectory, type ProjectOptions } from './project.js';
+import { connectProject, managementProject, discoverProjectOwners, projectDirectory, type ProjectOptions } from './project.js';
 import { version } from './version.js';
 
 const help = `previewhost — local previews and application environments
@@ -28,12 +28,14 @@ Preview operations:
   previewhost rerun-job NAME ATTEMPT_ID JOB  (stop first; writes are not rolled back)
   previewhost replace [--file spec.yaml] [--no-wait] [--timeout-ms 30000]
   previewhost list
+  previewhost projects
+  previewhost remove [NAME]  (stopped entries only; keeps source and secrets)
   previewhost get NAME
   previewhost wait NAME ATTEMPT_ID [--timeout-ms 30000]
   previewhost logs NAME [ATTEMPT_ID] [--source SERVICE_OR_JOB] [--after CURSOR] [--max-bytes 65536]
   previewhost cancel NAME ATTEMPT_ID
   previewhost stop NAME [--after-engine-restart]
-  previewhost delete-data NAME
+  previewhost delete-data NAME [--allow-exec]
   previewhost shutdown
 
 Secrets:
@@ -129,7 +131,7 @@ async function main(): Promise<void> {
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
   if (command === 'secrets') { await secretCommand(positionals.slice(1), values); return; }
   const accepted: Record<string, string[]> = {
-    dashboard: [],
+    dashboard: [], projects: [], remove: ['endpoint', 'token-file'],
     serve: ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket', 'port', 'token-file'],
     mcp: ['endpoint', 'token-file'],
     inspect: ['file', 'endpoint', 'token-file'],
@@ -139,19 +141,23 @@ async function main(): Promise<void> {
     wait: ['timeout-ms', 'endpoint', 'token-file'], logs: ['max-bytes', 'source', 'after', 'endpoint', 'token-file'],
     cancel: ['endpoint', 'token-file'], stop: ['after-engine-restart', 'endpoint', 'token-file'],
     'rerun-job': ['endpoint', 'token-file'],
-    'delete-data': ['endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
+    'delete-data': ['allow-exec', 'endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
   };
   if (!Object.hasOwn(accepted, command)) throw new PreviewError('INVALID_INPUT', 'Unknown command. Run previewhost --help.');
-  if (!['serve', 'dashboard'].includes(command)) accepted[command].push('project');
+  if (!['serve', 'dashboard', 'projects'].includes(command)) accepted[command].push('project');
   if (['mcp', 'inspect', 'start', 'replace'].includes(command)) accepted[command].push(...launchFlags);
   for (const key of Object.keys(values)) if (!accepted[command].includes(key)) throw new PreviewError('INVALID_INPUT', `--${key} is not supported for ${command}.`);
-  const counts: Record<string, [number, number]> = { 'rerun-job': [4, 4], get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
+  const counts: Record<string, [number, number]> = { remove: [1, 2], 'rerun-job': [4, 4], get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
   const [minimum, maximum] = counts[command] ?? [1, 1];
   if (positionals.length < minimum || positionals.length > maximum) throw new PreviewError('INVALID_INPUT', `Invalid arguments for ${command}. Run previewhost --help.`);
   const tokenFile = values['token-file'] ? resolve(values['token-file']) : defaultTokenFile();
   const timeoutMs = integer(values['timeout-ms'], '--timeout-ms', limits.waitMs);
   const maxBytes = integer(values['max-bytes'], '--max-bytes', limits.logBytes, 4);
 
+  if (command === 'projects') {
+    process.stdout.write(`${JSON.stringify((await discoverProjectOwners()).map(owner => ({ id: owner.id, project: (owner.connection ?? owner.retained)?.projectDirectory, connection: owner.connection ? 'recorded' : owner.retained ? 'offline' : 'unavailable', ...(owner.error ? { error: owner.error } : {}) })))}\n`);
+    return;
+  }
   if (command === 'dashboard') {
     const { startDashboard } = await import('./dashboard.js');
     const dashboard = await startDashboard();
@@ -201,7 +207,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const project = await projectDirectory(values.project);
+  const project = await (['inspect', 'start', 'replace'].includes(command) ? projectDirectory(values.project) : managementProject(values.project));
   const client = connectProject(projectOptions(values, project));
   const inputController = new AbortController();
   const interrupt = () => { process.exitCode = 130; inputController.abort(); void client.close(); };
@@ -232,6 +238,12 @@ async function main(): Promise<void> {
           result = outcome;
         }
         break;
+      }
+      case 'remove': {
+        const name = positionals[1];
+        const preview = name ? (await client.list()).find(preview => preview.name === name) : undefined;
+        await client.remove(name, preview?.latest?.id ?? null);
+        result = { removed: name ?? project }; break;
       }
       case 'list': result = await client.list(); break;
       case 'get': result = await client.get(positionals[1]); break;

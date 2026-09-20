@@ -10,9 +10,13 @@ import type { Entry } from "./lib/model";
 import { call, errorMessage } from "./lib/api";
 import { Button } from "./components/ui/button";
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "./components/ui/native-select";
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+} from "./components/ui/select";
 import { Toggle } from "./components/ui/toggle";
 import { Spinner } from "./components/ui/spinner";
 import { ScrollArea } from "./components/ui/scroll-area";
@@ -139,38 +143,47 @@ export function Diagnostics({
             disabled={!logs}
           />
         )}
-        <NativeSelect
-          aria-label="Diagnostic attempt"
-          value={selected.id}
-          onChange={(event) => selectAttempt(event.target.value)}
-        >
-          {retained.map((attempt) => (
-            <NativeSelectOption value={attempt.id} key={attempt.id}>
-              {attempt.id === entry.preview?.active?.id
-                ? "Serving"
-                : attempt.id === entry.preview?.candidate?.id
-                  ? "Starting"
-                  : "Latest"}{" "}
-              · {attempt.id.slice(0, 8)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+        <Select value={selected.id} onValueChange={selectAttempt}>
+          <SelectTrigger aria-label="Diagnostic attempt">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {retained.map((attempt) => (
+                <SelectItem value={attempt.id} key={attempt.id}>
+                  {attempt.id === entry.preview?.active?.id
+                    ? "Serving"
+                    : attempt.id === entry.preview?.candidate?.id
+                      ? "Starting"
+                      : "Latest"}{" "}
+                  · {attempt.id.slice(0, 8)}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
         {tab === "logs" && (
-          <NativeSelect
-            aria-label="Log source"
-            value={source}
-            onChange={(event) => setSource(event.target.value)}
+          <Select
+            value={source || "*"}
+            onValueChange={(value) => setSource(value === "*" ? "" : value)}
           >
-            <NativeSelectOption value="">All output</NativeSelectOption>
-            {(selected.type === "environment"
-              ? Object.keys(selected.services ?? {})
-              : [entry.preview!.name]
-            ).map((name) => (
-              <NativeSelectOption key={name} value={name}>
-                {name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+            <SelectTrigger aria-label="Log source">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="*">All output</SelectItem>
+                {(selected.type === "environment"
+                  ? Object.keys(selected.services ?? {})
+                  : [entry.preview!.name]
+                ).map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         )}
         <Button
           variant="outline"

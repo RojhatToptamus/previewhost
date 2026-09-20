@@ -1,17 +1,19 @@
 import { execFile, fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, opendir } from 'node:fs/promises';
+import { lstat, mkdir, open, opendir, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import { z } from 'zod';
 import { checkTokenDirectory, connectPreviewDaemon, type ClientOptions } from './client.js';
-import { limits, secretIdSchema, type Failure } from './contracts.js';
+import { limits, secretIdSchema, type Failure, type DeleteDataOptions, type PreviewStatus } from './contracts.js';
 import { PreviewError, failure } from './errors.js';
 import { canonicalDirectory, isWithin } from './spec.js';
+import { createDataOwner, withRetainedData } from './data.js';
+import { Keystore } from './keystore.js';
 
 export interface ProjectOptions extends ClientOptions {
   projectDirectory?: string;
@@ -75,31 +77,74 @@ export function projectOwnerDirectory(project: string): string {
   return join(homedir(), '.local', 'share', 'previewd', 'projects', createHash('sha256').update(project).digest('hex'));
 }
 
+export const projectRecordSchema = z.strictObject({
+  projectDirectory: directorySchema.refine(isAbsolute),
+  dataDirectory: directorySchema.refine(isAbsolute).optional(), dockerSocket: directorySchema.refine(isAbsolute).optional(),
+  endpoint: z.string().optional(), pid: z.number().int().positive().optional(),
+}).refine(record => (record.endpoint !== undefined) === (record.pid !== undefined) && (record.endpoint !== undefined || record.dataDirectory !== undefined));
+export type ProjectRecord = z.output<typeof projectRecordSchema>;
+
+/** Resolve existing management records even when source has been removed. This grants no source access. */
+export async function managementProject(explicit?: string): Promise<string> {
+  try { return await projectDirectory(explicit); }
+  catch (error) {
+    if (!explicit) throw error;
+    const root = resolve(explicit);
+    const record = await readProjectRecord(projectOwnerDirectory(root));
+    if (record?.projectDirectory !== root) throw error;
+    return root;
+  }
+}
+
+/** The same permanent lock serializes owner startup and offline management. Never unlink it. */
+export async function lockProject(directory: string): Promise<FileHandle> {
+  if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Automatic project management currently requires macOS.');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await checkTokenDirectory(join(directory, 'token'));
+  let lock: FileHandle | undefined;
+  try {
+    lock = await open(join(directory, '.lock'), constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK | 0x20, 0o600);
+    const stat = await lock.stat();
+    if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== process.getuid!() || (stat.mode & 0o077) !== 0) throw new PreviewError('UNAUTHORIZED', 'The project lock is unsafe.');
+    return lock;
+  } catch (error) {
+    await lock?.close();
+    if ((error as NodeJS.ErrnoException).code === 'EAGAIN') throw new PreviewError('BUSY', 'This project has a running owner or another operation in progress.');
+    throw error;
+  }
+}
+
+/** Connection record writes are serialized by the project lock. */
+export async function writeProjectRecord(directory: string, record: ProjectRecord): Promise<void> {
+  const temporary = join(directory, 'connection.tmp');
+  await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  const file = await open(temporary, 'wx', 0o600);
+  try { await file.writeFile(JSON.stringify(projectRecordSchema.parse(record))); await file.sync(); }
+  finally { await file.close(); }
+  await rename(temporary, join(directory, 'connection.json'));
+}
+
 /** Discover records only; reading them never launches an owner or grants authority. */
 export async function discoverProjectOwners(directory = join(homedir(), '.local', 'share', 'previewd', 'projects')) {
-  const owners: Array<{ id: string; connection?: NonNullable<Awaited<ReturnType<typeof readConnection>>>; tokenFile: string; error?: Failure }> = [];
+  const owners: Array<{ id: string; connection?: NonNullable<Awaited<ReturnType<typeof readConnection>>>; retained?: ProjectRecord; tokenFile: string; error?: Failure }> = [];
   const stat = await lstat(directory).catch(error => { if (error.code !== 'ENOENT') throw error; return undefined; });
   if (!stat) return owners;
   await checkTokenDirectory(join(directory, 'token'));
   const entries = await opendir(directory);
   for await (const entry of entries) {
     if (!/^[a-f0-9]{64}$/.test(entry.name)) continue;
-    if (owners.length >= 128) throw new PreviewError('BUSY', 'Too many project owners to display. Use the project CLI to inspect them.');
     const ownerDirectory = join(directory, entry.name);
     const tokenFile = join(ownerDirectory, 'token');
     try {
-      const connection = await readConnection(ownerDirectory);
+      const connection = await readProjectRecord(ownerDirectory);
       if (!connection) continue;
-      if (!isAbsolute(connection.projectDirectory) || createHash('sha256').update(connection.projectDirectory).digest('hex') !== entry.name) {
-        throw new PreviewError('UNAUTHORIZED', 'The owner record does not match its project directory.');
-      }
-      owners.push({ id: entry.name, connection, tokenFile });
+      owners.push({ id: entry.name, ...(connection.endpoint ? { connection: { ...connection, endpoint: connection.endpoint, pid: connection.pid! } } : { retained: connection }), tokenFile });
     } catch (error) { owners.push({ id: entry.name, tokenFile, error: failure(error) }); }
   }
-  return owners;
+  return owners.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function readConnection(directory: string): Promise<{ endpoint: string; pid: number; projectDirectory: string } | undefined> {
+export async function readProjectRecord(directory: string): Promise<ProjectRecord | undefined> {
   let file;
   try {
     await checkTokenDirectory(join(directory, 'token'));
@@ -110,7 +155,8 @@ async function readConnection(directory: string): Promise<{ endpoint: string; pi
     const buffer = Buffer.alloc(16_385);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     if (bytesRead !== info.size) throw new Error();
-    const record = z.strictObject({ endpoint: z.string(), pid: z.number().int().positive(), projectDirectory: directorySchema }).parse(JSON.parse(buffer.subarray(0, bytesRead).toString('utf8')));
+    const record = projectRecordSchema.parse(JSON.parse(buffer.subarray(0, bytesRead).toString('utf8')));
+    if (createHash('sha256').update(record.projectDirectory).digest('hex') !== basename(directory)) throw new Error();
     return record;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
@@ -118,14 +164,104 @@ async function readConnection(directory: string): Promise<{ endpoint: string; pi
   } finally { await file?.close(); }
 }
 
+async function readConnection(directory: string) {
+  const record = await readProjectRecord(directory);
+  return record?.endpoint ? { ...record, endpoint: record.endpoint, pid: record.pid! } : undefined;
+}
+
+/** Only cleanly shut-down records can be managed offline. A dead connection never qualifies. */
+async function manageOfflineProject<T>(directory: string, operation: (record: ProjectRecord) => Promise<T>): Promise<T> {
+  const lock = await lockProject(directory);
+  try {
+    const record = await readProjectRecord(directory);
+    if (!record || record.endpoint) throw new PreviewError('STALE_ATTEMPT', 'The project connection changed. Refresh before continuing.');
+    return await operation(record);
+  } finally { await lock.close(); }
+}
+
+export async function offlinePreviews(record: ProjectRecord): Promise<PreviewStatus[]> {
+  if (!record.dataDirectory) return [];
+  return withRetainedData(record.dataDirectory, async records => records.map(({ name, data }) => ({ name, busy: false, data })));
+}
+
+export async function deleteOfflineData(directory: string, name: string, options: DeleteDataOptions, signal?: AbortSignal, keystore?: Keystore) {
+  return manageOfflineProject(directory, async record => {
+    const previews = await offlinePreviews(record);
+    const data = previews.find(p => p.name === name)?.data;
+    if (!data) throw new PreviewError('NOT_FOUND', 'This preview has no retained managed data.');
+    if (options.expected && (options.expected.attemptId !== null || !isDeepStrictEqual(data.resources, options.expected.resources))) {
+      throw new PreviewError('STALE_ATTEMPT', 'The managed databases changed. Review them before deleting data.');
+    }
+    if (data.cleanup && data.cleanup.operation !== 'remove-credential') throw new PreviewError('CLEANUP_INCOMPLETE', data.cleanup.message);
+    if (signal?.aborted) throw new PreviewError('CLOSED', 'Data deletion was canceled before it began.');
+    const store = keystore ?? new Keystore();
+    try {
+      if ((await store.status({ signal })).state !== 'unlocked') {
+        throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Unlock Secret Manager in the dashboard, then retry Delete data there. CLI deletion needs automatic unlock on macOS. No data was deleted.');
+      }
+      const owner = await createDataOwner({ directory: record.dataDirectory!, dockerSocket: record.dockerSocket, keystore: store });
+      try { await owner.deleteData(name); }
+      finally { await owner.close(); }
+    } finally { if (!keystore) store.close(); }
+    return { name, busy: false };
+  });
+}
+
+export async function removeOfflineProject(directory: string) {
+  await manageOfflineProject(directory, async record => {
+    await withRetainedData(record.dataDirectory!, async records => {
+      if (records.length) throw new PreviewError('BUSY', 'Delete the retained managed data before removing this project.');
+      await unlink(join(directory, 'connection.json'));
+    });
+  });
+}
+
+/** Hold both existing locks through review/removal; native process cleanup still requires human verification. */
+async function withStaleProject<T>(directory: string, expected: ProjectRecord | undefined, operation: (record: ProjectRecord) => Promise<T>): Promise<T> {
+  const lock = await lockProject(directory);
+  try {
+    const record = await readProjectRecord(directory);
+    if (!record) throw new PreviewError('NOT_FOUND', 'This project is no longer listed.');
+    if (expected && !isDeepStrictEqual(record, expected)) throw new PreviewError('STALE_ATTEMPT', 'The project record changed. Recheck before removing it.');
+    if (record.pid) {
+      let present = true;
+      try { process.kill(record.pid, 0); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new PreviewError('CLEANUP_INCOMPLETE', 'Cannot verify whether the recorded owner process has exited. Removal is blocked.');
+        present = false;
+      }
+      if (present) throw new PreviewError('BUSY', 'The recorded process still exists. Restore the owner connection or verify its identity and cleanup in the terminal.');
+    }
+    if (!record.dataDirectory) throw new PreviewError('CLEANUP_INCOMPLETE', 'This record does not identify its managed-data directory. Verify process and database cleanup in the terminal before removing the record.');
+    return await withRetainedData(record.dataDirectory, async records => {
+      if (records.length) throw new PreviewError('CLEANUP_INCOMPLETE', 'Managed data is still retained. Recover the owner and use Delete data only if you want to erase it. This entry cannot be removed while data remains.');
+      return operation(record);
+    });
+  } finally { await lock.close(); }
+}
+
+export async function reviewStaleProject(directory: string): Promise<ProjectRecord> {
+  return withStaleProject(directory, undefined, async record => record);
+}
+
+/** Explicit human verification replaces manual crash-record removal, never process cleanup. */
+export async function removeStaleProject(directory: string, expected: ProjectRecord): Promise<void> {
+  await withStaleProject(directory, expected, async () => unlink(join(directory, 'connection.json')));
+}
+
 async function launchOptions(options: ProjectOptions, project: string): Promise<ProjectLaunch> {
   const inputKeys = [...new Set(options.inputKeys ?? [])].sort();
-  const dataDirectory = resolve(options.dataDirectory ?? join(projectOwnerDirectory(project), 'data'));
+  const retained = await readProjectRecord(projectOwnerDirectory(project));
+  if (retained && !retained.endpoint && options.dataDirectory && resolve(options.dataDirectory) !== retained.dataDirectory) {
+    throw new PreviewError('INVALID_INPUT', 'This project still has a retained data directory. Delete its data and remove the entry before selecting a different directory.');
+  }
+  const dataDirectory = resolve(options.dataDirectory ?? retained?.dataDirectory ?? join(projectOwnerDirectory(project), 'data'));
+  const dockerSocket = options.dockerSocket ?? retained?.dockerSocket;
   const info = { projectDirectory: project, pid: process.pid,
     allowedRoots: [...new Set(await Promise.all((options.allowedRoots ?? [project]).map(root => canonicalDirectory(resolve(root)))))].sort(),
     allowExec: options.allowExec ?? false, inputKeys, secretIds: [...new Set(options.secretIds ?? [])].sort(),
     dataDirectory,
-    ...(options.dockerSocket ? { dockerSocket: resolve(options.dockerSocket) } : {}),
+    ...(dockerSocket ? { dockerSocket: resolve(dockerSocket) } : {}),
   };
   if (!ownerInfoSchema.safeParse(info).success) {
     throw new PreviewError('INVALID_INPUT', 'Invalid project launch options. Supply valid roots, input keys and secret names.');
@@ -172,8 +308,9 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
     }
     return connectPreviewDaemon(options);
   }
-  const project = projectDirectory(options.projectDirectory);
+  const project = managementProject(options.projectDirectory);
   const clients = new Set<ReturnType<typeof connectPreviewDaemon>>();
+  const offlineOperations = new Set<Promise<unknown>>();
   const controller = new AbortController();
   let starting: Promise<void> | undefined;
   async function connect(create: boolean) {
@@ -229,6 +366,17 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
     try { return await operation(client); }
     finally { clients.delete(client); await client.close(); }
   }
+  async function offline() {
+    if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The project client is closed.');
+    const directory = projectOwnerDirectory(await project);
+    const record = await readProjectRecord(directory);
+    if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The project client is closed.');
+    return record && !record.endpoint ? { directory, record } : undefined;
+  }
+  async function runOffline<T>(work: Promise<T>): Promise<T> {
+    offlineOperations.add(work);
+    try { return await work; } finally { offlineOperations.delete(work); }
+  }
   return {
     allowSources: (directories, signal) => call(true, client => client.allowSources(directories, signal)),
     describe: (name, id) => call(false, client => client.describe(name, id)),
@@ -237,6 +385,11 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
     saveConfiguration: (name, id) => call(false, client => client.saveConfiguration(name, id)),
     secretsList: () => call(false, client => client.secretsList()),
     secretsOpen: (id, opts) => call(false, client => client.secretsOpen(id, opts)),
+    remove: async (name, attemptId = null) => {
+      const retained = await offline();
+      if (retained) { await runOffline(removeOfflineProject(retained.directory)); return; }
+      await call(false, client => client.remove(name, attemptId));
+    },
     info: () => call(false, client => client.info()),
     inspect: async spec => {
       try { return await call(false, client => client.inspect(spec)); }
@@ -255,13 +408,24 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
     },
     start: spec => call(true, client => client.start(spec)),
     replace: (name, spec) => call(true, client => client.replace(name, spec)),
-    list: () => call(false, client => client.list()),
-    get: name => call(false, client => client.get(name)),
+    list: async () => { const retained = await offline(); return retained ? offlinePreviews(retained.record) : call(false, client => client.list()); },
+    get: async name => {
+      const retained = await offline();
+      if (!retained) return call(false, client => client.get(name));
+      const preview = (await offlinePreviews(retained.record)).find(p => p.name === name);
+      if (!preview) throw new PreviewError('NOT_FOUND', 'This preview is not retained.');
+      return preview;
+    },
     wait: (name, id, opts) => call(false, client => client.wait(name, id, opts)),
     logs: (name, id, options) => call(false, client => client.logs(name, id, options)),
     cancel: (name, id) => call(false, client => client.cancel(name, id)),
     stop: (name, opts) => call(false, client => client.stop(name, opts)),
-    deleteData: (name, options) => call(false, client => client.deleteData(name, options)),
+    deleteData: async (name, deletion = {}) => {
+      const retained = await offline();
+      if (!retained) return call(false, client => client.deleteData(name, deletion));
+      if (!options.allowExec) throw new PreviewError('EXECUTION_DENIED', 'Offline data deletion requires explicit permission. Use delete-data with --allow-exec.');
+      return runOffline(deleteOfflineData(retained.directory, name, deletion, controller.signal));
+    },
     secretsSetup: (spec, opts) => call(true, client => client.secretsSetup(spec, opts)),
     secretsEdit: (id, opts) => call(true, client => client.secretsEdit(id, opts)),
     secretsStatus: (id, opts) => call(false, client => client.secretsStatus(id, opts)),
@@ -275,6 +439,6 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
         await delay(25);
       }
     }),
-    close: async () => { controller.abort(); await Promise.all([...clients].map(client => client.close())); },
+    close: async () => { controller.abort(); await Promise.all([...clients].map(client => client.close())); await Promise.allSettled(offlineOperations); },
   };
 }

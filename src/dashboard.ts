@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { loadPreviewSpec } from './config.js';
 import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
@@ -10,18 +10,23 @@ import { limits, requestSchemas, secretIdSchema } from './contracts.js';
 import { readBody } from './daemon.js';
 import { failure, PreviewError, throwIfAborted } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
-import { discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
+import { reviewStaleProject, removeStaleProject, projectRecordSchema, deleteOfflineData, offlinePreviews, removeOfflineProject, discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
 import { Keystore, unlockSchema } from './keystore.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
-  z.strictObject({ action: z.literal('list') }),
+  z.strictObject({ action: z.literal('list'), after: ownerId.optional() }),
+  z.strictObject({ action: z.literal('recheck'), owner: ownerId }),
+  z.strictObject({ action: z.literal('reviewRemoval'), owner: ownerId }),
+  z.strictObject({ action: z.literal('removeStale'), owner: ownerId, expected: projectRecordSchema, cleanupVerified: z.literal(true) }),
   z.strictObject({ action: z.literal('listSecrets') }),
   unlockSchema.extend({ action: z.literal('unlockKeystore') }),
   z.strictObject({ action: z.enum(['rememberKeystore', 'forgetKeystore']) }),
   z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('resetData'), owner: ownerId, resources: requestSchemas.deleteData.shape.expected.unwrap().shape.resources }).required({ expected: true }),
+  requestSchemas.remove.extend({ action: z.literal('remove'), owner: ownerId }),
+  requestSchemas.deleteData.extend({ action: z.literal('deleteData'), owner: ownerId }).required({ expected: true }),
   requestSchemas.cancel.extend({ action: z.literal('cancel'), owner: ownerId }),
   requestSchemas.rerunJob.extend({ action: z.literal('rerunJob'), owner: ownerId }),
   requestSchemas.startAgain.extend({ action: z.literal('startAgain'), owner: ownerId }),
@@ -31,7 +36,7 @@ const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('secretsOpen'), owner: ownerId, id: z.uuid() }),
 ]);
 
-/** An optional browser client of existing owners. It never starts or shuts down an owner. */
+/** An authenticated browser client of existing project operations. It never starts application owners. */
 export async function startDashboard(options: {
   discover?: typeof discoverProjectOwners;
   openBrowser?: typeof openLocalBrowser;
@@ -77,6 +82,34 @@ export async function startDashboard(options: {
     } finally { clearTimeout(timer); clients.delete(client); await client.close(); }
   }
 
+  async function readOwner(owner: Awaited<ReturnType<typeof discover>>[number]) {
+    const identity = { id: owner.id, project: (owner.connection ?? owner.retained)?.projectDirectory };
+    if (owner.retained) {
+      try { return { ...identity, offline: true, previews: await offlinePreviews(owner.retained), requests: [] }; }
+      catch (error) { return { ...identity, offline: true, error: failure(error) }; }
+    }
+    try {
+      if (owner.error) return { ...identity, error: owner.error };
+      return await withOwner(owner, async (client, info) => {
+        const file = join(info.projectDirectory, 'preview.yml');
+        let configuration: { file: string; error?: ReturnType<typeof failure> } | undefined;
+        try {
+          await lstat(file);
+          configuration = { file };
+          await normalizeSources(parseSpec(await loadPreviewSpec(file, { allowedRoots: info.allowedRoots, signal: controller.signal })), info.allowedRoots);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') configuration = { file, error: failure(error, 'INVALID_INPUT') };
+        }
+        const previews = await client.list();
+        return { ...identity, configuration, previews, requests: await client.secretsList() };
+      }, 3000);
+    } catch (error) {
+      const problem = failure(error);
+      if (problem.code === 'DAEMON_UNAVAILABLE') problem.message = 'The owner is not responding. Application processes may still be running. Recheck status or review removal before clearing this entry.';
+      return { ...identity, error: problem };
+    }
+  }
+
   async function dispatch(input: unknown, signal: AbortSignal) {
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
@@ -103,34 +136,52 @@ export async function startDashboard(options: {
     if (!('owner' in p) && p.action !== 'list') throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action.');
     const owners = await discover();
     if (p.action === 'list') {
-      return Promise.all(owners.map(async owner => {
-        const identity = { id: owner.id, project: owner.connection?.projectDirectory };
-        try {
-          if (owner.error) return { ...identity, error: owner.error };
-          return await withOwner(owner, async (client, info) => {
-            const file = join(info.projectDirectory, 'preview.yml');
-            let configuration: { file: string; error?: ReturnType<typeof failure> } | undefined;
-            try {
-              await lstat(file);
-              configuration = { file };
-              await normalizeSources(parseSpec(await loadPreviewSpec(file, { allowedRoots: info.allowedRoots, signal: controller.signal })), info.allowedRoots);
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') configuration = { file, error: failure(error, 'INVALID_INPUT') };
-            }
-            const previews = await client.list();
-            try { return { ...identity, configuration, previews, requests: await client.secretsList() }; }
-            catch (error) {
-              if (!(error instanceof PreviewError) || error.code !== 'NOT_FOUND') throw error;
-              return { ...identity, configuration, previews, requests: [], legacy: true };
-            }
-          }, 3000);
-        } catch (error) { return { ...identity, error: failure(error) }; }
-      }));
+      const candidates = owners.filter(owner => !p.after || owner.id > p.after).sort((a, b) => a.id.localeCompare(b.id));
+      // Bound network fan-out and response size independently of the number of known projects.
+      const results = await Promise.all(candidates.slice(0, 16).map(readOwner));
+      const page: typeof results = [];
+      let bytes = 128;
+      for (const result of results) {
+        let item = result;
+        if (Buffer.byteLength(JSON.stringify(item)) > limits.controlBytes - 128) {
+          item = { id: item.id, project: item.project, error: { code: 'BUSY', message: 'This project has too much detail to display. Inspect it through the CLI.' } };
+        }
+        const size = Buffer.byteLength(JSON.stringify(item)) + 1;
+        if (bytes + size > limits.controlBytes) break;
+        page.push(item); bytes += size;
+      }
+      return { owners: page, ...(page.length < candidates.length ? { next: page.at(-1)!.id } : {}) };
     }
     const owner = owners.find(owner => owner.id === p.owner);
     if (!owner) throw new PreviewError('NOT_FOUND', 'This owner is no longer available. Refresh the list.');
+    if (p.action === 'recheck') {
+      const result = await readOwner(owner);
+      if ('error' in result && result.error) throw new PreviewError(result.error.code, result.error.message);
+      return result;
+    }
+    if (p.action === 'reviewRemoval') {
+      try { return { expected: await reviewStaleProject(dirname(owner.tokenFile)) }; }
+      catch (error) { return { blocked: failure(error).message }; }
+    }
+    if (p.action === 'removeStale') {
+      throwIfAborted(signal);
+      const update = removeStaleProject(dirname(owner.tokenFile), p.expected);
+      updates.add(update);
+      try { await update; return null; } finally { updates.delete(update); }
+    }
+    if (owner.retained) {
+      const directory = dirname(owner.tokenFile);
+      if (p.action === 'deleteData' || p.action === 'remove') {
+        const update = p.action === 'deleteData' ? deleteOfflineData(directory, p.name, { expected: p.expected }, signal, store) : removeOfflineProject(directory);
+        updates.add(update);
+        try { return await update ?? null; } finally { updates.delete(update); }
+      }
+      throw new PreviewError('DAEMON_UNAVAILABLE', 'This project is offline. Start through your agent or CLI to run it again.');
+    }
     return withOwner<unknown>(owner, async client => {
       switch (p.action) {
+        case 'remove': await client.remove(p.name, p.attemptId); return null;
+        case 'deleteData': return client.deleteData(p.name, { expected: p.expected });
         case 'stop': return client.stop(p.name, { expected: p.expected });
         case 'resetData': {
           const attemptId = p.expected.active ?? p.expected.latest;
