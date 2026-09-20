@@ -41,7 +41,7 @@ Never print token contents. In explicit connection mode, omit the MCP `project` 
 That connection cannot change owner launch permissions.
 
 Use `list` or `preview_list` to check existing preview names. A missing owner is normal before first startup.
-If installation or connection is missing, read the relevant [installation](references/README.md#install) or [MCP setup](references/docs/integrations.md#connect-an-mcp-client) section.
+If installation or connection is missing, read the relevant [installation](references/docs/installation.md) or [MCP setup](references/docs/mcp.md) guide.
 Automatic startup uses current launch arguments; it does not restore previous permissions from disk.
 Do not restart or reconfigure a shared daemon to broaden access.
 Commands require daemon execution permission. `--allow-exec` also permits managed database operations and explicit deletion/recovery.

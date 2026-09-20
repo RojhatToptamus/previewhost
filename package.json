@@ -43,7 +43,12 @@
     "changeset": "changeset",
     "version:release": "changeset version && npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
     "build:dashboard": "vite build",
-    "test:dashboard": "npm run build && playwright test --config dashboard/playwright.config.ts"
+    "test:dashboard": "npm run build && playwright test --config dashboard/playwright.config.ts",
+    "dev:docs": "vite --config website/vite.config.mjs",
+    "build:docs": "node website/build.mjs",
+    "preview:docs": "vite preview --config website/vite.config.mjs",
+    "check:docs": "tsc -p website/tsconfig.json && npm run build:docs && node website/check.mjs",
+    "test:docs": "playwright test --config website/playwright.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
@@ -65,6 +70,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.47.0",
+    "marked": "^18.0.13",
     "radix-ui": "^1.6.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

@@ -27,7 +27,7 @@ They communicate through HTTP and database connections, without imports between 
 
 ## Install the dependencies
 
-Use the [global CLI installation and runtime requirements](../../README.md#install).
+Use the [global CLI installation and runtime requirements](../../docs/installation.md).
 Managed databases also require macOS 13 or later, local Docker Engine, and the images below.
 The npm package includes the compiled Keychain helper. This walkthrough requires no source build.
 

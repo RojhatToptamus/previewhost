@@ -1,4 +1,12 @@
-# Setup jobs
+# Services and jobs
+
+An environment starts related services and setup jobs in dependency order.
+
+## Define services and jobs
+
+Use `type: command` for an HTTP server that stays running. Use `static` for files or `attach` for a server managed elsewhere.
+Managed and external databases can also be environment services. See [Databases](databases.md).
+Each environment needs a primary HTTP service. Background workers without HTTP readiness are not a supported service type.
 
 Use a finite `type: job` node for migrations, dependency installation, or seeding.
 Keep the application start command focused on running its server.
@@ -90,7 +98,7 @@ has **All output**. Use the attempt selector to compare a failed update with the
 CLI: `previewhost logs shop ATTEMPT_ID --source migrate`. MCP `preview_logs` accepts the same
 `source` and an optional `after` cursor. [Log limits and incremental reads](api.md#methods).
 
-**Reset data** in Services stops the selected environment, deletes its managed data,
+**Reset data** in Activity stops the selected environment, deletes its managed data,
 then starts the configuration that Stop retains: the serving app, or the latest attempt if none is serving. The confirmation names the worktree and databases.
 External databases and saved user secrets are not deleted. Jobs still use their configured connections.
 Setup runs against fresh managed data,
@@ -124,20 +132,3 @@ Previewhost cannot detect an internal failure that a script catches and reports 
 Scripts must return a nonzero exit code on failure.
 For a database-backed API, `/health` should query required tables and return 503 when they are unavailable.
 `/openapi.json` and a successful `SELECT 1` do not prove that application tables exist.
-
-## Design reference
-
-Reviewed [Task Monki's preview guide](https://www.monki.work/docs/preview/) and its MIT-licensed
-[implementation](https://github.com/RojhatToptamus/task-monki/tree/fa33f22a7effe1c10571540ebf7aacb716dec590/src/core/preview).
-
-| Task Monki feature | Previewhost decision |
-| --- | --- |
-| Finite jobs and explicit dependency conditions | Reuse the dependency-gating approach. Node type determines success versus readiness, so no duplicate condition field is needed. |
-| Supervised native jobs and verified cleanup | Extend Previewhost's existing Task Monki-derived supervisor instead of copying a second runner and persistence layer. |
-| Retained setup and recovery after ambiguous writes | Keep two outcomes in the existing owned-data record. Persist intent before execution; require explicit recovery. |
-| Migration/seed roles and empty/demo scenarios | Use `always`/`once` to state execution semantics directly. Omit optional seed nodes for an empty recipe; no scenario subsystem. |
-| Setup skipped on replacement | Adapt: seeds stay skipped, but repeatable migrations run so a new application can update its schema. |
-| Restart policies, retries, backoff, liveness probes | Leave out automatic retries. They do not solve missing migrations and can repeat writes. Existing explicit restart and readiness remain. |
-| Captured source, generation storage, approvals, route replacement | Keep Previewhost's live sources, current authorization, and existing atomic route switch. No second lifecycle. |
-| Logs and failure recovery | Reuse bounded attempt logs and statuses across library, CLI, MCP, and dashboard. Dashboard reset composes existing Stop, authorized deletion and startup operations. |
-| Workers, Compose, additional probe types | Outside this setup requirement. Existing HTTP services and managed or attached local databases cover it. |

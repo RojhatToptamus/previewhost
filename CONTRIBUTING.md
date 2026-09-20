@@ -110,7 +110,7 @@ npm install /absolute/path/to/previewhost/previewhost-VERSION.tgz
 ```
 
 Installation from the tarball does not compile native code.
-Continue with the [README quick starts](README.md#use-the-cli).
+Continue with [Your first preview](docs/first-preview.md).
 Use `./node_modules/.bin/previewhost` for this local CLI installation.
 
 ## Verify a macOS release

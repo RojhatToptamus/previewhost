@@ -17,7 +17,7 @@ This report now describes the implemented design and its verified limits. The Se
 
 A paused agent does not need an idle-shutdown exception or a new background job. The owner remains alive across ordinary inactivity and MCP disconnection. If the agent turn ends during private entry, the page tells the user to send “Secrets saved—continue”. Saving cannot independently create a new agent turn.
 
-Global MCP registration now uses client-native project approval (see [current setup](../README.md#use-mcp)):
+Global MCP registration now uses client-native project approval (see [current setup](mcp.md)):
 
 ```sh
 codex mcp add previewhost -- previewhost mcp --allow-exec

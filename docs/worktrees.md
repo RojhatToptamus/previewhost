@@ -31,7 +31,7 @@ previewhost does not create checkouts or change Git state.
 The example below uses a parent directory that contains the task worktrees.
 Replace both `/absolute/...` paths with your source parent and private data directory.
 Keep the data directory outside any task directory that the host can remove.
-Managed databases also require the [database prerequisites](../examples/multi-repo/README.md#install-the-dependencies).
+Managed databases also require the [database prerequisites](databases.md#prepare-docker).
 
 Normal automatic mode gives each canonical worktree root a separate owner. Use `--project` when launch context is uncertain.
 For an explicitly shared owner across the task worktrees, this optional manual example starts a foreground daemon:

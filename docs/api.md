@@ -8,7 +8,7 @@ daemon client implement `PreviewApi`.
 
 These configuration fragments assume imports from `previewhost`.
 Replace `/absolute/...` paths with your source and private storage directories.
-For a complete program with cleanup, see [Embed the library](../README.md#embed-the-library).
+For a complete program with cleanup, see [Embed the library](library.md).
 
 ```ts
 const runtime = await createPreviewRuntime({
@@ -149,7 +149,7 @@ See [setup jobs](jobs.md) for fields, examples, retained seed results, and recov
 The example below assumes prepared `backend` and `frontend` directories beside
 the spec directory. Each must contain an HTTP `server.mjs` with installed dependencies.
 The API must accept the shown bindings and expose `/ready`.
-Managed databases require the [database prerequisites](../examples/multi-repo/README.md#install-the-dependencies).
+Managed databases require the [database prerequisites](databases.md#prepare-docker).
 For a complete application, use the [shared-notes example](../examples/multi-repo/README.md).
 
 Before daemon startup, export `API_TOKEN` in its terminal.
@@ -382,7 +382,7 @@ requests recovery after a Docker Engine restart, as described above. It never im
 
 ### Managed databases with MCP
 
-Start your local Docker Engine and [download the required database images](../examples/multi-repo/README.md#install-the-dependencies).
+Start your local Docker Engine and [download the required database images](databases.md#prepare-docker).
 Docker Desktop on macOS uses `~/.docker/run/docker.sock` by default. No additional MCP flags are needed.
 For another local Engine, append its socket path to the MCP registration command after `--allow-exec`:
 

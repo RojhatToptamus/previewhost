@@ -119,7 +119,7 @@ The automated suite separately passed 112 tests, with no skips. Final focused te
 
 ## Agent skill
 
-Use the [README installation and usage steps](../README.md#use-the-agent-skill).
+Use the [agent skill guide](mcp.md#add-databases-or-an-agent-skill).
 The npm package includes `dist/skills/previewhost/SKILL.md` and materialized references. An agent can read them directly without installing a skill or accessing the repository.
 Repository-based discovery installation remains optional.
 The repository contains one `skills/previewhost/SKILL.md` entrypoint for preview operation and recipe creation.
@@ -167,7 +167,7 @@ Skill installation does not install previewhost, start its daemon, configure MCP
 
 ## Connect an MCP client
 
-Follow the [README MCP quick start](../README.md#use-mcp) for one global registration. The client confirms project access; registration supplies execution and database startup options.
+Follow [MCP setup](mcp.md) for one global registration. The client confirms project access; registration supplies execution and database startup options.
 Use the client configuration below for your host.
 Each example starts the adapter with `previewhost` from PATH.
 previewhost 0.1.0-alpha.0 passed static and README frontend/backend workflows through the CLI and MCP protocol.
@@ -281,7 +281,7 @@ This test access restriction does not establish a previewhost defect.
 
 ## Cursor and other MCP hosts
 
-In Cursor, use the [global registration in the README](../README.md#use-mcp).
+In Cursor, use the [global registration](mcp.md#cursor).
 Each chat supplies its worktree through the tool's `project` field.
 Global registration uses `preview_access` to request client confirmation without repository lists.
 The dated checks below describe earlier implementations; they do not establish verification of the new access flow.

@@ -41,13 +41,13 @@ An environment groups services that need one preview lifecycle. Its primary serv
 
 For databases, first determine whether the project expects existing data or a new isolated development database.
 If that decision is unknown, ask before creating or selecting a database.
-Owned PostgreSQL and Redis require the [database prerequisites](../examples/multi-repo/README.md#install-the-dependencies).
+Owned PostgreSQL and Redis require the [database prerequisites](databases.md#prepare-docker).
 External database entries accept only the supported local connection forms described in the API reference.
 Do not substitute production credentials or infer permission to migrate, reset, or delete data.
 
 ## Serve a static page
 
-Use the [global CLI installation and runtime requirements](../README.md#install).
+Use the [global CLI installation and runtime requirements](installation.md).
 This example needs no command execution permission or Docker.
 Create a sample page:
 
