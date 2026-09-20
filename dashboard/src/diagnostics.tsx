@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCwIcon } from "lucide-react";
+import { RefreshCwIcon, WrapTextIcon } from "lucide-react";
 import type {
   AttemptSummary,
   LogResult,
@@ -13,6 +13,7 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "./components/ui/native-select";
+import { Toggle } from "./components/ui/toggle";
 import { Spinner } from "./components/ui/spinner";
 import { ScrollArea } from "./components/ui/scroll-area";
 import {
@@ -41,6 +42,8 @@ type Props = {
   setSource: (source: string) => void;
   query: string;
   setQuery: (query: string) => void;
+  wrapLogs: boolean;
+  setWrapLogs: (wrap: boolean) => void;
   mutate: Mutate;
   acting: boolean;
 };
@@ -61,6 +64,8 @@ export function Diagnostics({
   setSource,
   query,
   setQuery,
+  wrapLogs,
+  setWrapLogs,
   mutate,
   acting,
 }: Props) {
@@ -180,16 +185,22 @@ export function Diagnostics({
           </span>
         </Button>
         {tab === "logs" && (
-          <p role="status" className="log-note">
-            {logs
-              ? query
-                ? `${matches.length} matching ${matches.length === 1 ? "line" : "lines"}`
-                : "Captured output"
-              : loading
-                ? "Loading output…"
-                : "Output unavailable"}
-            {logs?.truncated ? " · Earlier output omitted" : ""}
-          </p>
+          <div className="log-options">
+            <p role="status" className="log-note">
+              {logs
+                ? query
+                  ? `${matches.length} matching ${matches.length === 1 ? "line" : "lines"}`
+                  : "Captured output"
+                : loading
+                  ? "Loading output…"
+                  : "Output unavailable"}
+              {logs?.truncated ? " · Earlier output omitted" : ""}
+            </p>
+            <Toggle size="sm" pressed={wrapLogs} onPressedChange={setWrapLogs}>
+              <WrapTextIcon data-icon="inline-start" />
+              Wrap lines
+            </Toggle>
+          </div>
         )}
       </div>
       <div
@@ -211,7 +222,9 @@ export function Diagnostics({
         ) : !current ? (
           <Loading />
         ) : tab === "logs" ? (
-          <pre className="logs">{output}</pre>
+          <pre className="logs" data-wrap={wrapLogs}>
+            {output}
+          </pre>
         ) : (
           description && (
             <Configuration entry={entry} description={description} />

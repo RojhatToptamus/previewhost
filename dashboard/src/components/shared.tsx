@@ -76,11 +76,11 @@ export function CopyButton({
 export function AppLink({
   url,
   children = "Open app",
-  primary = false,
+  variant = "outline",
 }: {
   url: string;
   children?: ReactNode;
-  primary?: boolean;
+  variant?: "default" | "outline" | "link";
 }) {
   let safe = false;
   try {
@@ -94,8 +94,8 @@ export function AppLink({
   }
   if (!safe) return null;
   return (
-    <Button variant={primary ? "default" : "outline"} asChild>
-      <a href={url} target="_blank" rel="noopener noreferrer">
+    <Button variant={variant} asChild>
+      <a href={url} title={url} target="_blank" rel="noopener noreferrer">
         {children}
       </a>
     </Button>

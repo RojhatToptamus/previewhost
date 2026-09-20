@@ -104,12 +104,18 @@ export function Preview({
   const [attemptId, setAttemptId] = useState<string>();
   const [source, setSource] = useState("");
   const [query, setQuery] = useState("");
+  const [wrapLogs, setWrapLogs] = useState(false);
   const { owner, preview: p } = entry;
   const retained = attempts(p);
   const selected =
     retained.find((attempt) => attempt.id === attemptId) ?? retained[0];
   const actions = previewActions(entry);
   const canOpen = Boolean(p?.active && p.url);
+  const address = canOpen
+    ? Object.values(p?.active?.services ?? {}).find(
+        (service) => service.url === p?.url,
+      )?.browserUrl ?? p?.url
+    : undefined;
   const primary = !canOpen
     ? actions.find((action) => !action.danger)
     : undefined;
@@ -138,13 +144,26 @@ export function Preview({
               <CopyButton value={owner.project} />
             </div>
           )}
+          {address && (
+            <div className="preview-address">
+              <AppLink url={address} variant="link">
+                {address.replace(/^http:\/\//, "")}
+              </AppLink>
+              <CopyButton
+                value={address}
+                label={address === p?.url ? "Copy URL" : "Copy hostname URL"}
+              />
+            </div>
+          )}
           <p className="context-note">{hint(entry)}</p>
         </div>
         <div className="header-actions">
           {canOpen && (
             <>
-              <AppLink url={p!.url!} primary />
-              <CopyButton value={p!.url!} label="Copy URL" />
+              <AppLink url={p!.url!} variant="default" />
+              {address !== p!.url && (
+                <CopyButton value={p!.url!} label="Copy URL" />
+              )}
             </>
           )}
           {actions.map((action) => (
@@ -220,6 +239,8 @@ export function Preview({
                   setSource={setSource}
                   query={query}
                   setQuery={setQuery}
+                  wrapLogs={wrapLogs}
+                  setWrapLogs={setWrapLogs}
                   mutate={mutate}
                   acting={acting}
                 />

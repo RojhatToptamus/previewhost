@@ -80,6 +80,8 @@ Keep one application shell. The sidebar owns preview navigation and Secret Manag
 
 A preview has one persistent identity and action header, followed immediately by Activity, Logs, and Configuration tabs. Tab changes must not move the header or tabs. Content scrolls within its workspace.
 
+Align the header's sidebar trigger with the navigation icons below it. Use a 24px desktop content gutter and 16px narrow-screen gutter. Avoid breadcrumbs that only repeat the selected view.
+
 A preview name opens its details with one click. Keep the worktree path adjacent so previews with similar names remain distinguishable.
 
 Paths stay on one line. Let parent directories truncate while preserving the final segments at full contrast. Use the shared `Path` component; never use right-to-left text direction to fake truncation.
@@ -90,7 +92,7 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 | --- | --- |
 | Previews | Compare worktrees, status, and available applications in aligned rows. Names open details; Open app opens the running application. |
 | Activity | Show actionable failures, serving/latest attempts, services, jobs, history, private setup, and managed data. Put recovery beside the affected resource. |
-| Logs | Put search, attempt, source, and refresh controls above output. Preserve selection while switching tabs. Explain omitted output; do not imply captured logs are live. |
+| Logs | Put search, attempt, source, and refresh controls above output. Offer line wrapping for long output and preserve it across tabs. Explain omitted output; do not imply captured logs are live. |
 | Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yml visible outside the scrolling body. |
 | Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
 
@@ -99,6 +101,10 @@ Long lists need bounded scrolling without burying actions. The environment table
 Tables compare values. Give each column enough room for its content; do not squeeze references into an action-width column. Reserve compact right columns for actions. Use row separators without extra lines above the first row or below the last.
 
 At narrow widths, stack controls in reading order and preserve the primary action. Reduce secondary detail before shrinking text. Long paths, names, and output must not widen the entire page. Horizontal scrolling is appropriate for machine output or a table that cannot retain meaning when compressed.
+
+Display the serving application's readable hostname when supplied by the runtime. Keep the existing Open app destination; different origins can affect application cookies and CORS. Never construct an alias from a preview name or show a candidate's address as serving.
+
+Log source means the process or job that emitted the output. Frameworks can forward browser messages into that same output. Do not silently hide lines or classify their origin from text prefixes. Source selection and search provide reliable ways to narrow output.
 
 ## 5. Components and interaction
 

@@ -154,43 +154,39 @@ export function App() {
     <TooltipProvider>
       <SidebarProvider className="app-shell">
         <header className="app-header">
-          <SidebarTrigger />
-          <Button
-            variant="ghost"
-            className="brand"
-            onClick={() => select(undefined)}
-          >
-            previewhost
-          </Button>
-          <span className="crumb">
-            / &nbsp;{" "}
-            {selection === "secrets"
-              ? "Secret Manager"
-              : selection
-                ? "Preview details"
-                : "All previews"}
-          </span>
-          <span className="connection">
-            {error
-              ? "Disconnected"
-              : loaded
-                ? "Running locally"
-                : "Connecting…"}
-          </span>
-          <Toggle
-            aria-label="Dark mode"
-            pressed={dark}
-            onPressedChange={setDark}
-          >
-            <MoonIcon />
-            <span className="theme-label">Dark mode</span>
-          </Toggle>
-          <Button
-            variant="outline"
-            onClick={() => setRevision((value) => value + 1)}
-          >
-            Refresh
-          </Button>
+          <div className="header-brand">
+            <SidebarTrigger size="icon" />
+            <Button
+              variant="ghost"
+              className="brand"
+              onClick={() => select(undefined)}
+            >
+              previewhost
+            </Button>
+          </div>
+          <div className="header-controls">
+            <span className="connection">
+              {error
+                ? "Disconnected"
+                : loaded
+                  ? "Running locally"
+                  : "Connecting…"}
+            </span>
+            <Toggle
+              aria-label="Dark mode"
+              pressed={dark}
+              onPressedChange={setDark}
+            >
+              <MoonIcon />
+              <span className="theme-label">Dark mode</span>
+            </Toggle>
+            <Button
+              variant="outline"
+              onClick={() => setRevision((value) => value + 1)}
+            >
+              Refresh
+            </Button>
+          </div>
         </header>
         <Navigation
           owners={owners}

@@ -27,6 +27,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     connection: { endpoint: string; pid: number; projectDirectory: string };
   }> = [];
   const urls: string[] = [];
+  const hostnames: string[] = [];
   let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
   try {
     for (const folder of [
@@ -44,7 +45,9 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       });
       runtimes.push(runtime);
       const spec: Extract<PreviewSpec, { type: "environment" }> = {
-        name: "app",
+        name: folder === "first"
+          ? "app"
+          : "checkout-feature-with-long-address-layout-review",
         type: "environment",
         primary: "web",
         services: {
@@ -76,15 +79,16 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
             command: [
               process.execPath,
               "-e",
-              `console.log('GET /items');console.log('literal <script>window.untrusted=true</script>');require('http').createServer((q,r)=>r.end('${folder}')).listen(+process.env.PORT,process.env.HOST)`,
+              `console.log('GET /items');console.log('[browser] request failed');console.log('long line '+ 'x'.repeat(300));console.log('literal <script>window.untrusted=true</script>');require('http').createServer((q,r)=>r.end('${folder}')).listen(+process.env.PORT,process.env.HOST)`,
             ],
           },
         },
       };
       const started = await runtime.start(spec);
-      const ready = await runtime.wait("app", started.candidate!.id);
+      const ready = await runtime.wait(spec.name, started.candidate!.id);
       expect(ready.state).toBe("ready");
       urls.push(ready.url!);
+      hostnames.push(ready.services!.web.browserUrl!);
       const tokenFile = join(directory, folder + "-owner/token");
       const daemon = await startDaemon({
         runtime,
@@ -182,8 +186,18 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(
       page.getByRole("button", { name: "Copy URL", exact: true }),
     ).toBeVisible();
+    await expect(page.locator(".preview-address a")).toHaveAttribute(
+      "href",
+      hostnames[0],
+    );
+    await page.getByRole("button", { name: "Copy hostname URL" }).click();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(hostnames[0]);
     const app = await context.newPage();
     await app.goto(urls[0]);
+    await expect(app.locator("body")).toHaveText("first");
+    await app.goto(hostnames[0]);
     await expect(app.locator("body")).toHaveText("first");
     await app.close();
     await page
@@ -307,6 +321,13 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       .getByRole("button", { name: "All previews", exact: false })
       .click();
     await page.locator(".overview-table .preview-name").nth(1).click();
+    for (const width of [820, 320, 1360]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const selector of [".preview-address", ".service-address"]) {
+        const box = (await page.locator(selector).first().boundingBox())!;
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+      }
+    }
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Start preview", exact: true }),
@@ -323,6 +344,21 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       .getByRole("combobox", { name: "Log source" })
       .selectOption("web");
     await expect(page.locator(".logs")).toContainText("<script>");
+    await expect(page.locator(".logs")).toContainText("[browser] request failed");
+    const logPanel = page.getByRole("region", { name: "Log output" });
+    expect(
+      await logPanel.evaluate((el) => el.scrollWidth > el.clientWidth),
+    ).toBe(true);
+    await page.getByRole("button", { name: "Wrap lines", exact: true }).click();
+    expect(
+      await logPanel.evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
+    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await page.getByRole("tab", { name: "Logs", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Wrap lines" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".logs")).toContainText("[browser] request failed");
     expect(
       await page.evaluate(() => (window as any).untrusted),
     ).toBeUndefined();

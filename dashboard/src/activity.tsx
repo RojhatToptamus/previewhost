@@ -305,7 +305,7 @@ function Services({ entry, mutate, acting, openLogs }: Props) {
               <TableHead>Service</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Port / data</TableHead>
+              <TableHead>Address / data</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -313,12 +313,6 @@ function Services({ entry, mutate, acting, openLogs }: Props) {
             {services.map(([name, service]) => {
               const url =
                 attempt?.id === p.active?.id ? service.browserUrl : undefined;
-              let port = "";
-              try {
-                if (url) port = ":" + new URL(url).port;
-              } catch {
-                /* Invalid URL is not offered. */
-              }
               return (
                 <TableRow key={name}>
                   <TableCell>
@@ -334,7 +328,15 @@ function Services({ entry, mutate, acting, openLogs }: Props) {
                     </Status>
                   </TableCell>
                   <TableCell>
-                    {managed.has(name) ? dataLabel : <code>{port}</code>}
+                    {managed.has(name) ? (
+                      dataLabel
+                    ) : url ? (
+                      <div className="service-address">
+                        <AppLink url={url} variant="link">
+                          {url.replace(/^http:\/\//, "")}
+                        </AppLink>
+                      </div>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <div className="row-actions">
@@ -347,7 +349,6 @@ function Services({ entry, mutate, acting, openLogs }: Props) {
                           Logs
                         </Button>
                       )}
-                      {url && <AppLink url={url}>Open</AppLink>}
                     </div>
                   </TableCell>
                 </TableRow>
