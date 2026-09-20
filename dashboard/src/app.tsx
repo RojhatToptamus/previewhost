@@ -6,6 +6,8 @@ import {
   entries,
   shortProject,
   state,
+  visibleEntries,
+  type PreviewFilter,
   type Entry,
   type Owner,
 } from "./lib/model";
@@ -19,7 +21,6 @@ import {
   SidebarHeader,
   SidebarContent,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -44,6 +45,11 @@ import {
   TableCell,
 } from "./components/ui/table";
 import { Preview } from "./preview";
+import { PreviewMenu } from "./preview-actions";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "./components/ui/native-select";
 import { SecretManager } from "./secrets";
 
 type Selection = { owner: string; name?: string } | "secrets" | undefined;
@@ -61,6 +67,7 @@ export function App() {
   const [error, setError] = useState("");
   const [selection, setSelection] = useState<Selection>();
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
   const [acting, setActing] = useState(false);
   const mutation = useRef(false);
@@ -80,10 +87,20 @@ export function App() {
       if (pending || document.hidden) return;
       pending = true;
       try {
-        const result = await call<Owner[]>(
-          { action: "list" },
-          controller.signal,
-        );
+        const result: Owner[] = [];
+        let after: string | undefined;
+        do {
+          const page = await call<{ owners: Owner[]; next?: string }>(
+            { action: "list", after },
+            controller.signal,
+          );
+          result.push(...page.owners);
+          after = page.next;
+          if (!controller.signal.aborted && after) {
+            setOwners((current) => (current.length ? current : [...result]));
+            setLoaded(true);
+          }
+        } while (after && !controller.signal.aborted);
         if (!controller.signal.aborted) {
           setOwners(result);
           setLoaded(true);
@@ -137,14 +154,9 @@ export function App() {
   );
   function select(value: Selection) {
     setSelection(value);
-    setQuery("");
   }
   const all = owners.flatMap(entries);
-  const filtered = all.filter((entry) =>
-    `${entry.owner.project ?? ""} ${entry.name ?? ""}`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
-  );
+  const filtered = visibleEntries(owners, query, filter);
   const selected =
     typeof selection === "object"
       ? owners.find((owner) => owner.id === selection.owner)
@@ -187,6 +199,11 @@ export function App() {
           select={select}
           query={query}
           setQuery={setQuery}
+          list={filtered}
+          filter={filter}
+          setFilter={setFilter}
+          mutate={mutate}
+          acting={acting}
         />
         <main className="main-workspace">
           {!authenticated ? (
@@ -205,7 +222,8 @@ export function App() {
               </Notice>
             </div>
           ) : selection ? (
-            selected ? (
+            selected &&
+            entries(selected).some((entry) => entry.name === selection.name) ? (
               <Preview
                 key={selected.id + "/" + (selection.name ?? "")}
                 entry={{
@@ -220,7 +238,7 @@ export function App() {
               />
             ) : (
               <div className="page">
-                <Notice title="Project no longer listed">
+                <Notice title="Preview no longer listed">
                   Start through your agent or CLI to reconnect.
                 </Notice>
               </div>
@@ -256,6 +274,8 @@ export function App() {
                   ) : (
                     <Overview
                       entries={filtered}
+                      mutate={mutate}
+                      acting={acting}
                       select={(entry) =>
                         select({ owner: entry.owner.id, name: entry.name })
                       }
@@ -279,16 +299,26 @@ export function App() {
 
 function Navigation({
   owners,
+  list,
   selection,
   select,
   query,
   setQuery,
+  filter,
+  setFilter,
+  mutate,
+  acting,
 }: {
   owners: Owner[];
+  list: Entry[];
   selection: Selection;
   select: (value: Selection) => void;
   query: string;
   setQuery: (value: string) => void;
+  filter: PreviewFilter;
+  setFilter: (value: PreviewFilter) => void;
+  mutate: Mutate;
+  acting: boolean;
 }) {
   const { setOpenMobile } = useSidebar();
   function navigate(value: Selection) {
@@ -326,49 +356,61 @@ function Navigation({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        <NativeSelect
+          className="w-full"
+          aria-label="Filter previews"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value as PreviewFilter)}
+        >
+          <NativeSelectOption value="all">All statuses</NativeSelectOption>
+          <NativeSelectOption value="active">Active</NativeSelectOption>
+          <NativeSelectOption value="attention">
+            Needs attention
+          </NativeSelectOption>
+          <NativeSelectOption value="stopped">
+            Stopped / offline
+          </NativeSelectOption>
+        </NativeSelect>
       </SidebarHeader>
       <SidebarContent aria-label="Projects and previews">
-        {owners.map((owner) => {
-          const list = entries(owner).filter((entry) =>
-            `${owner.project} ${entry.name ?? ""}`
-              .toLowerCase()
-              .includes(query.trim().toLowerCase()),
-          );
-          return list.length ? (
-            <SidebarGroup key={owner.id}>
-              {list.length > 1 && (
-                <SidebarGroupLabel title={owner.project}>
-                  {shortProject(owner)}
-                </SidebarGroupLabel>
-              )}
-              <SidebarMenu>
-                {list.map((entry) => (
-                  <SidebarMenuItem key={entry.name ?? ""}>
-                    <SidebarMenuButton
-                      className="preview-nav"
-                      isActive={
-                        typeof selection === "object" &&
-                        selection.owner === owner.id &&
-                        selection.name === entry.name
-                      }
-                      onClick={() =>
-                        navigate({ owner: owner.id, name: entry.name })
-                      }
-                    >
-                      <span className="nav-name">
-                        {entry.name ?? shortProject(owner)}
-                      </span>
-                      <Status tone={owner.error ? "error" : state(entry).tone}>
-                        {owner.error ? "Unavailable" : state(entry).label}
-                      </Status>
-                      <Path value={owner.project ?? "Unverified record"} />
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroup>
-          ) : null;
-        })}
+        <SidebarGroup>
+          <SidebarMenu>
+            {list.map((entry) => (
+              <SidebarMenuItem
+                key={entry.owner.id + "/" + (entry.name ?? "")}
+                className="preview-nav-row"
+              >
+                <SidebarMenuButton
+                  className="preview-nav"
+                  isActive={
+                    typeof selection === "object" &&
+                    selection.owner === entry.owner.id &&
+                    selection.name === entry.name
+                  }
+                  onClick={() =>
+                    navigate({ owner: entry.owner.id, name: entry.name })
+                  }
+                >
+                  <span className="nav-name">
+                    {entry.name ?? shortProject(entry.owner)}
+                  </span>
+                  <Status
+                    tone={entry.owner.error ? "error" : state(entry).tone}
+                  >
+                    {entry.owner.error ? "Unavailable" : state(entry).label}
+                  </Status>
+                  <Path value={entry.owner.project ?? "Unverified record"} />
+                </SidebarMenuButton>
+                <PreviewMenu entry={entry} mutate={mutate} acting={acting} />
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+          {!list.length && (
+            <p className="px-2 py-4 text-xs text-muted-foreground">
+              No matching previews
+            </p>
+          )}
+        </SidebarGroup>
       </SidebarContent>
     </Sidebar>
   );
@@ -377,9 +419,13 @@ function Navigation({
 function Overview({
   entries,
   select,
+  mutate,
+  acting,
 }: {
   entries: Entry[];
   select: (entry: Entry) => void;
+  mutate: Mutate;
+  acting: boolean;
 }) {
   return (
     <div className="data-table overview-table">
@@ -421,6 +467,7 @@ function Overview({
                   {entry.preview?.active && entry.preview.url && (
                     <AppLink url={entry.preview.url} />
                   )}
+                  <PreviewMenu entry={entry} mutate={mutate} acting={acting} />
                 </div>
               </TableCell>
             </TableRow>

@@ -84,6 +84,12 @@ Align the header's sidebar trigger with the navigation icons below it. Use a 24p
 
 A preview name opens its details with one click. Keep the worktree path adjacent so previews with similar names remain distinguishable.
 
+Keep search and status filters above the scrolling list. Opening details preserves both.
+Order active work first, then entries that need attention, with stable path/name ordering.
+Each sidebar row has a separate action menu; using it must not navigate to that preview.
+Reuse the same actions in the overview and details. Hide unsafe operations and let the
+server reject stale confirmations. Never offer Remove entry for an unreachable owner.
+
 Paths stay on one line. Let parent directories truncate while preserving the final segments at full contrast. Use the shared `Path` component; never use right-to-left text direction to fake truncation.
 
 ### View contracts
@@ -116,6 +122,7 @@ Compose the maintained components in `dashboard/src/components/ui/`. Reuse view-
 | Text or search input | `Input`, `InputGroup`, shared `SearchField` |
 | Labeled field and validation | `Field`, `FieldLabel`, `FieldDescription`, `FieldError` |
 | Small fixed choice list | `NativeSelect` |
+| Preview actions | `DropdownMenu`, shared `PreviewMenu` |
 | View navigation | `Tabs`, `Sidebar`, mobile `Sheet` |
 | Tabular data | `Table` and its semantic children |
 | Bounded list | `ScrollArea` |
@@ -155,6 +162,8 @@ Use other truthful states when needed, including Startup failed, Configuration e
 Keep these consequences explicit at the relevant decision:
 
 - Stop retains managed database data. It affects only the selected preview.
+- Delete data erases named managed databases without restarting. Remove entry requires no remaining data or cleanup and keeps sources and saved secrets.
+- Removing the last entry closes an empty automatic owner and ends its private approvals. An offline data record contains no restart configuration.
 - Restart uses retained configuration and current source; it does not reload preview.yml.
 - Invalid YAML is an error, not permission to fall back silently.
 - Saving YAML is explicit and does not change the running preview. Existing files are not overwritten.

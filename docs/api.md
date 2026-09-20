@@ -608,6 +608,11 @@ The dashboard cannot change bindings or grant runtime access to references.
 
 The authenticated owner client also supports:
 
+- `remove(name, attemptId)`: remove an inactive entry and its bounded history. Supply
+  its latest attempt ID, or `null` for a private request without an attempt. Active
+  work, pending secret forms, retained data, and incomplete cleanup block removal.
+  Removing the last entry closes an automatic owner and ends dynamic approvals.
+  Source files and saved secrets remain. `remove()` clears an empty project entry.
 - `describe(name, attemptId)`: redacted requested configuration for a retained attempt,
   including secret reference metadata without checking Keychain presence.
 - `startAgain(name, attemptId)`: rerun the current stopped or failed attempt's declaration
@@ -627,6 +632,38 @@ The authenticated owner client also supports:
 observed attempt IDs (or `null`) before changing state. A mismatch returns
 `STALE_ATTEMPT`. The dashboard always supplies this guard. CLI/MCP behavior without
 it is unchanged; MCP also forwards an explicitly supplied guard.
+
+The sidebar and overview share the preview action menu. Search remains set when
+opening details. Status filters and active-first ordering keep running work easy to find.
+Discovery reads owners in bounded pages; an unavailable owner does not hide others.
+
+**Delete data** confirms the exact environment and managed databases without restarting.
+It requires a stopped preview. Its optional `expected` guard contains the latest
+`attemptId` and resource list; `attemptId: null` identifies retained data with no attempt.
+The dashboard always supplies this guard. External databases and user secrets are untouched.
+
+After clean owner shutdown, the existing private connection file keeps the project path,
+data directory, and Docker socket only when managed data remains. Offline status comes
+from the existing database ownership records. It does not restore configuration, logs,
+execution permission, or private approvals. Start through the agent or CLI to run again.
+Offline deletion and removal use the same project lock as owner startup. An unreachable
+live connection never qualifies for offline cleanup.
+
+CLI management also works when the registered source directory no longer exists:
+
+```sh
+previewhost projects
+previewhost list --project /absolute/worktree/path
+previewhost stop app --project /absolute/worktree/path
+previewhost delete-data app --project /absolute/worktree/path --allow-exec
+previewhost remove app --project /absolute/worktree/path
+```
+
+`projects` lists recorded paths without contacting owners; `recorded` does not mean running.
+Offline deletion requires `--allow-exec`. For a running owner, use its existing permission
+settings; omit the flag if it already has execution permission. After offline data deletion,
+use `previewhost remove --project /absolute/worktree/path` to clear the empty project entry.
+No removal operation deletes source files, saved secrets, or the permanent project lock.
 
 Dashboard **Reset data** confirms the managed resource list, then calls guarded Stop,
 guarded `deleteData`, and `startAgain` in order. It restarts the serving configuration

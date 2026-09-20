@@ -182,7 +182,8 @@ Use the theme button in the navbar to switch between light and dark mode.
 Private secret forms use the same design and theme control. Browser preferences are saved separately for each local address.
 
 Each worktree has its own preview, service connections, and managed database data.
-The overview shows what is ready and what needs attention.
+The sidebar puts active previews first. Search by name or path, or filter by status.
+Each row’s menu lets you stop, start, or clear an entry without opening its details.
 Open a preview to switch between **Activity**, **Logs**, and **Configuration** at the top.
 Activity shows services, setup jobs, and recovery actions. Logs and Configuration have their own scrollable views.
 In **Logs**, choose an attempt and source, then search its captured output. Search ignores letter case; **Clear** or Escape restores all captured lines.
@@ -195,7 +196,9 @@ In **Logs**, choose an attempt and source, then search its captured output. Sear
 | Diagnose a failed update | Compare **Serving** with **Latest update**, then open the failed job's **Logs** or select an attempt in **Logs**. |
 | Cancel an unfinished update | Select **Cancel update**. The previous application keeps running. |
 | Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
-| Test with fresh managed data | In **Activity**, select **Reset data**, review the databases, then confirm. Setup runs again; deletion cannot be undone. |
+| Test with fresh managed data | From the preview’s menu, select **Reset data**. Confirm the databases; setup runs again. |
+| Delete data without restarting | Stop the preview, then select **Delete data** from its menu. Deletion cannot be undone. |
+| Clear an old entry | Select **Remove entry** after stopping it and deleting any retained data. Source files and saved secrets remain. |
 | Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
 | Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the dialog and save. |
 | Supply a missing secret | Select **Open private form** to approve access and enter values outside the chat. |
@@ -221,9 +224,10 @@ Canceled private requests stay canceled.
 
 Secret Manager lists reference names, never values. Updating a shared reference affects future starts in every project that uses it. Running apps and access approvals stay unchanged.
 
-The dashboard lists live automatic project owners created through the CLI or MCP.
+The dashboard lists automatic project owners and data retained after clean owner shutdown.
+Deleted worktrees remain manageable. Unreachable owners require cleanup verification before removal.
 Standalone `serve` instances and embedded library runtimes are not automatically listed.
-It does not start owners or grant execution permissions.
+It does not start owners or grant execution permissions. Removing the last entry closes an empty owner and ends its private approvals.
 Use your editor or the CLI/MCP to edit configuration or shut down an owner.
 See [dashboard operations](docs/api.md#local-dashboard-operations) for lifecycle and permission details.
 

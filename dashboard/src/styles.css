@@ -264,6 +264,17 @@
 [data-slot="sidebar-menu-button"] {
   font-size: 13px;
 }
+.preview-nav-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 2px;
+}
+.preview-nav-row > [data-slot="dropdown-menu-trigger"] {
+  width: 28px;
+  height: 28px;
+  color: var(--t3);
+}
 .preview-nav {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -624,12 +635,6 @@
 }
 .env-table td {
   vertical-align: top;
-}
-.reset-row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  margin-top: 14px;
 }
 .job-hint {
   font-size: 12px;

@@ -9,7 +9,7 @@ export type Owner = {
   project?: string;
   previews?: PreviewStatus[];
   requests?: SecretSetupSummary[];
-  legacy?: boolean;
+  offline?: boolean;
   configuration?: { file: string; error?: { message: string } };
   error?: { message: string };
 };
@@ -41,6 +41,8 @@ export function pending(entry: Entry) {
 }
 export function state(entry: Entry) {
   const p = entry.preview;
+  if (entry.owner.offline && !p)
+    return { label: "Offline", tone: "muted", note: "" };
   if (needsCleanup(p))
     return {
       label: "Cleanup incomplete",
@@ -136,16 +138,17 @@ export function attempts(p?: PreviewStatus) {
 
 export function hint(entry: Entry) {
   const p = entry.preview;
+  if (entry.owner.offline)
+    return p?.data
+      ? "Data retained. Start through your agent or CLI to run this preview again."
+      : "";
   if (deletionNeedsRetry(p))
-    return "Nothing restarts until you explicitly retry Reset data.";
+    return "Resolve the Keychain error, then retry data deletion.";
   if (needsCleanup(p))
     return "Cleanup is incomplete; keep the source directories and retry cleanup before starting again.";
-  if (pending(entry).length)
-    return "Saving secrets does not start the app.";
+  if (pending(entry).length) return "Saving secrets does not start the app.";
   if (p?.candidate)
-    return p.active
-      ? "Your previous app is still running."
-      : "";
+    return p.active ? "Your previous app is still running." : "";
   if (p?.busy) return "";
   if (p?.active && p.latest?.state === "failed")
     return "Your previous app is still running.";
@@ -159,4 +162,53 @@ export function hint(entry: Entry) {
   return p?.data
     ? "Start again uses the same configuration, current source and retained database; it does not reload YAML."
     : "Start again uses the same configuration and current source without reloading YAML; the URL may change.";
+}
+
+export type PreviewFilter = "all" | "active" | "attention" | "stopped";
+export function needsAttention(entry: Entry) {
+  return !!(
+    entry.owner.error ||
+    entry.owner.configuration?.error ||
+    ["error", "warning"].includes(state(entry).tone)
+  );
+}
+export function isActive(entry: Entry) {
+  return !!(
+    entry.preview?.active ||
+    entry.preview?.candidate ||
+    entry.preview?.busy
+  );
+}
+export function visibleEntries(
+  owners: Owner[],
+  query: string,
+  filter: PreviewFilter,
+): Entry[] {
+  const search = query.trim().toLowerCase();
+  const rank = (entry: Entry) =>
+    isActive(entry) ? 0 : needsAttention(entry) ? 1 : 2;
+  return owners
+    .flatMap(entries)
+    .filter(
+      (entry) =>
+        `${entry.owner.project ?? ""} ${entry.name ?? ""}`
+          .toLowerCase()
+          .includes(search) &&
+        (filter === "all" ||
+          (filter === "active" && isActive(entry)) ||
+          (filter === "attention" && needsAttention(entry)) ||
+          (filter === "stopped" &&
+            !entry.owner.error &&
+            !isActive(entry) &&
+            !pending(entry).length &&
+            !needsCleanup(entry.preview))),
+    )
+    .sort(
+      (a, b) =>
+        rank(a) - rank(b) ||
+        (a.owner.project ?? a.owner.id).localeCompare(
+          b.owner.project ?? b.owner.id,
+        ) ||
+        (a.name ?? "").localeCompare(b.name ?? ""),
+    );
 }

@@ -69,7 +69,13 @@ After a crash, `CLEANUP_INCOMPLETE` names the retained connection file.
 Retain sources and verify old application/process-group cleanup, using the existing recovery checks below.
 The record's PID is a diagnostic clue, not authority to kill a process. An absent owner does not prove its children stopped.
 Only after cleanup is confirmed, remove that project's `connection.json` and retry. Keep the permanent `.lock` inode.
-Clean shutdown handles record removal automatically and retains stored values and managed data.
+Before removing a crash record, note its data directory and Docker socket. Reuse those
+settings on restart, especially with a custom data location.
+Clean shutdown keeps an offline record while managed data remains. The dashboard and
+`previewhost projects` still list it. Use **Delete data** to erase its managed databases,
+then **Remove entry** to clear the empty record. Source files need not still exist.
+Saved user secrets are unaffected. An unreachable owner is not a cleanly stopped owner;
+its entry cannot be removed through this shortcut.
 
 For an explicit manual connection, start `previewhost serve` in a foreground terminal.
 Use the same `--endpoint` and `--token-file` for its clients. Explicit connection mode never starts or reconfigures an owner.

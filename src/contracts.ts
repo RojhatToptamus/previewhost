@@ -193,7 +193,7 @@ export interface PreviewDescription {
 }
 export interface LogOptions { source?: string; after?: number; maxBytes?: number }
 export interface LogResult { name: string; attemptId: string; text: string; truncated: boolean; cursor: number }
-export interface DeleteDataOptions { expected?: { attemptId: string; resources: DataStatus['resources'] } }
+export interface DeleteDataOptions { expected?: { attemptId: string | null; resources: DataStatus['resources'] } }
 export interface WaitOptions { timeoutMs?: number; signal?: AbortSignal }
 export interface StopOptions {
   afterEngineRestart?: boolean;
@@ -202,6 +202,7 @@ export interface StopOptions {
 }
 export type SecretSetupSummary = Pick<SecretSetupStatus, 'id' | 'name' | 'mode' | 'state' | 'browser' | 'expiresAt'>;
 export interface PreviewManagementApi {
+  remove(name?: string, attemptId?: string | null): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
   saveConfiguration(name: string, attemptId: string): Promise<{ file: string; externalSources: string[] }>;
@@ -257,5 +258,6 @@ export const requestSchemas = {
   startAgain: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   saveConfiguration: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   rerunJob: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, job: nameSchema }),
-  deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema, resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis']) })).min(1).max(limits.environmentDatabases) }).optional() }),
+  remove: z.strictObject({ name: nameSchema.optional(), attemptId: attemptIdSchema.nullable() }),
+  deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema.nullable(), resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis']) })).min(1).max(limits.environmentDatabases) }).optional() }),
 };

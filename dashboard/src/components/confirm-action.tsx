@@ -13,7 +13,7 @@ import {
   AlertDialogAction,
 } from "./ui/alert-dialog";
 
-type Request = {
+export type Confirmation = {
   title: string;
   description: string;
   details?: ReactNode;
@@ -34,11 +34,11 @@ export function ConfirmAction({
   accessibleLabel?: string;
   danger?: boolean;
   disabled: boolean;
-  request: Request;
+  request: Confirmation;
   mutate: Mutate;
 }) {
   // Polling must not change the operation the user is currently reviewing.
-  const [review, setReview] = useState<Request>();
+  const [review, setReview] = useState<Confirmation>();
   return (
     <AlertDialog
       open={Boolean(review)}
@@ -54,27 +54,46 @@ export function ConfirmAction({
           {label}
         </Button>
       </AlertDialogTrigger>
-      {review && (
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{review.title}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {review.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {review.details}
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant={danger ? "destructive" : "default"}
-              disabled={disabled}
-              onClick={() => void mutate(review.body, review.message)}
-            >
-              {review.confirmLabel}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      )}
+      <ConfirmationContent
+        review={review}
+        disabled={disabled}
+        danger={danger}
+        mutate={mutate}
+      />
     </AlertDialog>
   );
+}
+
+export function ConfirmationContent({
+  review,
+  disabled,
+  danger = false,
+  mutate,
+  onCloseAutoFocus,
+}: {
+  review?: Confirmation;
+  onCloseAutoFocus?: (event: Event) => void;
+  disabled: boolean;
+  danger?: boolean;
+  mutate: Mutate;
+}) {
+  return review ? (
+    <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{review.title}</AlertDialogTitle>
+        <AlertDialogDescription>{review.description}</AlertDialogDescription>
+      </AlertDialogHeader>
+      {review.details}
+      <AlertDialogFooter>
+        <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogAction
+          variant={danger ? "destructive" : "default"}
+          disabled={disabled}
+          onClick={() => void mutate(review.body, review.message)}
+        >
+          {review.confirmLabel}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  ) : null;
 }

@@ -74,17 +74,17 @@ test('dashboard authenticates browser access, discovers isolated owners, and con
   }), 401);
   assert.equal((await api({ action: 'shutdown', owner: fixtures[0].id })).body.error?.code, 'INVALID_INPUT');
   const list = await api({ action: 'list' });
-  assert.equal(list.body.result.length, 2);
+  assert.equal(list.body.result.owners.length, 2);
   assert.ok(!JSON.stringify(list.body).includes('tokenFile'));
   assert.ok(!JSON.stringify(list.body).includes(capability));
   const first = fixtures[0];
   await writeFile(join(first.projectDirectory, 'preview.yml'), 'name: app\nservices: [\n');
-  const invalidConfig = (await api({ action: 'list' })).body.result.find((owner: any) => owner.id === first.id);
+  const invalidConfig = (await api({ action: 'list' })).body.result.owners.find((owner: any) => owner.id === first.id);
   assert.equal(invalidConfig.configuration.error.code, 'INVALID_INPUT');
   assert.match(invalidConfig.configuration.error.message, /line 3/);
   assert.equal(await (await fetch(first.url)).text(), 'worktree-one');
   await rm(join(first.projectDirectory, 'preview.yml'));
-  const recoveredConfig = (await api({ action: 'list' })).body.result.find((owner: any) => owner.id === first.id);
+  const recoveredConfig = (await api({ action: 'list' })).body.result.owners.find((owner: any) => owner.id === first.id);
   assert.equal(recoveredConfig.configuration, undefined);
   const before = await first.runtime.get('app');
   const expected = { active: before.active!.id, candidate: null, latest: before.latest!.id };
@@ -141,10 +141,10 @@ test('a hung owner is bounded without blocking healthy-owner results', { timeout
   t.after(() => dashboard.close()); await dashboard.open();
   const start = performance.now();
   const res = await fetch(dashboard.endpoint + '/api', { method: 'POST', headers: { 'content-type': 'application/json', origin: dashboard.endpoint, authorization: 'Bearer ' + new URL(launch).hash.slice(1) }, body: JSON.stringify({ action: 'list' }) });
-  const result = await res.json() as { result: Array<{ error?: { code: string }; previews?: PreviewStatus[] }> };
-  assert.equal(result.result[0].error?.code, 'TIMEOUT');
-  assert.deepEqual(result.result[1].previews, []);
-  assert.equal(result.result[1].error, undefined);
+  const result = await res.json() as { result: { owners: Array<{ error?: { code: string }; previews?: PreviewStatus[] }> } };
+  assert.equal(result.result.owners[0].error?.code, 'TIMEOUT');
+  assert.deepEqual(result.result.owners[1].previews, []);
+  assert.equal(result.result.owners[1].error, undefined);
   assert.ok(performance.now() - start < 6000);
 });
 
