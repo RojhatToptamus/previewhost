@@ -13,7 +13,6 @@ import { openLocalBrowser } from './local-browser.js';
 import { discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
 import { listSecrets } from './secrets.js';
 import { keychain } from './keychain.js';
-import { dashboardPage, dashboardScript, dashboardStyle } from './dashboard-page.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
@@ -37,7 +36,10 @@ export async function startDashboard(options: {
   openBrowser?: typeof openLocalBrowser;
 } = {}) {
   const discover = options.discover ?? discoverProjectOwners;
-  const [geist, geistMono] = await Promise.all(['geist.woff2', 'geist-mono.woff2'].map(file => readFile(new URL(`./fonts/${file}`, import.meta.url))));
+  const [geist, geistMono, dashboardPage, dashboardScript, dashboardStyle] = await Promise.all([
+    './fonts/geist.woff2', './fonts/geist-mono.woff2',
+    './dashboard/index.html', './dashboard/dashboard.js', './dashboard/dashboard.css',
+  ].map(file => readFile(new URL(file, import.meta.url))));
   const capability = randomBytes(32).toString('hex');
   const clients = new Set<ReturnType<typeof connectPreviewDaemon>>();
   const controller = new AbortController();
@@ -170,10 +172,11 @@ export async function startDashboard(options: {
         req.url === '/dashboard.css' ? [dashboardStyle, 'text/css; charset=utf-8'] :
         req.url === '/fonts/geist.woff2' ? [geist, 'font/woff2'] : req.url === '/fonts/geist-mono.woff2' ? [geistMono, 'font/woff2'] : undefined;
       if (asset && req.method === 'GET') {
+        // Radix and Sonner insert presentation styles. Scripts, connections, and API authorization remain restricted.
         if (req.headers.origin !== undefined && (req.headers.origin !== origin || count('origin') !== 1)) throw new PreviewError('UNAUTHORIZED', 'Use the dashboard origin.');
         res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
           'x-content-type-options': 'nosniff', 'cross-origin-resource-policy': 'same-origin',
-          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
+          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
         res.end(asset[0]); return;
       }
       const supplied = req.headers.authorization ?? '';

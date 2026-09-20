@@ -70,9 +70,15 @@ test('global MCP defaults support private setup, isolated worktree databases and
     args: [resolve('dist/cli.js'), 'mcp', '--allow-exec'], stderr: 'pipe',
     env: { ...process.env, HOME: home, NODE_OPTIONS: `--import=${hook}` } as Record<string, string> }));
   async function call<T>(name: string, project: string, args: Record<string, unknown> = {}): Promise<T> {
-    const response = await client.callTool({ name, arguments: { project, ...args } });
-    assert.equal(response.isError, undefined, JSON.stringify(response.structuredContent));
-    return (response.structuredContent as { result: T }).result;
+    for (;;) {
+      const signal = name === 'preview_wait' ? t.signal : undefined;
+      signal?.throwIfAborted();
+      const response = await client.callTool({ name, arguments: { project, ...args } }, { signal });
+      // A wait budget expiring is not a failed attempt. Observe the same attempt; never repeat startup.
+      if (name === 'preview_wait' && response.isError && (response.structuredContent as { error: { code: string } }).error.code === 'TIMEOUT') continue;
+      assert.equal(response.isError, undefined, JSON.stringify(response.structuredContent));
+      return (response.structuredContent as { result: T }).result;
+    }
   }
   async function privateCall(operation: string, body: unknown = {}) {
     const url = new URL(await readFile(capture, 'utf8'));

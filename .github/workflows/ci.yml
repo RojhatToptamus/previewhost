@@ -32,12 +32,16 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: npm ci
+      - name: Install Docker tools
+        run: brew install colima docker
       - name: Start local Docker
+        id: docker
         run: |
-          brew install colima docker qemu
-          # VZ is too slow for the real database lifecycle tests on hosted Intel Macs.
-          colima start --runtime docker --vm-type qemu --cpus 2 --memory 4
+          colima start --runtime docker --vm-type vz --cpus 2 --memory 4
+          docker info
           echo "PREVIEWD_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+      - name: Pull database images
+        run: |
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
       - run: npm run verify:release
@@ -84,6 +88,16 @@ jobs:
           path: ${{ runner.temp }}/previewhost-release
           if-no-files-found: error
           retention-days: 30
+      - name: Docker startup diagnostics
+        if: failure() && steps.docker.outcome == 'failure'
+        run: |
+          for file in "$HOME"/.colima/_lima/colima/ha.stderr.log "$HOME"/.colima/_lima/colima/serial*.log; do
+            if [ -f "$file" ]; then
+              echo "::group::$(basename "$file")"
+              cat "$file"
+              echo "::endgroup::"
+            fi
+          done
       - name: Stop local Docker
         if: always()
         run: colima stop

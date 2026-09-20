@@ -33,7 +33,8 @@ That existing gate requires macOS, an explicit local Unix socket, and zero skipp
 failed, canceled, or TODO tests. It does not accept a partial test run.
 
 The runner is `macos-15-intel`, which Colima uses in its own integration workflow.
-Colima uses QEMU with two virtual CPUs. VZ exceeds the database test deadlines on hosted Intel Macs.
+Colima uses the native macOS VZ backend with two virtual CPUs. Docker tool installation,
+VM startup, and image pulls have separate CI steps so their durations are visible.
 The full suite retains its normal timeouts and the zero-skip release gate.
 Native compilation requires Xcode Command Line Tools. The build produces one
 ad-hoc signed Keychain helper with `arm64` and `x86_64` slices. Consumers do not
