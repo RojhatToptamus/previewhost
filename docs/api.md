@@ -1,5 +1,7 @@
 # API and CLI reference
 
+Look up runtime methods, spec fields, CLI flags, and MCP tool arguments. For a complete workflow, start with [MCP](mcp.md), [CLI](first-preview.md), or the [library](library.md).
+
 ## Runtime and client
 
 The ESM package exports `createPreviewRuntime`, `connectPreviewDaemon`,
@@ -8,7 +10,7 @@ daemon client implement `PreviewApi`.
 
 These configuration fragments assume imports from `previewhost`.
 Replace `/absolute/...` paths with your source and private storage directories.
-For a complete program with cleanup, see [Embed the library](library.md).
+For a complete program with cleanup, see [Node.js library](library.md).
 
 ```ts
 const runtime = await createPreviewRuntime({
@@ -33,7 +35,7 @@ Its default is the local Docker Desktop socket at `~/.docker/run/docker.sock`.
 
 For `start` and `replace`, the callback receives `operation`, a validated copy of
 `spec`, and `signal`. Changes to this copy do not affect execution.
-Service, input, and secret references have not yet been resolved.
+The callback receives unresolved service, input, and secret references.
 
 For `delete-data` and `recover-data`, the request contains `operation`, `name`,
 `resources`, and `signal`. The resource summary contains service names and types,
@@ -77,6 +79,7 @@ const description = await runtime.inspect(spec);
 ```
 
 `loadPreviewSpec` accepts one regular UTF-8 file of at most 1 MiB. Pipes belong on JSON stdin.
+
 Its optional `allowedRoots` constrains the resolved file target, including symlinks. `.yaml` and `.yml`
 files use YAML 1.2. Other file names use JSON. YAML aliases, tags, merge keys,
 duplicate keys, and multiple documents are errors. The loader never runs code
@@ -153,7 +156,7 @@ Managed databases require the [database prerequisites](databases.md#prepare-dock
 For a complete application, use the [shared-notes example](../examples/multi-repo/README.md).
 
 Before daemon startup, export `API_TOKEN` in its terminal.
-Select that value with `serve --env API_TOKEN`.
+Select that value with `start --env API_TOKEN --allow-exec`, or `serve --env API_TOKEN` for a manual daemon.
 
 ```yaml
 name: shop
@@ -238,22 +241,24 @@ External services remain outside owned stop and deletion operations.
 | `logs(name, attemptId?, { source?, after?, maxBytes? })` | `{ name, attemptId, text, cursor, truncated }`. Select a service/job or omit `source` for all output. |
 | `cancel(name, attemptId)` | Cancels the pending candidate and waits for cleanup. A stale ID fails. |
 | `stop(name, { afterEngineRestart? })` | Stops all applications and owned containers. Preserves data. Repeated stop retries incomplete cleanup. |
-| `rerunJob(name, attemptId, job)` | Reruns the named job and starts the stopped environment from its latest configuration. Normal authorization applies; partial writes remain. |
+| `rerunJob(name, attemptId, job)` | Reruns the named job and starts the stopped environment from its latest configuration. Normal authorization applies. Partial writes remain. |
 | `deleteData(name, { expected? })` | Permanently removes a stopped environment's verified owned database data after host authorization. |
 
 Logs use one bounded store per attempt: 65,536 captured UTF-8 bytes and at most 1,024
 output chunks. Filtering does not create another buffer. Source labels in **All output**
 are added when reading, not parsed from application text. Known supplied values are
-redacted before storage; applications must still avoid logging other sensitive data.
+redacted before storage. Applications must still avoid logging other sensitive data.
 
 Without `after`, reads return a tail. For incremental reads, keep the same `attemptId`
 and `source`, then pass the returned `cursor` as `after`. A cursor is a byte offset in
 that attempt's captured output, before display labels. It advances past other sources
-as well. `maxBytes` limits captured bytes per read (4–65,536); display labels add bytes.
+as well. `maxBytes` limits captured bytes per read (4–65,536). Display labels add bytes.
+
 `truncated` means earlier output was omitted by retention or the initial tail limit.
-Incremental pages do not skip output still retained. An expired attempt is an error;
-logs are not persisted after owner shutdown. No streaming endpoint is provided.
-Output comes from command services and jobs; database container logs are not collected.
+
+Incremental pages do not skip output still retained. An expired attempt is an error. Logs are not persisted after owner shutdown. No streaming endpoint is provided.
+
+Output comes from command services and jobs. Database container logs are not collected.
 
 For a confirmed deletion, `expected` accepts `{ attemptId, resources: [{ name, type }] }`.
 The latest attempt and exact managed resource list must still match before deletion.
@@ -298,6 +303,7 @@ stop/start. Managed resource definitions must match retained data.
 The runtime retains active attempts, candidates, cleanup handles, and the latest
 outcome for each name. After Stop, `latest` retains the application actually stopped,
 rather than a failed replacement of it. It does not retain every historical replacement.
+
 At most 128 inactive names remain. Unknown or expired attempt IDs return
 `ATTEMPT_EXPIRED`, never a different attempt result.
 Up to 128 retained data records remain independently of that application history.
@@ -323,12 +329,13 @@ Successful commands exit 0. Errors exit nonzero. An interrupted client exits 130
 `--timeout-ms` controls this wait, separately from the spec readiness timeout.
 When this budget expires, start/replace reads the current attempt and returns its state, including `starting`, with exit 0.
 Continue waiting for that ID. A real failed attempt remains an error.
+
 An error after a successful start request includes the name and attempt ID.
 `wait` returns a terminal outcome as JSON, including failed outcomes.
 
 The command examples below assume a spec named `app` in `preview.json`.
-Cold command startup requires `--allow-exec`; static previews need no execution grant.
-They show separate operations. `ATTEMPT_ID` is the candidate ID from start or status.
+Cold command startup requires `--allow-exec`. Static previews need no execution grant.
+These are separate operations, not a sequence to run unchanged. `ATTEMPT_ID` is the candidate ID from start or status.
 Use `./node_modules/.bin/previewhost` for a local installation without `previewhost` on PATH.
 
 ```sh
@@ -351,19 +358,22 @@ previewhost shutdown
 CLI commands default to the current canonical Git worktree root, or cwd outside Git.
 Automatic MCP tools select the `project` supplied with each call.
 `--project DIR` selects another project. Each project has one persistent owner with a dynamic loopback port.
+
 Start, replace, and secret setup/edit can start it. Read/status/cleanup commands never create an owner.
+
 Inspection validates offline before an owner exists. It does not open managed storage or resolve Keychain values.
 MCP discovery needs no owner or skill installation.
 
 `mcp`, `inspect`, `start`, `replace`, and `secrets setup/edit` accept `--root`, `--allow-exec`, `--env`, `--secret`, `--data-dir`, and `--docker-socket`.
 The default source root is the selected project. Existing owner settings are reused when flags are omitted.
 Incompatible explicit settings report an error without reconfiguring or terminating the owner.
-Selected input values are captured at startup; restarting the owner is required to refresh them.
+Selected input values are captured at startup. Restarting the owner is required to refresh them.
 
 An explicit `--endpoint` or `--token-file` selects connection-only mode.
 That mode uses `http://127.0.0.1:9400` and `~/.local/share/previewd/token` for any omitted connection value.
 It accepts no launch-permission flags and never starts an owner.
 `--version` prints the installed package version.
+
 `serve` accepts repeated `--root`, repeated `--env`, repeated `--secret`, `--data-dir`,
 `--docker-socket`, `--allow-exec`, `--port`, and `--token-file`.
 Its default root is the current directory. Port `0` selects an available control
@@ -371,10 +381,11 @@ port, which the startup JSON reports.
 
 `--env NAME` selects the current value once at owner startup. Missing selected
 keys are errors. Startup JSON reports selected key names without their values.
+
 `--data-dir` selects an exact private directory for managed databases.
 Automatic owners default to `data` inside their private project-owner directory, with or without `--docker-socket`.
-Explicit data directories retain their existing behavior. A shared directory permits only one owner at a time.
-Foreground `serve` still requires `--data-dir` for managed databases.
+A shared directory permits only one owner at a time.
+Foreground `serve` requires `--data-dir` for managed databases.
 
 `--allow-exec` grants native execution, managed database operations, and explicit
 data deletion/recovery and private secret setup through the trusted daemon. `stop --after-engine-restart`
@@ -400,19 +411,23 @@ If an owner already runs with different settings, follow the [owner restart inst
 Stored secrets require macOS 13 or later and the packaged Keychain helper.
 Commands below use `previewhost` from PATH, or `./node_modules/.bin/previewhost` from your application directory.
 `shop/dev/token` is an example name, bound with `{secret: shop/dev/token}` in a direct spec or optional file.
+
 For cold setup, use `--allow-exec`. The private form can approve unselected names. Explicit edit still requires an already selected name.
 Replace `REQUEST_ID` with the ID from setup or edit.
 
 Select exact names through `RuntimeOptions.secretIds` or repeated `serve --secret ID`.
 The initial selection is copied at owner creation and defaults to empty.
 Private setup can add exact names after browser approval. Grants last until owner shutdown.
+
 The same exact name reuses one Keychain value across worktrees and projects that approve it.
-Use a distinct explicit reference for a different value; missing-value setup never overwrites shared entries. Names match
+Use a distinct explicit reference for a different value. Missing-value setup never overwrites shared entries. Names match
 `[A-Za-z0-9][A-Za-z0-9._/-]{0,127}`. Slashes have no inheritance or filesystem meaning.
+
 Specs bind these names to standalone command fields, environment command fields,
 or external database URLs. Start/replace rejects unselected names before storage access.
+
 Setup checks neither presence nor values for an unselected name until private approval.
-Approval revalidates source scope and unions selected names within the existing 128-name limit.
+Approval checks source access again and adds selected names, up to 128 per owner.
 
 Inspect returns `secrets: [{id, selected, bindings: [{service?, key}]}]` without
 reading Keychain values. Start/replace resolves each required ID once, after
@@ -459,12 +474,14 @@ The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id, {ti
 | `canceled` | The request ended and its private form is invalid. Stop setup. Wait for an explicit user request before new setup or startup. |
 | `expired` | The form reached its deadline. Ask before requesting a new form. |
 | `complete` | Access is approved and all required entries were observed present or saved. Check preview state before startup. |
-| `partial` | Setup ended with an error; the private form cannot be reused. Resolve the error before requesting fresh setup. |
+| `partial` | Setup ended with an error. The private form cannot be reused. Resolve the error before requesting fresh setup. |
 
 Do not interpret `canceled` as accidental browser closure. A browser close alone does not change status to `canceled`.
 The server invalidates canceled forms. The instruction to wait for explicit user intent is agent guidance, not a server-enforced restriction on new requests.
+
 Remaining names have unconfirmed writes. They are not necessarily absent.
-Status can wait up to 25,000 ms. Canceling that wait leaves the form open; no new background job is created.
+
+Status can wait up to 25,000 ms. Canceling that wait leaves the form open.
 It does not check whether a credential works with its service or remains accessible later.
 
 The `browser` field reports launch delivery separately from setup state.
@@ -474,10 +491,13 @@ A fresh setup rechecks availability after CLI entry and invalidates an obsolete 
 
 Save starts no application. Check status and current preview state before another start/replace with the current spec.
 Re-read file-based specs after private entry. Do not run an obsolete file or implicitly approve newly edited names.
+
 If the agent turn ends, send “Secrets saved—continue”. Retain the original project path and request ID together.
 Form close or expiry also starts no application.
+
 Owner restart loses access approvals and setup history, but stored values remain.
-Cancellation stops setup preparation; it does not undo earlier name approvals or saved values.
+Cancellation stops setup preparation. It does not undo earlier name approvals or saved values.
+
 A client disconnect after grant creation does not revoke the form automatically.
 
 Updates affect later resolutions. Running applications can retain old values.
@@ -506,39 +526,54 @@ Control requests require `Authorization: Bearer TOKEN`, `Content-Type: applicati
 the exact numeric Host header, and no Origin header. Use a trusted local HTTP
 client, the library client, or the CLI. This is not a browser control API.
 
-MCP tools use the names `preview_inspect`, `preview_start`, `preview_replace`,
+MCP tools use these names:
+
+`preview_inspect`, `preview_start`, `preview_replace`,
 `preview_list`, `preview_get`, `preview_wait`, `preview_logs`, `preview_cancel`,
 `preview_stop`, `preview_delete_data`, `preview_secrets_setup`, `preview_secrets_status`,
-`preview_save_config`, `preview_rerun_job`, and `preview_shutdown` (15 tools; global mode also includes `preview_access`).
-Global registration without fixed project/root options adds `preview_access({project, sources?})` (16 tools total).
+`preview_save_config`, `preview_rerun_job`, and `preview_shutdown`.
+
+Global registration without fixed project/root configuration adds `preview_access({project, sources?})` (16 tools total).
 It requests native client confirmation of exact directories before connecting to that project.
-Approval may start the owner but never an application. Denial/cancellation stops the flow; reconnecting requires approval again.
+Approval can start the owner but never an application. Denial/cancellation stops the flow. Reconnecting requires approval again.
+
 Automatic MCP tools require an absolute `project` on every call unless the registration supplies `--project` as a default.
 This includes reads, waits, secret status, stopping, and owner shutdown. The field selects the owner, file base, and default source root.
+
 Global selection requires confirmed project access. Explicit root registrations permit configured roots and their registered Git worktrees. Neither grants execution or selects secret names.
 A shared connection retains no current-chat or last-project state. Equal preview names in different projects remain independent.
+
 Explicit endpoint/token mode keeps one fixed owner and rejects `project` tool arguments.
+
 MCP inspect/start/replace/setup accepts either `spec` or `file`, never both.
 If both are omitted, it reads project-root `preview.yml`. Invalid or unreadable files are errors.
-Explicit file paths resolve from the MCP project; source paths resolve relative to that file.
-MCP files and sources must resolve within the connection’s approved roots or explicit configured roots; symlink escapes are rejected.
+
+Explicit file paths resolve from the MCP project. Source paths resolve relative to that file.
+
+MCP files and sources must resolve within the connection’s approved roots or explicit configured roots. Symlink escapes are rejected.
+
 The HTTP/runtime API continues to accept spec objects only. `reopen` remains owner-only.
 There is no public name-approval, secret edit, set, remove, value-read, or export tool.
 
 `preview_save_config({project, spec})` creates root `preview.yml` only on an explicit user request.
 It uses the original prepared spec, validates schema, dependencies, attachments and source scope, then round-trips through the strict YAML loader.
+
 It preserves non-secret literals and references without resolving inputs, credentials, service URLs or ports.
 Project-local source paths become relative. The result contains `file` and `externalSources` (nonportable paths).
 It does not run code or establish application health. Save/load cannot certify arbitrary strings contain no secrets.
+
 Existing files, directories and symlinks produce `ALREADY_EXISTS`. Use a normal editor for requested updates and validate them.
+
 Complete-file publication permits one concurrent creator and exposes no partial file.
 The same operation is available as `savePreviewSpec(spec, {projectDirectory, allowedRoots?, signal?})` in the library.
 
 `info` reports a project owner's project, PID, current source roots, execution mode, input keys, initial secret IDs and data/socket paths.
 Manual owners return `null`. Values and dynamic browser grants are not copied into connection files.
+
 Authenticated automatic-owner clients can call `allowSources(directories, signal?)` (`POST /sources/allow`).
 The runtime requires `authorize` to accept `operation: "allow-sources"`, rechecks paths, and updates its existing root set.
 This is an owner operation, not an agent-controlled approval argument. Fixed daemons reject it.
+
 Attempt summaries and incomplete cleanup records include `sources` so callers can identify directories still in use.
 
 Job rerun uses `POST /rerunJob` with `{ "name": "shop", "attemptId": "...", "job": "seed" }`.
@@ -575,7 +610,7 @@ headers and WebSocket handshakes have a 10-second deadline. Active streams do no
 Control bodies and responses have a 1 MiB limit. The daemon permits 32 active
 requests, including at most 16 waits, with two slots reserved for cleanup.
 
-At most 128 IDs can be selected or required per attempt. Metadata listing returns
+An attempt can select or require at most 128 secret IDs. Metadata listing returns
 up to 128 names with `truncated`. Keychain work permits four helpers and 32 queued
 operations. Reads have a 10-second deadline. Explicit interactive writes have 30 seconds.
 
@@ -587,24 +622,10 @@ traffic perform no Keychain reads.
 After a lost response to start, replace, cancel, stop, or delete-data, read `get` or `list` before another attempt.
 A transport failure does not prove that the original operation failed.
 
-
 ## Local dashboard operations
 
-`previewhost dashboard` opens an authenticated local management page for existing
-automatic project owners. It starts no preview or owner. Its foreground process can
-close without stopping applications. Private browser session delivery follows the
-same native-launch pattern as secret forms, with separate credentials. The dashboard
-keeps its capability in per-tab `sessionStorage` so the same tab can reload. Browser
-session restore may retain that storage; stopping the dashboard process ends its
-authority. Private secret forms continue to keep their capabilities only in memory.
-If session storage is unavailable, the initial launch works but reload needs a new launch.
-
-Secret Manager works without a running owner. It lists up to 128 user-secret references
-from Keychain and indicates when the list is truncated. Edit opens a dialog with a blank, masked
-field. Save sends the replacement to the authenticated local dashboard; the response
-contains only its reference name. Cancel clears the field without sending a value.
-Save updates only an existing entry and never recreates one removed during editing.
-The dashboard cannot change bindings or grant runtime access to references.
+`previewhost dashboard` opens a local management page for automatic project owners.
+See [Dashboard](dashboard.md) for its controls and [dashboard security](security.md#local-dashboard) for browser authorization and storage.
 
 The authenticated owner client also supports:
 
@@ -617,7 +638,7 @@ The authenticated owner client also supports:
   Canceled attempts cannot use this operation.
 - `saveConfiguration(name, attemptId)`: create root `preview.yml` from that exact
   retained attempt through the existing validated saver. The automatic owner's project
-  fixes the destination; callers cannot supply a path or a replacement spec. Returns
+  fixes the destination. Callers cannot supply a path or a replacement spec. Returns
   `{ file, externalSources }` and does not start, stop, or replace an application.
 - `secretsList()`: bounded request summaries, including requests made before preview startup.
 - `secretsOpen(id)`: reopen only an idle pending private form through the native launcher.
@@ -625,29 +646,28 @@ The authenticated owner client also supports:
 
 `stop(name, { expected: { active, candidate, latest } })` optionally checks the exact
 observed attempt IDs (or `null`) before changing state. A mismatch returns
-`STALE_ATTEMPT`. The dashboard always supplies this guard. CLI/MCP behavior without
-it is unchanged; MCP also forwards an explicitly supplied guard.
+`STALE_ATTEMPT`. The dashboard always supplies this guard. CLI and MCP calls can omit this guard. MCP forwards it when supplied.
 
 Dashboard **Reset data** confirms the managed resource list, then calls guarded Stop,
 guarded `deleteData`, and `startAgain` in order. It restarts the serving configuration
-when available; otherwise it uses the latest stopped or failed attempt. It starts only
+when available. Otherwise it uses the latest stopped or failed attempt. It starts only
 after deletion succeeds. A canceled attempt without a serving app is not resettable.
-A startup failure uses ordinary error reporting and Retry start; it does not repeat
+
+A startup failure uses ordinary error reporting and Retry start. It does not repeat
 deletion. After a lost response, inspect the current state before resetting again.
 
 Declarations and logs remain bounded owner memory. They are unavailable after owner
-shutdown or history eviction. Start again may allocate a different URL and keeps
-managed data. A later agent Start remains authorized after a human Stop: this is not
-a permanent pause or a new agent-approval lifecycle.
-In the dashboard, use Retry start after resolving the failure. It creates no
-private setup request and does not bypass secret approval or Keychain access checks.
+shutdown or history eviction. Start again can allocate a different URL and keeps
+managed data. An authorized agent can start a preview again after you stop it.
 
 Saving keeps secret/input references unexpanded. It never reads Keychain values or
 exports the raw declaration through the dashboard response. Sources inside the project
-become relative paths; external sources keep absolute paths and appear in `externalSources`.
+become relative paths. External sources keep absolute paths and appear in `externalSources`.
 Existing files and symlinks win: saving returns `ALREADY_EXISTS` without overwriting them.
+
 An expired attempt cannot be reconstructed from status. An owner without a project
-directory cannot use this operation; save the original spec through CLI/MCP or the library.
+directory cannot use this operation. Save the original spec through CLI/MCP or the library.
+
 The file is future input, not a configuration change applied to the running preview.
-Declared literal values remain part of the recipe; saving does not certify that arbitrary
+Declared literal values remain part of the recipe. Saving does not certify that arbitrary
 strings contain no secrets.

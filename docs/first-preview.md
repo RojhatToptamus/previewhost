@@ -1,11 +1,17 @@
-# Your first preview
+# First preview with the CLI
 
 Run a frontend that requests a message from a backend. Previewhost supplies both ports and connects the two services.
 
 ## Create the example
 
-Complete [installation](installation.md) first. This example requires no Docker or application packages.
-Create a new directory outside an existing Git repository:
+Use macOS with Node.js 22.23 or later. This example needs no Docker, MCP registration, or application packages.
+Install the CLI:
+
+```sh
+npm install -g previewhost
+```
+
+For other installation choices, see [Installation](installation.md). Create a new directory outside an existing Git repository:
 
 ```sh
 mkdir previewhost-demo
@@ -97,10 +103,15 @@ Both servers use Previewhost's `PORT` and `HOST` values.
 
 ## Start and inspect
 
-Inspect the recipe, then start it:
+Check the configuration:
 
 ```sh
 previewhost inspect
+```
+
+Start the preview:
+
+```sh
 previewhost start --allow-exec
 ```
 
@@ -108,12 +119,11 @@ previewhost start --allow-exec
 The CLI finds or starts a persistent background owner for this directory.
 
 Open the `url` from the JSON result. The page shows **Frontend + backend**, then **Hello from the backend.**
-Readiness checks HTTP headers. Opening the page verifies that the application actually works.
+Readiness checks HTTP headers. The page check also covers the request from the frontend to the backend.
 
-If the result says `starting`, use its attempt ID to continue waiting:
+If the result says `starting`, wait for the returned attempt ID:
 
 ```sh
-previewhost get hello
 previewhost wait hello ATTEMPT_ID
 ```
 
@@ -141,4 +151,4 @@ previewhost shutdown
 Stop ends the preview. Shutdown ends this project's owner and all its previews.
 The source files remain. For a project with databases, stop also retains managed data.
 
-Next, adapt a [configuration](recipes.md) to your application, or connect your agent through [MCP](mcp.md).
+Next, [write preview.yml](recipes.md) for your own application.

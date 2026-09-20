@@ -46,7 +46,7 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   await expect(page.locator('html')).toHaveAttribute('data-site-theme', 'dark');
   await expect(page.locator('.docs-app')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('desktop-dark.png') });
-  await page.getByRole('link', { name: 'Next Your first preview' }).click();
+  await page.getByRole('link', { name: 'Next CLI quickstart' }).click();
   await expect(page).toHaveURL(/first-preview/);
   await page.goBack();
   await expect(page).toHaveURL(/installation/);
@@ -73,7 +73,7 @@ test('mobile navigation, keyboard dismissal and long reference tables', async ({
   await expect(page.getByRole('searchbox')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  for (const href of ['/first-preview/', '/services-and-jobs/', '/dashboard/', '/secrets/']) {
+  for (const href of ['/first-preview/', '/mcp/', '/library/', '/configuration/', '/integrations/', '/services-and-jobs/', '/dashboard/', '/secrets/']) {
     await page.goto(href);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), href).toBe(true);
   }

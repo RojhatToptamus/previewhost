@@ -1,52 +1,96 @@
-# Embed the library
+# Node.js library
 
-Run Previewhost inside a Node.js application without a separate daemon. The same runtime powers CLI and MCP previews.
+Run Previewhost inside a Node.js program. Your program owns the runtime and stops its previews when it closes the runtime.
 
-## Start an environment
+## Install and prepare a page
 
-Use the files from [Your first preview](first-preview.md), then install Previewhost locally:
+Use macOS with Node.js 22.23 or later. This example needs no global CLI, MCP registration, or Docker.
+Create an example directory:
 
 ```sh
+mkdir previewhost-library
+cd previewhost-library
+npm init -y
 npm install previewhost
+mkdir site
+printf '<h1>Hello from Previewhost.</h1>\n' > site/index.html
 ```
 
-Save this as `preview.mjs` in the example directory:
+## Start a preview
+
+Save this as `preview.mjs` beside the `site` directory:
 
 ```js
-import { createPreviewRuntime, loadPreviewSpec } from 'previewhost';
+import { resolve } from 'node:path';
+import { createPreviewRuntime } from 'previewhost';
 
 const runtime = await createPreviewRuntime({
   allowedRoots: [process.cwd()],
-  authorize: async () => true,
 });
 
 try {
-  const spec = await loadPreviewSpec('./preview.yml');
-  const started = await runtime.start(spec);
-  const ready = await runtime.wait(spec.name, started.candidate.id);
+  const started = await runtime.start({
+    name: 'site',
+    type: 'static',
+    directory: resolve('site'),
+  });
+  const ready = await runtime.wait('site', started.candidate.id);
   if (ready.state !== 'ready') throw new Error(JSON.stringify(ready.error));
-  console.log(ready.url);
-  const response = await fetch(new URL('/message', ready.url));
+
+  const response = await fetch(ready.url);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  console.log(await response.json());
+  console.log(await response.text());
 } finally {
   await runtime.close();
 }
 ```
 
-Run it from that directory:
+Run the program from that directory:
 
 ```sh
 node preview.mjs
 ```
 
-The program starts both servers, requests the backend message through the frontend, then closes the runtime.
-`authorize: async () => true` permits every operation in this trusted example.
-In an application that accepts untrusted requests, supply an authorization decision for the actual operation.
+The program prints `<h1>Hello from Previewhost.</h1>` and stops the preview.
+`start` returns before startup finishes. `wait` follows the returned attempt ID until startup succeeds or fails.
+If the request fails, the `finally` block still closes the runtime.
+For a longer-lived preview, keep the runtime open until your application finishes with it.
 
-## Connect to an owner
+## Run your application
 
-Use `connectPreviewDaemon` for an existing daemon. Its client implements the same `PreviewApi` interface.
-Closing the client only ends its requests. `runtime.close()` stops owned previews, and `client.shutdown()` stops the daemon.
+The runtime accepts the same [spec types](api.md#specs) as the CLI and MCP: `static`, `command`, `attach`, and `environment`.
+Direct specs require absolute source paths within `allowedRoots`.
+To reuse a file, import `loadPreviewSpec` from `previewhost` and pass its result to `runtime.start`:
 
-See [Runtime and client](api.md#runtime-and-client) for connection configuration, authorization callbacks, and database requirements.
+```js
+const spec = await loadPreviewSpec('./preview.yml');
+```
+
+File paths resolve relative to the configuration file. See [Write preview.yml](recipes.md) for commands, readiness checks, and service connections.
+
+Native commands and managed databases require an `authorize` callback in `createPreviewRuntime`.
+The callback must decide whether to allow the requested operation. Without it, these operations fail with `EXECUTION_DENIED`.
+Managed databases also require `dataDirectory`, a private directory outside the source tree, and the [database prerequisites](databases.md#prepare-docker).
+See [runtime configuration](api.md#runtime-and-client) for callback arguments and selected inputs.
+
+## Connect to an existing daemon
+
+Use `connectPreviewDaemon` to control a daemon that already runs. It implements the same `PreviewApi` interface as the runtime.
+
+```js
+import { connectPreviewDaemon } from 'previewhost';
+
+const client = connectPreviewDaemon({
+  endpoint: 'http://127.0.0.1:9400',
+  tokenFile: '/absolute/private-directory/token',
+});
+
+try {
+  console.log(await client.list());
+} finally {
+  await client.close();
+}
+```
+
+Replace the endpoint and token path with those of your daemon.
+`client.close()` ends client requests and leaves previews active. `client.shutdown()` stops the daemon and its previews.

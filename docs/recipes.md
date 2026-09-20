@@ -1,145 +1,172 @@
-# Create or update a preview recipe
+# Write preview.yml
 
-A recipe uses the existing `PreviewSpec` format. Root `preview.yml` is the optional default.
-MCP spec objects and CLI JSON stdin work without a configuration file.
-Use the [API reference](api.md#specs) for fields and limits.
-This guide covers the decisions needed to adapt that format to a project.
+Describe your application's commands, readiness checks, and service connections in one file. The CLI and MCP can reuse it for each preview.
 
-## Inspect the project
+## Choose an input
 
-Read project instructions before choosing commands or changing files.
-Prefer root `preview.yml` if present. Treat invalid content as an error; do not silently use another file.
-Explicit alternate files or specs override the default. Do not merge recipes.
-Reuse the selected recipe. Preserve its name when continuing a preview with retained data.
+Save `preview.yml` at the project root for the default CLI and MCP workflow.
+The file is optional: MCP and library calls also accept a spec object, and the CLI accepts JSON stdin.
 
-Inspect package scripts, lockfiles, framework configuration, server entrypoints, and source directories.
-For each service, identify the working directory, start command, required dependencies, listener settings, and readiness route.
-Read configuration variable names without displaying secret values.
-Determine which commands load existing environment files and which values require explicit bindings.
+An explicit file or spec replaces the default input. Previewhost does not merge configurations or ignore an invalid root file.
+Source paths in a file resolve relative to that file. Direct MCP and library specs require absolute paths.
+JSON stdin paths resolve from the current directory.
 
-Use current task directories and worktrees supplied by the coding host.
-The coding host chooses installation, build, migration, and seed commands.
-Declare finite preparation as [setup jobs](jobs.md) when it belongs in preview startup.
-The coding host still owns source removal.
-Do not clone or reset source merely to create a preview.
-For shared output or overlapping processes, read the [worktree guide](worktrees.md#prepare-and-start).
+Use one YAML 1.2 document. Duplicate keys, aliases, tags, merge keys, and unknown fields are errors.
+For the complete schema and limits, see the [spec reference](api.md#specs).
 
-## Choose the smallest spec
+## Choose a preview type
 
-| Project requirement | Spec and maintained reference |
-| --- | --- |
-| Serve existing HTML/assets or prepared build output | `static`: [static quick start](#serve-a-static-page) and [static fields](api.md#specs). |
-| Start one HTTP application | `command`: [command recipe](../examples/command.json) and [framework configuration](integrations.md#framework-configuration). |
-| Expose an HTTP server already managed elsewhere | `attach`: [attachment fields and example](api.md#specs). Verify the existing listener first. |
-| Start connected HTTP services or use databases | `environment`: [bindings and service fields](api.md#environment-specs) and [frontend, backends, PostgreSQL, and Redis walkthrough](../examples/multi-repo/README.md). |
-| Preview existing task worktrees | Use the appropriate spec with the host's source paths. See the [worktree guide](worktrees.md) and [maintained recipe program](../examples/multi-repo/worktrees.mjs). |
+| What you need | Type | Required source |
+| --- | --- | --- |
+| Serve HTML, assets, or build output | `static` | A `directory` with prepared files |
+| Start one HTTP application | `command` | A `cwd` and a `command` array |
+| Use an HTTP server that already runs | `attach` | Its local HTTP `url` with an explicit port |
+| Connect services, jobs, or databases | `environment` | A `services` map and a primary HTTP service |
 
-Use `spa: true` only if the application needs an index fallback for client routes.
-Use a command preview when the task needs a development server, SSR, HMR, or server behavior.
-Keep an existing server attached when another owner manages its lifecycle.
-An environment groups services that need one preview lifecycle. Its primary service must serve HTTP.
-
-For databases, first determine whether the project expects existing data or a new isolated development database.
-If that decision is unknown, ask before creating or selecting a database.
-Owned PostgreSQL and Redis require the [database prerequisites](databases.md#prepare-docker).
-External database entries accept only the supported local connection forms described in the API reference.
-Do not substitute production credentials or infer permission to migrate, reset, or delete data.
+Use `command` for a development server, server-side rendering, or hot reload.
+An attached server stays under its original owner's control after preview stop.
+Background workers without HTTP readiness are not a supported service type.
+Use [setup jobs](jobs.md) for commands that finish, such as migrations.
 
 ## Serve a static page
 
-Use the [global CLI installation and runtime requirements](installation.md).
-This example needs no command execution permission or Docker.
-Create a sample page:
+For a project with prepared files in `site`, save this as root `preview.yml`:
+
+```yaml
+name: site
+type: static
+directory: ./site
+```
+
+`directory` must already exist. Previewhost serves its `index.html` for directory requests.
+If the application uses client-side routes, add `spa: true` to serve the root index for missing extensionless paths.
+Missing assets still return 404.
+
+Start this configuration with `previewhost start`. Static previews need no execution permission.
+Open the returned `url` to check the page. When you finish, run `previewhost stop site`.
+
+## Start an HTTP application
+
+Read the project's start script before you choose commands or flags.
+Install its dependencies before startup, or declare an intentional setup job.
+For a Node.js server that reads `PORT` and `HOST`, the configuration can be:
+
+```yaml
+name: app
+type: command
+cwd: .
+command: [node, server.mjs]
+readyPath: /health
+timeoutMs: 30000
+```
+
+This example assumes that `server.mjs` exists and serves `/health`.
+Change the command and readiness path to match your application.
+
+Commands use argument arrays without a shell. Put environment variables in `env`, not in shell assignments inside `command`.
+If startup needs several shell commands, use a project script.
+
+Previewhost supplies `PORT`, `HOST` (`127.0.0.1`), and `PREVIEW_URL`. These names are reserved and cannot appear in `env`.
+If the server ignores `PORT`, pass its port flag with `"{port}"` as the value.
+The server must use the assigned port and bind to loopback. Disable framework behavior that chooses another port automatically.
+See [framework configuration](integrations.md#framework-configuration) for Vite, Next.js, and Python examples.
+
+Readiness requires HTTP 200–399 headers from `readyPath`, which defaults to `/`.
+The check runs once at startup. It does not follow redirects or read the body.
+Choose a route that checks what the application needs, such as access to its database tables.
+
+## Connect services
+
+Use an environment when several services belong to one preview.
+This example assumes prepared `api` and `web` directories with Node.js servers that read `PORT` and `HOST`:
+
+```yaml
+name: shop
+type: environment
+primary: web
+services:
+  api:
+    type: command
+    cwd: ./api
+    command: [node, server.mjs]
+    readyPath: /health
+  web:
+    type: command
+    cwd: ./web
+    command: [node, server.mjs]
+    env:
+      API_URL: {service: api}
+```
+
+The `primary` field selects the service at the environment URL.
+The `service` binding supplies the API's connection URL and waits for API readiness before the web service starts.
+The web server must read `API_URL` for its backend requests. Previewhost does not rewrite application code.
+For a runnable example with both server files, use [First preview with the CLI](first-preview.md).
+
+| Connection | Binding | Effect |
+| --- | --- | --- |
+| A server calls another service | `{service: api}` | Supplies a local connection URL and adds a readiness dependency. |
+| Browser code calls an HTTP service | `{browserUrl: api}` | Supplies a stable `.localhost` alias without a readiness dependency. |
+| A service needs the primary page's numeric origin | `{publicUrl: web}` | Supplies the environment URL without a readiness dependency. |
+
+Public URLs can reach the previous application during replacement.
+For browser requests across origins, configure the receiving application's CORS policy.
+Native services must use `service` bindings: native DNS clients do not necessarily resolve browser aliases.
+
+## Supply configuration and credentials
+
+Use literal values for non-secret configuration:
+
+```yaml
+env:
+  NODE_ENV: development
+  API_TOKEN: {secret: "shop/dev/api-token"}
+```
+
+The `secret` binding names a stored Keychain value. Enter missing values through [private secret setup](secrets.md).
+The same exact reference shares one value across projects that approve it.
+Use a project-specific reference for credentials that must stay separate.
+
+`{fromEnv: NAME}` reads a value selected when the owner starts, through `--env NAME` or the library's `inputs`.
+Previewhost does not load `.env` files or pass arbitrary host values to commands. Your application can load its own environment files.
+
+For a database, choose [managed or external data](databases.md) before you add the service.
+If the application needs tables or initial records, add [migration and seed jobs](jobs.md).
+
+## Check and apply the file
+
+From the project directory, inspect the configuration:
 
 ```sh
-mkdir previewhost-static
-cd previewhost-static
-mkdir site
-printf '<h1>Hello from previewhost.</h1>\n' > site/index.html
+previewhost inspect
 ```
 
-Save this recipe as `preview.json` in that directory:
-
-```json
-{
-  "name": "site",
-  "type": "static",
-  "directory": "./site"
-}
-```
-
-Start the preview from that directory:
+Inspection checks the spec and source access. It does not run commands or prove that the application works.
+For trusted application commands, start with execution permission:
 
 ```sh
-previewhost start --file preview.json
+previewhost start --allow-exec
 ```
 
-The command starts a project owner automatically. No execution permission is needed for static files.
+Open the returned URL and check an application request across the connected services.
+If startup fails, read the attempt's logs before changing the configuration.
+See [startup troubleshooting](troubleshooting.md#startup-fails-or-times-out).
 
-Open the returned `url`. The page shows **Hello from previewhost.**
-After use, stop the preview and daemon:
+After editing the file, apply it to a running preview with:
 
 ```sh
-previewhost stop site
-previewhost shutdown
+previewhost replace
 ```
 
-## Verify commands and bindings
+The file is not watched. Replacement reads it again and keeps the current URL after successful startup.
+For a stopped preview, use `start`. Keep the same preview name to reuse its managed data.
 
-Use the project's verified start command and installed package manager.
-Read the script or command help before adding framework flags.
-Commands are argv arrays without shell expansion.
-Put environment assignments in `env`. Use existing project scripts for required command composition.
-Keep preparation outside the preview unless it is an intentional part of HTTP startup within the readiness deadline.
+## Save a configuration from MCP
 
-Make the server honor injected `PORT` and `HOST`, or verified loopback/port arguments with `{port}`.
-Do not override `PORT`, `HOST`, or `PREVIEW_URL` in `env`.
-Do not invent a fixed port for a managed command.
-For attachment, verify the actual existing HTTP port instead.
-For framework-specific host checks or browser origins, use the [framework guide](integrations.md#framework-configuration).
+Ask your agent to save the spec after it works. `preview_save_config` creates root `preview.yml` from that spec.
+The dashboard also offers **Save as preview.yml** for a retained attempt.
 
-Choose a real readiness route that returns HTTP 200–399 when the service is usable.
-Readiness checks headers once during startup. They do not follow redirects or inspect response bodies.
-Verify the returned page separately after readiness.
-Choose a supported timeout based on the application's startup behavior, not repeated blind increases.
-
-Use literals only for non-secret configuration.
-Use `{fromEnv: NAME}` for a value selected by the daemon owner.
-Use `{secret: ID}` for a stored credential and the [private-entry workflow](api.md#stored-secrets) for approval and missing values.
-For new bindings, choose a project-specific reference: `API_SECRET: {secret: "my-project/dev/api"}`.
-Here, `API_SECRET` is the application variable. `my-project/dev/api` is the stored Keychain reference.
-Preserve existing references. Reuse an exact reference across projects or worktrees only for intentional sharing.
-A generic stored reference such as `API_SECRET` can select an unintended existing value after approval.
-previewhost does not automatically load `.env` files or inherit arbitrary host values.
-
-For inter-service connections, select bindings from the [environment reference](api.md#environment-specs).
-`{service: NAME}` waits for the referenced service and supplies its candidate connection URL.
-Browser/public URL bindings supply stable routes without readiness dependencies.
-Avoid service-reference cycles. Verify which URLs the browser and native services actually need.
-
-## Resolve unknowns and validate
-
-Infer mechanical details from project evidence, then verify them.
-Ask for missing product choices that affect the result: target application, database/data ownership, or intended public-facing service.
-Ask the owner to resolve missing permissions, selected inputs, and secret IDs.
-Do not ask for secret values in chat.
-
-Keep the prepared spec in the task until the user requests a save. MCP `preview_save_config({project, spec})` creates root `preview.yml` explicitly.
-It validates source scope and declarative structure, preserves reference bindings, and never resolves values or starts code.
-Existing files produce `ALREADY_EXISTS`; use the host editor for requested updates, then validate them.
-Do not serialize inspection output, which omits literal environment bindings. Report external source paths as nonportable.
-File-based source paths resolve relative to that recipe, not the terminal directory.
-For MCP or direct library calls, resolve source paths to absolute paths first.
-Do not maintain a second schema or change working application configuration to fit an unverified recipe.
-
-Inspect before startup. Inspection works offline when no owner exists.
-For trusted native code, cold CLI startup needs `--allow-exec`, or the same flag in the MCP registration.
-Then start it within the task's authorization and wait for the exact attempt.
-Fetch the resulting URL and verify expected application content or behavior.
-For connected services, verify a representative request across the required services.
-Use logs to diagnose failure, then correct the underlying command, binding, or prerequisite.
-After a timeout or disconnection, inspect current status before retrying a mutation.
-
-Report any saved recipe path, the URL check, and any missing prerequisites or unverified behavior.
-When cleanup is requested, stop the preview and verify cleanup completes.
-Preserve retained data and externally owned services.
+Both operations preserve references without resolving secret values, ports, or service URLs.
+Paths inside the project become relative. External source paths remain absolute and are not portable to another machine.
+Saving does not change the running preview or overwrite an existing file.
+To change an existing file, edit it and inspect it again.

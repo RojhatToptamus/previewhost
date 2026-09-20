@@ -2,9 +2,10 @@
 export const pageSources = [
   ['welcome', 'Introduction', 'Start', 'docs/introduction.md'],
   ['installation', 'Installation', 'Start', 'docs/installation.md'],
-  ['first-preview', 'Your first preview', 'Start', 'docs/first-preview.md'],
+  ['first-preview', 'CLI quickstart', 'Start', 'docs/first-preview.md'],
   ['mcp', 'MCP setup', 'Start', 'docs/mcp.md'],
-  ['configuration', 'Configuration', 'Guides', 'docs/recipes.md'],
+  ['library', 'Node.js library', 'Start', 'docs/library.md'],
+  ['configuration', 'Write preview.yml', 'Guides', 'docs/recipes.md'],
   ['services-and-jobs', 'Services and jobs', 'Guides', 'docs/jobs.md'],
   ['databases', 'Databases', 'Guides', 'docs/databases.md'],
   ['secrets', 'Secrets', 'Guides', 'docs/secrets.md'],
@@ -12,7 +13,6 @@ export const pageSources = [
   ['dashboard', 'Dashboard', 'Guides', 'docs/dashboard.md'],
   ['troubleshooting', 'Troubleshooting', 'Help', 'docs/troubleshooting.md'],
   ['reference', 'API and CLI', 'Reference', 'docs/api.md'],
-  ['library', 'Node.js library', 'Reference', 'docs/library.md'],
   ['integrations', 'Integrations', 'Reference', 'docs/integrations.md'],
   ['security', 'Security and limits', 'Reference', 'docs/security.md'],
 ].map(([id, label, group, source]) => ({ id, label, group, source }));

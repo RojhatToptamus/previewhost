@@ -8,44 +8,32 @@
       <img src="https://img.shields.io/npm/v/previewhost.svg?style=flat-square" alt="NPM version" />
     </a>
   </p>
-previewhost runs local preview environments for applications with multiple services.
-An environment can connect frontends, backends, and PostgreSQL or Redis databases across repositories and Git worktrees.
-
-Use previewhost when several coding agents or worktrees need separate running copies of the same application.
-Each task gets its own service ports and connections, without manual port assignments or changes to service URLs.
-
-Define services, commands, and connections in optional root `preview.yml`, or supply a spec directly through MCP or JSON stdin.
-previewhost runs setup jobs, then starts dependent services and waits for readiness.
-Use explicit [migration and seed jobs](docs/jobs.md) instead of embedding setup in server commands.
+Previewhost runs local previews of applications and their services.
+Use it to try changes in separate worktrees or connect a frontend, APIs, and local databases across repositories.
+It assigns ports, supplies service URLs, and runs setup jobs before dependent services start.
 
 When you replace a preview, its local URL stays the same.
-New requests switch to the replacement services only after they pass readiness checks.
+New requests switch only after the replacement services pass readiness checks.
+Stop ends owned processes and retains managed database data.
 
 ![Previewhost dashboard showing a frontend, API, PostgreSQL, Redis, and completed migration and seed jobs](./assets/dashboard.png)
-
-Control environments through the CLI, MCP tools, or an embedded Node.js library:
-
-- [CLI](docs/api.md#cli): control previews from a terminal or script.
-- [MCP](docs/mcp.md): give an agent tools to control previews.
-- [Library](docs/library.md): manage previews inside your Node.js application.
-- [Dashboard](docs/dashboard.md): review worktrees, open apps, inspect failures, and stop or restart previews.
-- [Optional agent skill](https://github.com/RojhatToptamus/previewhost/blob/main/skills/previewhost/SKILL.md): give an agent instructions and recipe references for the CLI or MCP.
 
 ## Get started
 
 Previewhost supports macOS and requires Node.js 22.23 or later.
-Stored secrets and managed databases require macOS 13 or later.
-Linux and Windows remain unverified.
+Stored secrets and managed databases require macOS 13 or later. Linux and Windows remain unverified.
 
-```sh
-npm install -g previewhost
-```
+Choose the interface you need:
 
-Follow [Your first preview](docs/first-preview.md) to run a frontend connected to a backend.
-The example includes both server files and needs no Docker or application packages.
-For a coding agent, follow [MCP setup](docs/mcp.md).
+| Interface | Guide |
+| --- | --- |
+| Coding agent | [MCP setup](docs/mcp.md): register a client and ask it to preview your application. |
+| Terminal | [First preview with the CLI](docs/first-preview.md): run a frontend and backend, replace them, and stop them. |
+| Node.js program | [Node.js library](docs/library.md): start a runtime, request a page, and close it. |
 
-From a project with root `preview.yml`, the main commands are:
+Each guide includes its installation steps. The [introduction](docs/introduction.md) explains how previews, environments, and project owners work.
+
+For a project with root `preview.yml` and the global CLI installed:
 
 ```sh
 previewhost inspect
@@ -53,20 +41,17 @@ previewhost start --allow-exec
 previewhost dashboard
 ```
 
-`--allow-exec` permits trusted commands and managed database operations with your user permissions.
-It provides no sandbox. The dashboard opens in your browser and needs its terminal to remain open.
-Closing the dashboard does not stop previews.
+`--allow-exec` permits trusted commands and managed database operations with your user permissions, without a sandbox.
+The dashboard opens in your browser and needs its terminal to remain open. Closing it does not stop previews.
 
 ## Documentation
-
-Start with the [introduction](docs/introduction.md) for the workflow and product limits.
 
 | Task | Guide |
 | --- | --- |
 | Install or update Previewhost | [Installation](docs/installation.md) |
-| Run a complete example | [Your first preview](docs/first-preview.md) |
+| Run a complete example | [First preview with the CLI](docs/first-preview.md) |
 | Connect a coding agent | [MCP setup](docs/mcp.md) |
-| Describe your application | [Configuration](docs/recipes.md) |
+| Describe your application | [Write preview.yml](docs/recipes.md) |
 | Run services, migrations, and seeds | [Services and jobs](docs/jobs.md) |
 | Connect or manage local data | [Databases](docs/databases.md) |
 | Supply private credentials | [Secrets](docs/secrets.md) |
@@ -87,6 +72,6 @@ MCP registration and skill installation are separate operations.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for source builds and verification.
 The [documentation website](https://github.com/RojhatToptamus/previewhost/blob/main/website/README.md) renders the same Markdown guides with
 search, page outlines, and light and dark themes. Run `npm run dev:docs` after installing
-repository dependencies. Its static build and screenshots are excluded from the npm package.
+repository dependencies. Website code and build output are excluded from the npm package. The bundled agent skill includes its referenced guides and product screenshots.
 
 See [NOTICE](NOTICE) for attribution and [LICENSE](LICENSE) for the MIT license.

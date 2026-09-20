@@ -305,8 +305,20 @@ Use its actual start command, dependencies, environment variables, and readiness
 Add each source root to the daemon with repeated `--root` arguments.
 Keep `service` bindings for native connections and browser URL bindings for browser calls.
 
-For this shared-notes layout, the [worktree guide](../../docs/worktrees.md#shared-notes-task-recipe) shows the existing recipe helper.
-That helper requires a source build for its library import.
+For this shared-notes layout, [build the Previewhost source](../../CONTRIBUTING.md#build-and-install-a-tarball) before using the recipe helper.
+From the Previewhost repository root, print a spec for existing task directories:
+
+```sh
+node examples/multi-repo/worktrees.mjs \
+  --name task-notes-42 \
+  --frontend /absolute/task-worktrees/frontend-task \
+  --backend /absolute/task-worktrees/backend-task
+```
+
+Replace both paths. The frontend directory must contain `server.mjs`. The backend must contain `api/` and `reporting/` with their dependencies installed.
+The helper prints JSON without preparing source or starting a preview.
+Pass that JSON to `previewhost inspect --file -` or `previewhost start --file -`, with the connection arguments for your daemon.
+See [Worktrees](../../docs/worktrees.md) for project selection and cleanup.
 For a different application, adapt YAML directly through the [recipe guide](../../docs/recipes.md).
 The [API reference](../../docs/api.md#environment-specs) lists all supported fields.
 

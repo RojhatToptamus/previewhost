@@ -48,9 +48,10 @@ For a local package, use its absolute `node_modules/previewhost/dist/cli.js` pat
 
 Without an explicit connection, CLI uses the canonical project root. MCP uses the tool call's `project` or registration's `--project` default.
 Check that the selected path is this chat's actual worktree.
-Read/status/cleanup operations never start a missing owner; inspect works offline.
+Read/status/cleanup operations never start a missing owner. Inspect works offline.
+
 Start or secret setup can create the owner with the required current launch flags, such as `--allow-exec`.
-A living owner with incompatible settings is left unchanged. To apply new options, explicitly shut down only that project:
+An owner with incompatible configuration stays unchanged. To apply new options, explicitly shut down only that project:
 
 ```sh
 previewhost shutdown --project /absolute/project
@@ -58,7 +59,7 @@ previewhost shutdown --project /absolute/project
 
 Use its actual path and omit launch overrides such as `--root`.
 Shutdown stops that owner's previews and ends dynamic secret approvals. Stored values and managed data remain.
-Other project owners are unaffected. Restart with the corrected registration and reapprove secrets when prompted.
+Other project owners are unaffected. Restart with the corrected registration. If private setup requests secret access again, approve the intended references.
 
 For `SOURCE_DENIED` with global registration, ask the agent to call `preview_access` for its actual project and dependency directories.
 For explicitly restricted registrations, use a matching `--root` for the repository itself, not its parent folder.
@@ -66,8 +67,9 @@ That restriction includes its registered Git worktrees.
 Do not copy sources into another directory or substitute another project to bypass the denial.
 
 After a crash, `CLEANUP_INCOMPLETE` names the retained connection file.
-Retain sources and verify old application/process-group cleanup, using the existing recovery checks below.
+Retain sources and check old application/process-group cleanup, using the existing recovery checks below.
 The record's PID is a diagnostic clue, not authority to kill a process. An absent owner does not prove its children stopped.
+
 Only after cleanup is confirmed, remove that project's `connection.json` and retry. Keep the permanent `.lock` inode.
 Clean shutdown handles record removal automatically and retains stored values and managed data.
 
@@ -113,11 +115,8 @@ This message alone does not prove that a person canceled the call.
 Codex 0.146.0 `exec` canceled startup elicitation before dispatch with
 `approval_policy="never"` and `approvals_reviewer="auto_review"`.
 
-For the tested automatic-review path, use `on-request`, `auto_review`, and an enforceable sandbox.
-Keep the relevant tool approval requirements enabled.
-Check that review events and decisions occur.
-See the [tested approval configurations](integrations.md#mcp-approvals).
-The [Codex Desktop result](integrations.md#codex-desktop) has a separate UI access blocker.
+Check the client's approval policy and the reason for cancellation.
+[Recorded client checks](integrations.md#tested-clients) apply only to their listed versions and modes.
 
 For a reviewer denial, read the review rationale.
 For a pending client approval, approve the specific operation through that client.
@@ -125,18 +124,11 @@ The daemon still requires separate permission for native execution.
 
 ## An MCP client waits for approval
 
-Check the pending tool name and arguments before approval.
-The tested clients used these per-request controls:
-
-| Client | Control | Observed requirement |
-| --- | --- | --- |
-| Cursor IDE | **Run** or **Skip** | Both stop calls required approval |
-| Claude Code | **Yes** | Each start and stop required approval |
-| OpenCode | **Allow once** | Each start and stop required approval |
-
-These prompts appeared before dispatch to the daemon.
-See [client versions and configurations](integrations.md) for the conditions.
-Client approval does not grant the daemon's native execution permission.
+Check the pending tool name and arguments in your client.
+If you want the operation to proceed, approve that request there.
+The call cannot reach Previewhost until client approval completes.
+Client approval does not grant execution permission to the project owner or select stored secrets.
+See [MCP setup](mcp.md).
 
 ## Startup fails or times out
 
@@ -162,16 +154,18 @@ For environments, status includes `active.services`, `candidate.services`, or `l
 Each service reports its state and error. Logs include service prefixes.
 If a dependency fails to start, services that need it cannot start.
 
-For a missing selected input, supply it to the daemon with `serve --env NAME`.
+For a missing selected input, select its current value at owner startup with `--env NAME`.
 Only selected values reach `{fromEnv: NAME}` bindings.
 previewhost does not load `.env` files.
 YAML files require one document without aliases, tags, or merge keys.
 
 Managed databases require private data storage and cached local Docker images.
 Automatic owners default to separate private storage per project. Foreground `serve` requires `--data-dir`.
+
 If an existing automatic owner reports missing `dataDirectory`, upgrade Previewhost and explicitly shut down that project owner before retrying.
 Restarting the MCP client alone does not restart its owner. See [owner restart instructions](#the-client-cannot-find-the-daemon).
 See the [database example](../examples/multi-repo/README.md).
+
 External database URLs require `127.0.0.1`, an explicit port, and a valid database path.
 A reachable TCP port does not prove successful authentication.
 
@@ -197,17 +191,21 @@ A daemon restart loses the process records needed for cleanup. It cannot identif
 
 ## Stored secrets are missing or inaccessible
 
-For `SECRET_REQUIRED` or unselected names, use `previewhost secrets setup --allow-exec` with root `preview.yml`, an explicit file, or JSON stdin; MCP uses `preview_secrets_setup` with `file` or `spec`.
+For `SECRET_REQUIRED` or unselected references, follow [private secret setup](secrets.md#approve-and-enter-values).
 The private owner form first approves access to unselected names, then collects missing values. Existing values are reused.
 Save does not start an application.
+
 Check `previewhost secrets status REQUEST_ID --timeout-ms 25000` before a startup retry.
 Use the original project path and re-read the current spec. If the agent turn ended, send “Secrets saved—continue”.
 
 If status is `canceled`, stop setup. Wait for an explicit user request before new setup or startup.
 Do not assume the user closed the browser accidentally. A canceled form cannot be reused.
+
 A wait timeout with `pending` or `saving` leaves setup in progress. Use the same request ID.
 If status is `expired`, ask before requesting a new form.
+
 If the browser cannot open, `browser: "failed"` reports launch failure. `setup --reopen` retries a pending form.
+
 For already selected names, use `previewhost secrets set ID` in a terminal, then request setup again.
 Terminal entry stores a value but does not approve runtime access. Unselected names still need private approval or explicit owner startup with `--secret ID`.
 
@@ -226,8 +224,9 @@ An updated helper can require approval. Do not grant all applications access.
 A missing helper requires a macOS package build.
 
 Partial saves retain completed writes.
-`partial` is terminal; its private form cannot accept another submission.
+`partial` is terminal. Its private form cannot accept another submission.
 After resolving the reported error, request fresh setup instead of waiting on the old result.
+
 An unknown write result can already have changed the item.
 Check public status before a fresh setup request for remaining entries.
 Presence alone does not prove that an explicit edit succeeded.
@@ -293,12 +292,15 @@ The runtime does not retain every previous attempt or log tail.
 
 For executable lookup errors, use the [PATH troubleshooting steps](#the-client-cannot-find-previewhost).
 
-Verify the project context and current launch authority. Only explicit endpoint/token mode needs a separately running daemon.
+Check the project context and current launch authority. Only explicit endpoint/token mode needs a separately running daemon.
+
 MCP stdout must contain only protocol messages.
 Remove shell wrappers that print banners to stdout.
 Check for `preview_start`, `preview_secrets_setup`, `preview_save_config`, and `preview_rerun_job`. Global mode also exposes `preview_access`.
+
 Read the tool's error envelope before a retry.
 After changing a registration's command or environment, reload the client workspace and reconnect the server.
-In Cursor 3.20.7, an edited registration showed connected tools while agent calls timed out; a new server name after reload restored calls.
-Verify an actual tool result before treating the connection indicator as proof. See the fresh [client check](integrations.md#cursor-ide).
+
+In Cursor 3.20.7, an edited registration showed connected tools while agent calls timed out. A new server name after reload restored calls.
+Check an actual tool result after reconnection. See the [recorded client check](integrations.md#cursor-ide).
 See [MCP client configuration](integrations.md#connect-an-mcp-client).
