@@ -318,6 +318,10 @@ from the URL immediately. The dashboard keeps it in per-tab `sessionStorage` to 
 Browser session restore may preserve this storage; tab closure is not a guaranteed
 revocation boundary. Stopping the dashboard process ends the capability's authority.
 If browser storage is unavailable, the fresh launch works only in page memory.
+The React dashboard loads only bundled scripts and fonts. Its CSP permits the inline
+presentation styles used by Radix and Sonner, but does not permit inline scripts,
+external connections, framing, or form navigation.
+
 Owner bearer tokens stay in the local dashboard process and never reach browser JavaScript.
 The dashboard requires exact Host/Origin headers and authenticated JSON POST actions;
 the existing owner control listener still rejects browser Origin headers.

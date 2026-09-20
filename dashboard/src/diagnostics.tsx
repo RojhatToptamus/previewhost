@@ -1,0 +1,376 @@
+import { useEffect, useRef, useState } from "react";
+import type {
+  AttemptSummary,
+  LogResult,
+  PreviewDescription,
+} from "../../src/contracts";
+import type { Mutate } from "./lib/api";
+import type { Entry } from "./lib/model";
+import { call, errorMessage } from "./lib/api";
+import { Button } from "./components/ui/button";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "./components/ui/native-select";
+import { Spinner } from "./components/ui/spinner";
+import {
+  Loading,
+  Notice,
+  Path,
+  SearchField,
+  Section,
+} from "./components/shared";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from "./components/ui/table";
+
+type Props = {
+  entry: Entry;
+  tab: "logs" | "configuration";
+  selected: AttemptSummary;
+  retained: AttemptSummary[];
+  selectAttempt: (id: string) => void;
+  source: string;
+  setSource: (source: string) => void;
+  query: string;
+  setQuery: (query: string) => void;
+  mutate: Mutate;
+  acting: boolean;
+};
+type Result = {
+  key: string;
+  logs?: LogResult;
+  description?: PreviewDescription;
+  error?: string;
+};
+
+export function Diagnostics({
+  entry,
+  tab,
+  selected,
+  retained,
+  selectAttempt,
+  source,
+  setSource,
+  query,
+  setQuery,
+  mutate,
+  acting,
+}: Props) {
+  const [result, setResult] = useState<Result>();
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const body = useRef<HTMLDivElement>(null);
+  const key = [entry.owner.id, entry.name, selected.id, tab, source].join("/");
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    void call<LogResult | PreviewDescription>(
+      {
+        action: tab === "logs" ? "logs" : "describe",
+        owner: entry.owner.id,
+        name: entry.name,
+        attemptId: selected.id,
+        ...(tab === "logs" && source ? { source } : {}),
+      },
+      controller.signal,
+    )
+      .then((value) => {
+        if (!controller.signal.aborted)
+          setResult(
+            tab === "logs"
+              ? { key, logs: value as LogResult }
+              : { key, description: value as PreviewDescription },
+          );
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setResult({ key, error: errorMessage(error) });
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [entry.owner.id, entry.name, selected.id, tab, source, key, revision]);
+  const current = result?.key === key ? result : undefined;
+  const logs = current?.logs;
+  const description = current?.description;
+  const matches =
+    logs && query
+      ? logs.text
+          .split("\n")
+          .filter((line) => line.toLowerCase().includes(query.toLowerCase()))
+      : [];
+  const output = logs
+    ? query
+      ? matches.join("\n") || "No matching lines in captured output."
+      : logs.text || "No output captured."
+    : "";
+  function search(value: string) {
+    setQuery(value);
+    body.current?.scrollTo(0, 0);
+  }
+  return (
+    <>
+      <div
+        className={
+          tab === "logs"
+            ? "diagnostic-toolbar logs-toolbar"
+            : "diagnostic-toolbar"
+        }
+      >
+        {tab === "logs" && (
+          <SearchField
+            value={query}
+            onChange={search}
+            label="Search logs"
+            disabled={!logs}
+          />
+        )}
+        <NativeSelect
+          aria-label="Diagnostic attempt"
+          value={selected.id}
+          onChange={(event) => selectAttempt(event.target.value)}
+        >
+          {retained.map((attempt) => (
+            <NativeSelectOption value={attempt.id} key={attempt.id}>
+              {attempt.id === entry.preview?.active?.id
+                ? "Serving"
+                : attempt.id === entry.preview?.candidate?.id
+                  ? "Starting"
+                  : "Latest"}{" "}
+              · {attempt.id.slice(0, 8)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {tab === "logs" && (
+          <NativeSelect
+            aria-label="Log source"
+            value={source}
+            onChange={(event) => setSource(event.target.value)}
+          >
+            <NativeSelectOption value="">All output</NativeSelectOption>
+            {(selected.type === "environment"
+              ? Object.keys(selected.services ?? {})
+              : [entry.preview!.name]
+            ).map((name) => (
+              <NativeSelectOption key={name} value={name}>
+                {name}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        )}
+        <Button
+          variant="outline"
+          className="refresh-details"
+          disabled={loading || acting}
+          onClick={() => setRevision((value) => value + 1)}
+        >
+          {loading && <Spinner data-icon="inline-start" />}
+          {loading ? "Refreshing…" : "Refresh"}
+        </Button>
+        {tab === "logs" && (
+          <p role="status" className="log-note">
+            {logs
+              ? query
+                ? `${matches.length} matching ${matches.length === 1 ? "line" : "lines"}`
+                : "Captured output"
+              : "Output unavailable"}
+            {logs?.truncated ? " · Earlier output omitted" : ""}
+          </p>
+        )}
+      </div>
+      <div
+        className={
+          tab === "logs" && logs
+            ? "scroll-panel log-panel"
+            : "scroll-panel diagnostic-body"
+        }
+        ref={body}
+        tabIndex={0}
+        role="region"
+        aria-label={tab === "logs" ? "Log output" : "Configuration details"}
+        aria-busy={loading}
+      >
+        {current?.error ? (
+          <Notice title="Details unavailable" error>
+            {current.error}
+          </Notice>
+        ) : !current ? (
+          <Loading />
+        ) : tab === "logs" ? (
+          <pre className="logs">{output}</pre>
+        ) : (
+          description && (
+            <Configuration entry={entry} description={description} />
+          )
+        )}
+      </div>
+      {tab === "configuration" && description && (
+        <div className="save-row">
+          <p>
+            Save this attempt as preview.yml. Existing files are never
+            overwritten.
+          </p>
+          <Button
+            variant="outline"
+            disabled={acting || loading}
+            onClick={() =>
+              void mutate<{ file: string; externalSources: string[] }>(
+                {
+                  action: "saveConfiguration",
+                  owner: entry.owner.id,
+                  name: entry.name,
+                  attemptId: selected.id,
+                },
+                (result) =>
+                  `Saved ${result.file}. The running preview is unchanged.` +
+                  (result.externalSources.length
+                    ? " Sources outside this project keep absolute paths: " +
+                      result.externalSources.join(", ")
+                    : ""),
+              )
+            }
+          >
+            Save as preview.yml
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Configuration({
+  entry,
+  description,
+}: {
+  entry: Entry;
+  description: PreviewDescription;
+}) {
+  const keys = new Set([
+    ...description.envKeys,
+    ...(description.secrets ?? []).flatMap((secret) =>
+      secret.bindings.map(
+        (binding) =>
+          (binding.service ? binding.service + "." : "") + binding.key,
+      ),
+    ),
+  ]);
+  const spec = description.spec;
+  return (
+    <>
+      <p className="text-muted-foreground">
+        Read-only configuration. Stored values are not included.
+      </p>
+      <Section title="Environment variables">
+        <div className="data-table env-table">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Reference</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[...keys].map((key) => {
+                const secret = description.secrets?.find((secret) =>
+                  secret.bindings.some(
+                    (binding) =>
+                      (binding.service ? binding.service + "." : "") +
+                        binding.key ===
+                      key,
+                  ),
+                );
+                const [service, envKey] = key.split(".");
+                const binding =
+                  spec.type === "environment"
+                    ? spec.services[service]?.bindings?.[envKey]
+                    : undefined;
+                return (
+                  <TableRow key={key}>
+                    <TableCell>
+                      <code>{key}</code>
+                    </TableCell>
+                    <TableCell>
+                      {secret
+                        ? "Secret"
+                        : binding
+                          ? Object.keys(binding)[0]
+                          : "Literal"}
+                    </TableCell>
+                    <TableCell>
+                      <code>
+                        {secret
+                          ? secret.id +
+                            (secret.selected
+                              ? " · approved for this owner"
+                              : " · approval required")
+                          : binding
+                            ? String(Object.values(binding)[0])
+                            : "Not included"}
+                      </code>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!keys.size && (
+                <TableRow>
+                  <TableCell colSpan={3}>
+                    No environment variables declared.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </Section>
+      {entry.owner.configuration && (
+        <p className="text-muted-foreground">
+          preview.yml exists. This view shows the selected runtime attempt.
+        </p>
+      )}
+      <Section title="Service definitions">
+        {spec.type === "environment" && (
+          <div className="definitions">
+            {Object.entries(spec.services).map(([name, service]) => (
+              <div key={name} className="definition-row">
+                <div className="flex items-center gap-3">
+                  <strong>{name}</strong>
+                  <span className="text-muted-foreground">{service.type}</span>
+                </div>
+                {service.command && (
+                  <pre>{JSON.stringify(service.command)}</pre>
+                )}
+                {!!service.dependsOn?.length && (
+                  <p className="text-muted-foreground">
+                    After: {service.dependsOn.join(", ")}
+                  </p>
+                )}
+                {service.run && (
+                  <p className="text-muted-foreground">
+                    {service.run === "once"
+                      ? "Once per retained environment; explicit rerun required after failure."
+                      : "Runs on every start and replacement."}
+                  </p>
+                )}
+                {(service.cwd || service.directory) && (
+                  <Path value={service.cwd ?? service.directory!} />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <details>
+          <summary>Full requested configuration</summary>
+          <pre className="configuration">{JSON.stringify(spec, null, 2)}</pre>
+        </details>
+      </Section>
+    </>
+  );
+}

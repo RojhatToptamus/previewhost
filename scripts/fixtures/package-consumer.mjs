@@ -50,7 +50,7 @@ try {
   const inventory = (await readdir(root, { recursive: true, withFileTypes: true }))
     .filter((entry) => !entry.isDirectory())
     .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1));
-  const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|dist\/fonts\/(?:geist(?:-mono)?\.woff2|LICENSE\.txt)|dist\/skills\/previewhost\/(?:SKILL\.md|references\/.+)|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
+  const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|dist\/dashboard\/(?:index\.html|dashboard\.(?:js|css)|LICENSES\.md)|dist\/ui-tokens\.css|dist\/fonts\/(?:geist(?:-mono)?\.woff2|LICENSE\.txt)|dist\/skills\/previewhost\/(?:SKILL\.md|references\/.+)|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
   for (const file of inventory) {
     assert(allowed.test(file) && !file.includes('.test.'), `Unexpected packaged file: ${file}`);
   }
@@ -63,6 +63,15 @@ try {
   const { startDashboard } = await import(pathToFileURL(join(root, 'dist/dashboard.js')).href);
   const dashboard = await startDashboard({ discover: async () => [] });
   try {
+    const html = await (await fetch(dashboard.endpoint)).text();
+    assert.match(html, /type="module"/);
+    for (const file of ['dashboard.js', 'dashboard.css']) {
+      assert(html.includes('/' + file));
+      const response = await fetch(`${dashboard.endpoint}/${file}`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(join(root, 'dist/dashboard', file)));
+    }
+    assert.match(await readFile(join(root, 'dist/dashboard/LICENSES.md'), 'utf8'), /react/);
     for (const file of ['geist.woff2', 'geist-mono.woff2']) {
       const response = await fetch(`${dashboard.endpoint}/fonts/${file}`, { signal: AbortSignal.timeout(2000) });
       assert.equal(response.status, 200);
@@ -72,14 +81,14 @@ try {
       assert.deepEqual(bytes, await readFile(join(root, 'dist/fonts', file)));
     }
   } finally { await dashboard.close(); }
-  record('installed-dashboard-fonts-and-license');
+  record('installed-dashboard-assets-fonts-and-license');
   const skill = await readFile(join(root, 'dist/skills/previewhost/SKILL.md'), 'utf8');
   for (const [, reference] of skill.matchAll(/\]\((references\/[^)#]+)(?:#[^)]*)?\)/g)) {
     assert((await stat(join(root, 'dist/skills/previewhost', reference))).isFile(), `Missing skill reference: ${reference}`);
   }
   assert.deepEqual(manifest.bin, { previewhost: './dist/cli.js' });
   for (const hook of ['preinstall', 'install', 'postinstall']) assert.equal(manifest.scripts[hook], undefined);
-  for (const extra of ['typescript', '@types/node', '@modelcontextprotocol/client']) await assert.rejects(stat(join(directory, 'node_modules', extra)));
+  for (const extra of ['typescript', '@types/node', '@modelcontextprotocol/client', 'react', 'react-dom', 'vite', 'tailwindcss', 'radix-ui', 'sonner']) await assert.rejects(stat(join(directory, 'node_modules', extra)));
   assert((await stat(binary)).mode & 0o111);
   await mkdir(site, { recursive: true });
   await writeFile(join(site, 'index.html'), 'packaged-static');

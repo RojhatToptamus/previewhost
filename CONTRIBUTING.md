@@ -48,6 +48,35 @@ It never reads personal credentials.
 For tests that open managed data or secrets, use `src/testSupport/keychain.ts`.
 The production binary accepts no test Keychain selector.
 
+## Dashboard development
+
+The React app lives in `dashboard/src/`. Vite bundles it into the CLI package;
+users do not run a frontend development server. Tailwind maps the shared
+`src/ui-tokens.css` palette to shadcn's semantic colors.
+
+```sh
+npm run build
+node dist/cli.js dashboard
+```
+
+After frontend edits, run `npm run build:dashboard` and reopen the dashboard
+command to load the new assets. Closing a dashboard leaves previews running.
+Run `npm run typecheck` for both the runtime and React app.
+
+Use the existing components in `dashboard/src/components/ui/`; add shadcn
+components through the CLI and remove unused additions. Browser-check real
+API interactions, keyboard navigation, both themes, and narrow screens.
+The focused browser regression runs separately from the default Node suite:
+
+```sh
+npx playwright install chromium
+npm run test:dashboard
+```
+
+Set `PREVIEWHOST_TEST_BROWSER` to a browser executable to use Brave instead.
+The test creates disposable projects and real processes; it never reads personal
+secrets. It disables traces and automatic screenshots to keep launch capabilities private.
+
 ## Build and install a tarball
 
 Source builds require the tools listed in [Set up development](#set-up-development).

@@ -4,8 +4,11 @@ await chmod(new URL('../dist/cli.js', import.meta.url), 0o755);
 
 // Both compiled entry points serve the same bundled UI fonts.
 for (const output of ['dist', '.local/test-build']) {
+  await cp(new URL('../src/ui-tokens.css', import.meta.url), new URL(`../${output}/ui-tokens.css`, import.meta.url));
   await cp(new URL('../src/fonts/', import.meta.url), new URL(`../${output}/fonts/`, import.meta.url), { recursive: true });
 }
+
+await cp(new URL('../dist/dashboard/', import.meta.url), new URL('../.local/test-build/dashboard/', import.meta.url), { recursive: true });
 
 // Materialize the maintained skill's source links for npm, which excludes symlinks.
 const skill = new URL('../dist/skills/previewhost/', import.meta.url);
