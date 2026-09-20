@@ -45,7 +45,7 @@ export function state(entry: Entry) {
     return {
       label: "Cleanup incomplete",
       tone: "error",
-      note: "Cleanup needs attention",
+      note: "",
     };
   if (pending(entry).length)
     return {
@@ -55,21 +55,21 @@ export function state(entry: Entry) {
     };
   if (p?.candidate || p?.busy)
     return {
-      label: "Starting",
+      label: p.candidate ? "Starting" : "Working",
       tone: "neutral",
       note: p.active
-        ? "Previous attempt serving"
-        : p.busy
-          ? "Operation in progress"
-          : "Startup checks in progress",
+        ? p.candidate
+          ? "Previous attempt serving"
+          : "App serving"
+        : p.candidate
+          ? "Startup checks in progress"
+          : "",
     };
   if (p?.latest?.state === "failed")
     return {
       label: p.active ? "Update failed" : "Startup failed",
       tone: "error",
-      note: p.active
-        ? "Previous attempt serving"
-        : "Startup failed · not serving",
+      note: p.active ? "Previous attempt serving" : "Not serving",
     };
   if (!p && entry.owner.configuration?.error)
     return {
@@ -83,7 +83,7 @@ export function state(entry: Entry) {
       tone: "muted",
       note: requests(entry).some((r) => r.state === "canceled")
         ? "Private setup canceled"
-        : "No preview started",
+        : "",
     };
   if (p?.active)
     return {
@@ -93,7 +93,7 @@ export function state(entry: Entry) {
         ? "preview.yml needs attention · app serving"
         : p.latest?.state === "canceled"
           ? "Update canceled · app serving"
-          : "Startup checks passed",
+          : "",
     };
   return {
     label: "Stopped",
@@ -103,7 +103,7 @@ export function state(entry: Entry) {
         ? "Startup canceled"
         : p?.data
           ? "Data retained"
-          : "Not running",
+          : "",
   };
 }
 export function shortProject(owner: Owner) {
@@ -141,19 +141,19 @@ export function hint(entry: Entry) {
   if (needsCleanup(p))
     return "Cleanup is incomplete; keep the source directories and retry cleanup before starting again.";
   if (pending(entry).length)
-    return "Values go to the macOS Keychain. Saving them does not start the app on its own.";
+    return "Saving secrets does not start the app.";
   if (p?.candidate)
     return p.active
       ? "Your app is still available; canceling affects only the pending update in this worktree."
-      : "The URL appears once startup checks pass. Cancelling affects only this worktree.";
+      : "The URL appears once startup checks pass. Canceling affects only this worktree.";
   if (p?.busy)
     return "An operation is in progress; wait for it to finish before changing this preview.";
   if (p?.active && p.latest?.state === "failed")
     return "Your previous app is still running.";
   if (p?.active)
     return p.data
-      ? "Every startup check passed. Stopping keeps your database data."
-      : "Every startup check passed. Stopping affects only this preview.";
+      ? "Stopping keeps your database data."
+      : "Stopping affects only this preview.";
   if (p?.latest?.state === "failed")
     return "Your app is not serving; resolve the startup error before retrying.";
   if (p?.latest?.state === "canceled")

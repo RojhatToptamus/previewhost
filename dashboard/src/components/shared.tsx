@@ -1,5 +1,5 @@
-import { useRef, type ReactNode } from "react";
-import { CopyIcon, SearchIcon, XIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { CheckIcon, CopyIcon, SearchIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Alert, AlertTitle, AlertDescription } from "./ui/alert";
@@ -39,15 +39,25 @@ export function CopyButton({
   value: string;
   label?: string;
 }) {
+  const [copied, setCopied] = useState(false);
+  const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    setCopied(false);
+    return () => clearTimeout(reset.current);
+  }, [value]);
   return (
     <Button
       variant="ghost"
       size="icon-sm"
-      aria-label={label}
-      title={label}
+      aria-label={copied ? "Copied" : label}
+      title={copied ? "Copied" : label}
       onClick={() => {
         void navigator.clipboard.writeText(value).then(
-          () => toast.success("Copied"),
+          () => {
+            clearTimeout(reset.current);
+            setCopied(true);
+            reset.current = setTimeout(() => setCopied(false), 2000);
+          },
           () =>
             toast.error(
               "Copy was unavailable. Select and copy the text instead.",
@@ -55,7 +65,10 @@ export function CopyButton({
         );
       }}
     >
-      <CopyIcon />
+      {copied ? <CheckIcon className="text-muted-foreground" /> : <CopyIcon />}
+      <span className="sr-only" role="status">
+        {copied ? "Copied" : ""}
+      </span>
     </Button>
   );
 }

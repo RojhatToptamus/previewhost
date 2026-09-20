@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { RefreshCwIcon } from "lucide-react";
 import type {
   AttemptSummary,
   LogResult,
@@ -13,6 +14,7 @@ import {
   NativeSelectOption,
 } from "./components/ui/native-select";
 import { Spinner } from "./components/ui/spinner";
+import { ScrollArea } from "./components/ui/scroll-area";
 import {
   Loading,
   Notice,
@@ -168,11 +170,14 @@ export function Diagnostics({
         <Button
           variant="outline"
           className="refresh-details"
+          aria-label={loading ? "Refreshing…" : "Refresh"}
           disabled={loading || acting}
           onClick={() => setRevision((value) => value + 1)}
         >
-          {loading && <Spinner data-icon="inline-start" />}
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading ? <Spinner /> : <RefreshCwIcon className="refresh-icon" />}
+          <span className="refresh-label">
+            {loading ? "Refreshing…" : "Refresh"}
+          </span>
         </Button>
         {tab === "logs" && (
           <p role="status" className="log-note">
@@ -180,7 +185,9 @@ export function Diagnostics({
               ? query
                 ? `${matches.length} matching ${matches.length === 1 ? "line" : "lines"}`
                 : "Captured output"
-              : "Output unavailable"}
+              : loading
+                ? "Loading output…"
+                : "Output unavailable"}
             {logs?.truncated ? " · Earlier output omitted" : ""}
           </p>
         )}
@@ -213,10 +220,7 @@ export function Diagnostics({
       </div>
       {tab === "configuration" && description && (
         <div className="save-row">
-          <p>
-            Save this attempt as preview.yml. Existing files are never
-            overwritten.
-          </p>
+          <p>Existing files are never overwritten.</p>
           <Button
             variant="outline"
             disabled={acting || loading}
@@ -245,6 +249,14 @@ export function Diagnostics({
   );
 }
 
+const bindingLabels: Record<string, string> = {
+  secret: "Secret",
+  fromEnv: "Owner input",
+  service: "Service URL",
+  publicUrl: "Public URL",
+  browserUrl: "Browser URL",
+};
+
 function Configuration({
   entry,
   description,
@@ -268,7 +280,11 @@ function Configuration({
         Read-only configuration. Stored values are not included.
       </p>
       <Section title="Environment variables">
-        <div className="data-table env-table">
+        <ScrollArea
+          className="data-table env-table"
+          type="always"
+          aria-label="Environment variables"
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -301,20 +317,26 @@ function Configuration({
                       {secret
                         ? "Secret"
                         : binding
-                          ? Object.keys(binding)[0]
+                          ? bindingLabels[Object.keys(binding)[0]]
                           : "Literal"}
                     </TableCell>
                     <TableCell>
-                      <code>
-                        {secret
-                          ? secret.id +
-                            (secret.selected
-                              ? " · approved for this owner"
-                              : " · approval required")
-                          : binding
-                            ? String(Object.values(binding)[0])
-                            : "Not included"}
-                      </code>
+                      {secret ? (
+                        <>
+                          <code>{secret.id}</code>
+                          <p className="text-muted-foreground">
+                            {secret.selected
+                              ? "Approved for this owner"
+                              : "Approval required"}
+                          </p>
+                        </>
+                      ) : binding ? (
+                        <code>{String(Object.values(binding)[0])}</code>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          Not included
+                        </span>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -328,7 +350,7 @@ function Configuration({
               )}
             </TableBody>
           </Table>
-        </div>
+        </ScrollArea>
       </Section>
       {entry.owner.configuration && (
         <p className="text-muted-foreground">

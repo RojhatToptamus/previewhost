@@ -50,6 +50,9 @@ The production binary accepts no test Keychain selector.
 
 ## Dashboard development
 
+Follow [the dashboard design system](dashboard/DESIGN.md) for layout, components,
+interaction states, and copy.
+
 The React app lives in `dashboard/src/`. Vite bundles it into the CLI package;
 users do not run a frontend development server. Tailwind maps the shared
 `src/ui-tokens.css` palette to shadcn's semantic colors.

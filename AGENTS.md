@@ -1,5 +1,7 @@
 # Dashboard changes
 
+Read [`dashboard/DESIGN.md`](dashboard/DESIGN.md) before dashboard UI or copy changes.
+
 The dashboard uses React, Vite, Tailwind, and shadcn in `dashboard/src/`.
 Keep the shared palette, fonts, and sizing in `src/ui-tokens.css`; private setup
 uses these same tokens through `src/ui.ts`.

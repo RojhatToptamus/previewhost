@@ -210,7 +210,7 @@ export function App() {
               </EmptyState>
             </div>
           ) : selection === "secrets" ? (
-            <SecretManager revision={revision} query={query} />
+            <SecretManager revision={revision} />
           ) : error ? (
             <div className="page">
               <Notice title="Dashboard disconnected" error>
@@ -235,8 +235,7 @@ export function App() {
             ) : (
               <div className="page">
                 <Notice title="Project no longer listed">
-                  Its owner may have shut down. Start through your agent or CLI
-                  to reconnect.
+                  Start through your agent or CLI to reconnect.
                 </Notice>
               </div>
             )
@@ -247,10 +246,7 @@ export function App() {
                 <Loading>Connecting to local previews…</Loading>
               ) : !all.length ? (
                 <EmptyState title="No previews running">
-                  Ask your coding agent to start one. The preview URL appears
-                  here.
-                  <br />
-                  <code>Start a previewhost preview for this worktree.</code>
+                  Ask your agent to preview an application with Previewhost.
                 </EmptyState>
               ) : (
                 <>
@@ -265,7 +261,7 @@ export function App() {
                           ["error", "warning"].includes(state(e).tone),
                       ).length
                     }{" "}
-                    need attention
+                    to review
                   </p>
                   {!filtered.length ? (
                     <EmptyState title="No matching previews">
@@ -319,9 +315,7 @@ function Navigation({
         <SearchField
           value={query}
           onChange={setQuery}
-          label={
-            selection === "secrets" ? "Search references" : "Search previews"
-          }
+          label="Search previews"
         />
         <SidebarMenu>
           <SidebarMenuItem>
@@ -349,12 +343,10 @@ function Navigation({
       </SidebarHeader>
       <SidebarContent aria-label="Projects and previews">
         {owners.map((owner) => {
-          const list = entries(owner).filter(
-            (entry) =>
-              selection === "secrets" ||
-              `${owner.project} ${entry.name ?? ""}`
-                .toLowerCase()
-                .includes(query.trim().toLowerCase()),
+          const list = entries(owner).filter((entry) =>
+            `${owner.project} ${entry.name ?? ""}`
+              .toLowerCase()
+              .includes(query.trim().toLowerCase()),
           );
           return list.length ? (
             <SidebarGroup key={owner.id}>
@@ -422,27 +414,32 @@ function Overview({
           {entries.map((entry) => (
             <TableRow key={entry.owner.id + "/" + (entry.name ?? "")}>
               <TableCell>
-                <strong>{entry.name ?? shortProject(entry.owner)}</strong>
+                <Button
+                  variant="link"
+                  className="preview-name"
+                  onClick={() => select(entry)}
+                >
+                  {entry.name ?? shortProject(entry.owner)}
+                </Button>
                 <Path value={entry.owner.project ?? "Unverified record"} />
               </TableCell>
               <TableCell>
                 <Status tone={entry.owner.error ? "error" : state(entry).tone}>
                   {entry.owner.error ? "Unavailable" : state(entry).label}
                 </Status>
-                <p className="text-xs text-muted-foreground">
-                  {entry.owner.error
-                    ? "Owner did not respond"
-                    : state(entry).note}
-                </p>
+                {(entry.owner.error || state(entry).note) && (
+                  <p className="text-xs text-muted-foreground">
+                    {entry.owner.error
+                      ? "Owner did not respond"
+                      : state(entry).note}
+                  </p>
+                )}
               </TableCell>
               <TableCell>
                 <div className="row-actions">
                   {entry.preview?.active && entry.preview.url && (
                     <AppLink url={entry.preview.url} />
                   )}
-                  <Button variant="outline" onClick={() => select(entry)}>
-                    Details
-                  </Button>
                 </div>
               </TableCell>
             </TableRow>

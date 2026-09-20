@@ -65,16 +65,12 @@ export function Activity(props: Props) {
         </Notice>
       ) : pending(entry).length ? (
         <Notice title="Private setup requested">
-          Approve access and enter any missing values in the separate private
-          form. Cancellation stays in that form.
+          Approve access or enter missing values in the private form. Cancel
+          there.
         </Notice>
       ) : !p?.candidate && latest?.state === "failed" && !failedJob ? (
         <Notice
-          title={
-            p?.active
-              ? "The update failed. Your previous version is still running."
-              : "Startup failed. Your app is not running."
-          }
+          title={p?.active ? "Update failed" : "Startup failed"}
           error
         >
           <p>
@@ -86,11 +82,7 @@ export function Activity(props: Props) {
         </Notice>
       ) : !p?.candidate && latest?.state === "canceled" ? (
         <Notice
-          title={
-            p?.active
-              ? "The update was canceled. Your previous version is still running."
-              : "Startup was canceled."
-          }
+          title={p?.active ? "Update canceled" : "Startup canceled"}
         >
           Nothing was started again automatically. Ask your agent to continue
           only when you are ready.
@@ -160,13 +152,13 @@ export function Activity(props: Props) {
                   : "Attempt " + attempt.state}
               </strong>
               <code className="attempt-id">{attempt.id}</code>
-              <p className={attempt.error ? "error" : "text-muted-foreground"}>
-                {attempt.error?.message ??
-                  (attempt.readyAt
-                    ? "Startup checks passed at " +
-                      new Date(attempt.readyAt).toLocaleTimeString()
-                    : "Started at the time shown.")}
-              </p>
+              {(attempt.error || attempt.readyAt) && (
+                <p className={attempt.error ? "error" : "text-muted-foreground"}>
+                  {attempt.error?.message ??
+                    "Startup checks passed at " +
+                      new Date(attempt.readyAt!).toLocaleTimeString()}
+                </p>
+              )}
             </div>
           </div>
         ))}
@@ -196,10 +188,6 @@ export function Activity(props: Props) {
       )}
       {!!requests(entry).length && (
         <Section title="Private setup">
-          <p className="text-muted-foreground">
-            Approval and values stay in the private form. Saving does not start
-            the application.
-          </p>
           {requests(entry).map((request) => (
             <div key={request.id} className="request">
               <strong>
@@ -214,9 +202,11 @@ export function Activity(props: Props) {
                   }[request.state]
                 }
               </strong>
-              <time>
-                Expires {new Date(request.expiresAt).toLocaleTimeString()}
-              </time>
+              {["pending", "saving"].includes(request.state) && (
+                <time>
+                  Expires {new Date(request.expiresAt).toLocaleTimeString()}
+                </time>
+              )}
               {request.state === "pending" && pending(entry).length > 1 && (
                 <Button
                   variant="outline"

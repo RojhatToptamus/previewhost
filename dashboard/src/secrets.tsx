@@ -21,16 +21,11 @@ import {
 import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Spinner } from "./components/ui/spinner";
-import { EmptyState, Loading, Notice } from "./components/shared";
+import { EmptyState, Loading, Notice, SearchField } from "./components/shared";
 
 type SecretList = { ids: string[]; truncated: boolean };
-export function SecretManager({
-  revision,
-  query,
-}: {
-  revision: number;
-  query: string;
-}) {
+export function SecretManager({ revision }: { revision: number }) {
+  const [query, setQuery] = useState("");
   const [list, setList] = useState<SecretList>();
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string>();
@@ -73,9 +68,7 @@ export function SecretManager({
   return (
     <div className="page secrets-page">
       <h1>Secret Manager</h1>
-      <p className="summary">
-        Stored Keychain references. Values are never shown.
-      </p>
+      <p className="summary">Stored values are never shown.</p>
       <p className="text-muted-foreground">
         Changes apply on the next start in every project using the reference.
       </p>
@@ -87,12 +80,20 @@ export function SecretManager({
         <Loading>Loading secret references…</Loading>
       ) : !list.ids.length ? (
         <EmptyState title="No stored secrets">
-          Ask your agent to preview an application. When it needs a secret,
-          enter the value in private setup. Its reference will appear here.
+          Add secrets through private setup when your agent requests them.
         </EmptyState>
       ) : (
         <section className="secret-section">
-          <h2 className="section-label">Stored references</h2>
+          <div className="secret-toolbar">
+            <SearchField
+              value={query}
+              onChange={setQuery}
+              label="Search references"
+            />
+            <span className="secret-count" role="status">
+              {ids.length} {ids.length === 1 ? "reference" : "references"}
+            </span>
+          </div>
           {list.truncated && (
             <p className="warning">
               Showing the first 128 references returned by Keychain. Additional
@@ -178,9 +179,7 @@ function SecretRow({
     try {
       await call(input);
       saved = true;
-      toast.success(
-        "Secret updated. Future starts use the new value; running apps are unchanged.",
-      );
+      toast.success("Secret updated. Running apps are unchanged.");
     } catch (error) {
       setError(
         error instanceof Error && error.cause

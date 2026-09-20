@@ -29,11 +29,17 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
   const urls: string[] = [];
   let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
   try {
-    for (const folder of ["first", "second"]) {
+    for (const folder of [
+      "first",
+      "second-worktree-with-a-long-feature-branch-directory",
+    ]) {
       const project = join(directory, folder);
       await mkdir(project);
       const runtime = await createPreviewRuntime({
         allowedRoots: [project],
+        inputs: {
+          PREVIEWHOST_DISPOSABLE_APPLICATION_REGION_REFERENCE: "local",
+        },
         authorize: () => true,
       });
       runtimes.push(runtime);
@@ -55,6 +61,18 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
             type: "command",
             cwd: project,
             dependsOn: ["migrate"],
+            env: {
+              APPLICATION_REGION: {
+                fromEnv: "PREVIEWHOST_DISPOSABLE_APPLICATION_REGION_REFERENCE",
+              },
+              APPLICATION_MODE: "disposable",
+              ...Object.fromEntries(
+                Array.from({ length: 24 }, (_, index) => [
+                  `OPTION_${index}`,
+                  "local",
+                ]),
+              ),
+            },
             command: [
               process.execPath,
               "-e",
@@ -141,11 +159,10 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.goto(launch).catch(() => {
       throw new Error("The authenticated dashboard could not open.");
     });
-    await expect(
-      page.getByRole("button", { name: "Details", exact: true }),
-    ).toHaveCount(2);
+    await expect(page.locator(".overview-table .preview-name")).toHaveCount(2);
     await page
-      .getByRole("button", { name: "Details", exact: true })
+      .locator(".overview-table")
+      .getByRole("button", { name: "app", exact: true })
       .first()
       .click();
     await expect(page.locator(".preview-title")).toContainText("Update failed");
@@ -153,6 +170,18 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(
       page.getByRole("link", { name: "Open app", exact: true }),
     ).toHaveAttribute("href", urls[0]);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("button", { name: "Copy URL", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Copied", exact: true }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      urls[0],
+    );
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Copy URL", exact: true }),
+    ).toBeVisible();
     const app = await context.newPage();
     await app.goto(urls[0]);
     await expect(app.locator("body")).toHaveText("first");
@@ -210,6 +239,37 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     ).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".logs")).toHaveCount(0);
     slowLogs = false;
+    // Reference content needs real reading room, not an action column's minimum width.
+    const bindingRow = page
+      .getByRole("row")
+      .filter({ hasText: "web.APPLICATION_REGION" });
+    const reference = bindingRow.getByRole("cell").nth(2);
+    expect((await reference.boundingBox())!.width).toBeGreaterThan(240);
+    expect((await bindingRow.boundingBox())!.height).toBeLessThan(100);
+    await expect(reference).toContainText(
+      "PREVIEWHOST_DISPOSABLE_APPLICATION_REGION_REFERENCE",
+    );
+    const envScroll = page.locator(
+      '.env-table [data-slot="scroll-area-viewport"]',
+    );
+    expect(
+      (await page.locator(".env-table").boundingBox())!.height,
+    ).toBeLessThanOrEqual(322);
+    expect(
+      await envScroll.evaluate(
+        (element) => element.scrollHeight > element.clientHeight,
+      ),
+    ).toBe(true);
+    const headingY = (await page.locator(".env-table thead").boundingBox())!.y;
+    await envScroll.evaluate((element) =>
+      element.scrollTo(0, element.scrollHeight),
+    );
+    expect(
+      await envScroll.evaluate((element) => element.scrollTop),
+    ).toBeGreaterThan(0);
+    expect((await page.locator(".env-table thead").boundingBox())!.y).toBe(
+      headingY,
+    );
     await page.getByRole("button", { name: "Save as preview.yml" }).click();
     await expect
       .poll(() =>
@@ -235,14 +295,18 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
         page.getByRole("button", { name: "Save as preview.yml" }),
       ).toBeInViewport();
     }
+    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+    await page
+      .getByRole("button", { name: "All previews", exact: false })
+      .click();
+    for (const path of await page.locator(".overview-table .path").all()) {
+      expect((await path.boundingBox())!.height).toBeLessThan(24);
+    }
     await page.setViewportSize({ width: 1360, height: 900 });
     await page
       .getByRole("button", { name: "All previews", exact: false })
       .click();
-    await page
-      .getByRole("button", { name: "Details", exact: true })
-      .nth(1)
-      .click();
+    await page.locator(".overview-table .preview-name").nth(1).click();
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Start preview", exact: true }),

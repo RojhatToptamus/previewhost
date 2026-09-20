@@ -168,7 +168,7 @@ export function Preview({
       {owner.error ? (
         <div className="page">
           <Notice title="Status unavailable" error>
-            {owner.error.message} Other projects remain available.
+            {owner.error.message}
           </Notice>
         </div>
       ) : (
