@@ -244,6 +244,21 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       } else if (method === 'info') {
         parse(requestSchemas.list, value);
         send(res, 200, { result: options.owner ? { ...options.owner, allowedRoots: runtime.sourceRoots() } : null });
+      } else if (method === 'remove') {
+        const p = parse(requestSchemas.remove, value);
+        // No await between checking private setup, removing history, and retiring an empty owner.
+        secrets.assertRemovable(p.name);
+        const removed = runtime.remove(p.name, p.attemptId);
+        const removedRequest = secrets.remove(p.name);
+        if (p.name !== undefined && !removed && !removedRequest) throw new PreviewError('NOT_FOUND', 'This preview entry is no longer available.');
+        if (options.owner && runtime.isEmpty() && secrets.isEmpty()) {
+          try { await stopRuntime(); send(res, 200, { result: null }); }
+          catch (error) { fail(res, error); }
+          finally {
+            if (res.destroyed || res.writableFinished) await closeControl();
+            else res.once('finish', () => { void closeControl(); });
+          }
+        } else send(res, 200, { result: null });
       } else if (method === 'shutdown') {
         parse(requestSchemas.list, value);
         try { await stopRuntime(); send(res, 200, { result: null }); }

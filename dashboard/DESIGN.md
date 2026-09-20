@@ -84,6 +84,15 @@ Align the header's sidebar trigger with the navigation icons below it. Use a 24p
 
 A preview name opens its details with one click. Keep the worktree path adjacent so previews with similar names remain distinguishable.
 
+Group search and the compact status filter between navigation and the scrolling list. Opening details preserves both.
+Order active work first, then entries that need attention, with stable path/name ordering.
+Each sidebar row has a separate action menu; using it must not navigate to that preview.
+Keep each action trigger inside its row, aligned with the preview name. Show the path
+and status below the name. Reuse the same actions in the overview and details.
+Every entry offers Recheck status and Remove entry. Removal explains blockers in its
+review; an unreachable owner never counts as stopped. The server rechecks cleanup
+evidence and rejects changed records before removal.
+
 Paths stay on one line. Let parent directories truncate while preserving the final segments at full contrast. Use the shared `Path` component; never use right-to-left text direction to fake truncation.
 
 ### View contracts
@@ -115,7 +124,8 @@ Compose the maintained components in `dashboard/src/components/ui/`. Reuse view-
 | Action / navigation action | `Button`, appropriate variant; native anchor for URLs |
 | Text or search input | `Input`, `InputGroup`, shared `SearchField` |
 | Labeled field and validation | `Field`, `FieldLabel`, `FieldDescription`, `FieldError` |
-| Small fixed choice list | `NativeSelect` |
+| Choice list | shadcn `Select`; no native dropdowns |
+| Preview actions | `DropdownMenu`, shared `PreviewMenu` |
 | View navigation | `Tabs`, `Sidebar`, mobile `Sheet` |
 | Tabular data | `Table` and its semantic children |
 | Bounded list | `ScrollArea` |
@@ -155,6 +165,8 @@ Use other truthful states when needed, including Startup failed, Configuration e
 Keep these consequences explicit at the relevant decision:
 
 - Stop retains managed database data. It affects only the selected preview.
+- Delete data erases named managed databases without restarting. Remove entry requires no remaining data or cleanup and keeps sources and saved secrets.
+- Removing the last entry closes an empty automatic owner and ends its private approvals. An offline data record contains no restart configuration.
 - Restart uses retained configuration and current source; it does not reload preview.yml.
 - Invalid YAML is an error, not permission to fall back silently.
 - Saving YAML is explicit and does not change the running preview. Existing files are not overwritten.

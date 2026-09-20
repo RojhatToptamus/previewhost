@@ -101,7 +101,7 @@ Automatic owners use the existing runtime, bearer-token client and daemon.
 The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewd/projects`.
 A SHA-256 digest of that path gives it a fixed-length filesystem address. It is not a configuration signature or permission grant.
 A permanent Darwin kernel lock prevents concurrent owners for one project. It is held through runtime cleanup.
-The connection file contains only endpoint, PID and project path, and is published after the listener is ready.
+The private connection file contains endpoint, PID, project path, data directory, and any explicit Docker socket. It is published after listener readiness.
 Clients authenticate with the existing private token, then verify the responding project and requested launch options.
 The file cannot authorize a new owner or restore browser-added name grants.
 
@@ -110,9 +110,21 @@ Omitted options can reuse a living owner; incompatible explicit options are reje
 Explicit endpoint/token mode never automatically starts or adopts an owner.
 An idle owner remains alive so approvals and applications survive agent pauses and adapter disconnection.
 
-Clean shutdown removes the connection record after runtime cleanup. It retains stored credentials and managed data.
+Clean shutdown removes the endpoint and PID after runtime cleanup. If managed data remains,
+the same file retains its location and project path. Otherwise the file is removed.
+Stored credentials and managed data remain. These paths restore no execution or secret grants.
+Offline status reads validated ownership records without Docker recovery or Keychain access.
+Explicit offline deletion holds the project lock, checks the selected resources, then reuses
+the existing data owner’s deletion checks. The dashboard requires its private session and
+confirmation; CLI offline deletion requires `--allow-exec`.
+Removing an entry is blocked while work, private setup, data, or cleanup remains.
+An empty automatic owner closes after its last entry is removed, ending dynamic approvals.
 A crash or failed cleanup keeps the connection record. An unreachable listener does not prove application cleanup.
-Before removing that record, verify the old owner's resources and any externally prepared processes have stopped.
+Dashboard removal checks that the recorded PID is absent, the connection record is unchanged,
+and validated managed-data records are empty. It holds both existing locks through removal.
+The user must separately confirm that application processes have stopped; these checks do
+not prove orphaned native-process cleanup. Unknown data locations block removal.
+No process is stopped, data deleted, secret accessed, or authorization restored by removal.
 Never kill a process based only on the recorded PID; it can have been reused. See [recovery](troubleshooting.md#the-client-cannot-find-the-daemon).
 
 ## Retained storage identifiers

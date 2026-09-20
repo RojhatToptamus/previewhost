@@ -62,6 +62,51 @@ const credential = (record: RecordData, resource: StoredResource) => {
   return { namespace: id.includes('/') ? 'migration' as const : 'database' as const, id };
 };
 
+async function retainedRecords(root: Awaited<ReturnType<typeof acquireRoot>>): Promise<RecordData[]> {
+  const result: RecordData[] = [];
+  for (const [filename, contents] of await root.records()) {
+    let record: RecordData;
+    try { record = recordSchema.parse(JSON.parse(contents)); }
+    catch { throw cleanupError('A retained database record is invalid.'); }
+    if (filename !== `${record.name}.json` || record.owner !== root.owner
+      || new Set(record.resources.map((item) => item.name)).size !== record.resources.length
+      || (record.pending && !record.resources.some((item) => item.name === record.pending!.resource))
+      || record.resources.some((item) => item.container && !item.volume)) throw cleanupError('A retained database record has inconsistent ownership.');
+    if (record.pending) {
+      const resource = record.resources.find((item) => item.name === record.pending!.resource)!;
+      if (record.pending.operation === 'remove-credential') {
+        if (record.resources.some((item) => item.volume || item.container)) throw cleanupError('Credential cleanup must follow Docker data removal.');
+      } else if ((record.pending.operation.endsWith('volume') && !resource.volume)
+        || (!record.pending.operation.endsWith('volume') && !resource.container)
+        || (['start-container', 'remove-container'].includes(record.pending.operation) && !resource.container?.id)) {
+        throw cleanupError('A retained database mutation is invalid.');
+      }
+    }
+    if (record.resources.some((item) => 'credentialRef' in item && item.credentialRef.includes('/') && item.credentialRef !== legacyRef(record, item))) {
+      throw cleanupError('A migrated credential reference has inconsistent ownership.');
+    }
+    result.push(record);
+  }
+  return result;
+}
+
+/** Read ownership records under their existing lock without Docker recovery, Keychain access, or writes. */
+export async function withRetainedData<T>(directory: string, read: (records: Array<{ name: string; data: DataStatus }>) => Promise<T>): Promise<T> {
+  if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Owned databases currently require macOS.');
+  const root = await acquireRoot(directory, true);
+  try {
+    const records = (await retainedRecords(root)).map(record => ({ name: record.name, data: {
+      resources: record.resources.map(({ name, type }) => ({ name, type })), running: false,
+      ...(record.pending || record.resources.some(resource => resource.container) ? { cleanup: {
+        code: 'CLEANUP_INCOMPLETE' as const,
+        message: 'Retained database cleanup is incomplete. Resolve cleanup before deleting data.',
+        ...(record.pending?.operation === 'remove-credential' ? { operation: 'remove-credential' as const } : {}),
+      } } : {}),
+    } }));
+    return await read(records);
+  } finally { await root.close(); }
+}
+
 /** A retained data directory has one kernel-locked owner and one record per environment. */
 export async function createDataOwner(options: { directory: string; dockerSocket?: string }): Promise<DataOwner> {
   if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Owned databases currently require macOS.');
@@ -217,29 +262,7 @@ export async function createDataOwner(options: { directory: string; dockerSocket
   };
 
   try {
-    for (const [filename, contents] of await root.records()) {
-      let record: RecordData;
-      try { record = recordSchema.parse(JSON.parse(contents)); }
-      catch { throw cleanupError('A retained database record is invalid.'); }
-      if (filename !== `${record.name}.json` || record.owner !== root.owner
-        || new Set(record.resources.map((item) => item.name)).size !== record.resources.length
-        || (record.pending && !record.resources.some((item) => item.name === record.pending!.resource))
-        || record.resources.some((item) => item.container && !item.volume)) throw cleanupError('A retained database record has inconsistent ownership.');
-      if (record.pending) {
-        const resource = record.resources.find((item) => item.name === record.pending!.resource)!;
-        if (record.pending.operation === 'remove-credential') {
-          if (record.resources.some((item) => item.volume || item.container)) throw cleanupError('Credential cleanup must follow Docker data removal.');
-        } else if ((record.pending.operation.endsWith('volume') && !resource.volume)
-          || (!record.pending.operation.endsWith('volume') && !resource.container)
-          || (['start-container', 'remove-container'].includes(record.pending.operation) && !resource.container?.id)) {
-          throw cleanupError('A retained database mutation is invalid.');
-        }
-      }
-      if (record.resources.some((item) => 'credentialRef' in item && item.credentialRef.includes('/') && item.credentialRef !== legacyRef(record, item))) {
-        throw cleanupError('A migrated credential reference has inconsistent ownership.');
-      }
-      entries.set(record.name, { record });
-    }
+    for (const record of await retainedRecords(root)) entries.set(record.name, { record });
   } catch (error) { await root.close(); throw error; }
   for (const entry of entries.values()) { await stopEntry(entry).catch(() => {}); }
 
@@ -473,22 +496,22 @@ function publishedPort(container: Record<string, unknown>, resource: StoredResou
   return port;
 }
 
-async function acquireRoot(directory: string) {
+async function acquireRoot(directory: string, readOnly = false) {
   let handle: FileHandle | undefined;
   let directoryHandle: FileHandle | undefined;
   try {
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (!readOnly) await mkdir(directory, { recursive: true, mode: 0o700 });
     const before = await lstat(directory);
     if (!before.isDirectory() || before.uid !== process.getuid!() || (before.mode & 0o077) !== 0) throw new Error();
     directory = await realpath(directory);
     directoryHandle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     const lockPath = join(directory, '.lock');
     // Darwin O_EXLOCK is a kernel lock on this permanent inode; libuv opens CLOEXEC.
-    handle = await open(lockPath, constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK | 0x20, 0o600);
+    handle = await open(lockPath, constants.O_RDWR | (readOnly ? 0 : constants.O_CREAT) | constants.O_NOFOLLOW | constants.O_NONBLOCK | 0x20, 0o600);
     const lock = await handle.stat();
     if (!lock.isFile() || lock.nlink !== 1 || lock.uid !== before.uid || (lock.mode & 0o077) !== 0 || lock.size > 64) throw new Error();
     let owner = (await handle.readFile('utf8')).trim();
-    if (!owner) { owner = fresh(); await handle.write(`${owner}\n`, 0, 'utf8'); await handle.sync(); await directoryHandle.sync(); }
+    if (!owner && !readOnly) { owner = fresh(); await handle.write(`${owner}\n`, 0, 'utf8'); await handle.sync(); await directoryHandle.sync(); }
     if (!token.safeParse(owner).success) throw new Error();
     const assertRoot = async () => {
       const current = await lstat(lockPath);
@@ -523,7 +546,7 @@ async function acquireRoot(directory: string) {
         const records: Array<[string, string]> = [];
         for (const filename of files) {
           if (filename === '.lock') continue;
-          if (/^\.record-[a-f0-9]{32}\.tmp$/.test(filename)) { await read(filename); await unlink(join(directory, filename)); continue; }
+          if (/^\.record-[a-f0-9]{32}\.tmp$/.test(filename)) { await read(filename); if (!readOnly) await unlink(join(directory, filename)); continue; }
           if (!/^[a-z][a-z0-9-]{0,47}\.json$/.test(filename)) throw cleanupError('The private data directory contains an unknown file.');
           records.push([filename, await read(filename)]);
         }
