@@ -149,13 +149,6 @@ export function Activity(props: Props) {
                   : "Attempt " + attempt.state}
               </strong>
               <code className="attempt-id">{attempt.id}</code>
-              {(attempt.error || attempt.readyAt) && (
-                <p className={attempt.error ? "error" : "text-muted-foreground"}>
-                  {attempt.error?.message ??
-                    "Startup checks passed at " +
-                      new Date(attempt.readyAt!).toLocaleTimeString()}
-                </p>
-              )}
             </div>
           </div>
         ))}
@@ -372,7 +365,6 @@ function Services({ entry, mutate, acting, openLogs }: Props) {
       </div>
       {canReset && (
         <div className="reset-row">
-          <p>Reset managed data and run setup again.</p>
           <ConfirmAction
             label="Reset data"
             danger

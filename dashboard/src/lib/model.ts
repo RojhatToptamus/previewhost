@@ -144,18 +144,14 @@ export function hint(entry: Entry) {
     return "Saving secrets does not start the app.";
   if (p?.candidate)
     return p.active
-      ? "Your app is still available; canceling affects only the pending update in this worktree."
-      : "The URL appears once startup checks pass. Canceling affects only this worktree.";
-  if (p?.busy)
-    return "An operation is in progress; wait for it to finish before changing this preview.";
+      ? "Your previous app is still running."
+      : "";
+  if (p?.busy) return "";
   if (p?.active && p.latest?.state === "failed")
     return "Your previous app is still running.";
-  if (p?.active)
-    return p.data
-      ? "Stopping keeps your database data."
-      : "Stopping affects only this preview.";
+  if (p?.active) return "";
   if (p?.latest?.state === "failed")
-    return "Your app is not serving; resolve the startup error before retrying.";
+    return "Fix the startup error, then retry.";
   if (p?.latest?.state === "canceled")
     return "Startup was canceled; ask your agent to start again only when you want to continue.";
   if (!p)

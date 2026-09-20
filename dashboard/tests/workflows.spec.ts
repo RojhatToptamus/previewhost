@@ -295,6 +295,11 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.locator("[data-sonner-toast]").filter({ hasText: "already exists" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+    await expect(page.locator("body")).toHaveClass(/ph-dark/);
+    await page.getByRole("button", { name: "Dark mode", exact: true }).press("Space");
+    await expect(page.locator("body")).not.toHaveClass(/ph-dark/);
+    await page.getByRole("button", { name: "Dark mode", exact: true }).press("Space");
+    await expect(page.locator("body")).toHaveClass(/ph-dark/);
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 844 });
       await expect(

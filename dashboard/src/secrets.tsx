@@ -68,8 +68,7 @@ export function SecretManager({ revision }: { revision: number }) {
   return (
     <div className="page secrets-page">
       <h1>Secret Manager</h1>
-      <p className="summary">Stored values are never shown.</p>
-      <p className="text-muted-foreground">
+      <p className="summary">
         Changes apply on the next start in every project using the reference.
       </p>
       {error ? (

@@ -119,6 +119,7 @@ export function Preview({
   const primary = !canOpen
     ? actions.find((action) => !action.danger)
     : undefined;
+  const context = hint(entry);
   function openLogs(attempt: AttemptSummary, name = "") {
     setAttemptId(attempt.id);
     setSource(name);
@@ -155,7 +156,7 @@ export function Preview({
               />
             </div>
           )}
-          <p className="context-note">{hint(entry)}</p>
+          {context && <p className="context-note">{context}</p>}
         </div>
         <div className="header-actions">
           {canOpen && (
@@ -169,6 +170,11 @@ export function Preview({
           {actions.map((action) => (
             <Button
               key={action.label}
+              title={
+                action.label === "Stop"
+                  ? "Stop this preview and keep its database data"
+                  : undefined
+              }
               disabled={acting || Boolean(owner.error)}
               variant={
                 action === primary

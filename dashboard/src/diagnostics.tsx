@@ -289,9 +289,6 @@ function Configuration({
   const spec = description.spec;
   return (
     <>
-      <p className="text-muted-foreground">
-        Read-only configuration. Stored values are not included.
-      </p>
       <Section title="Environment variables">
         <ScrollArea
           className="data-table env-table"

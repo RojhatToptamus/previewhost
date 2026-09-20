@@ -170,6 +170,8 @@ Do not remove a necessary confirmation warning merely because the originating pa
 
 Write for someone checking an application, not someone learning Previewhost internals.
 
+Omit permanent reassurance and help text from navigation. Use an icon with an accessible name for theme switching; keep connection failures in the relevant error view. A healthy state does not need an explanatory sentence. Put consequences beside the action or in its confirmation, not in repeated page introductions.
+
 1. Start with the useful fact. Add a consequence or next action only when it helps.
 2. Use familiar words, active voice, and short sentences. Aim below 20 words for instructions and 25 for explanations.
 3. Give a concept one name. Use preview, worktree, service, job, attempt, stored reference, and managed database consistently.
@@ -183,7 +185,7 @@ Write for someone checking an application, not someone learning Previewhost inte
 
 | Avoid | Prefer |
 | --- | --- |
-| Ready — Every startup check passed. Stopping keeps your database data. | Ready — Stopping keeps your database data. |
+| Ready — Every startup check passed. | Ready |
 | Save this attempt as preview.yml. Existing files are never overwritten. [Save as preview.yml] | Existing files are never overwritten. [Save as preview.yml] |
 | Started at the time shown. | The timestamp alone. |
 | Values are never shown. | Stored values are never shown. |

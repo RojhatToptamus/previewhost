@@ -18,7 +18,6 @@ import {
   SidebarProvider,
   SidebarHeader,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
@@ -165,20 +164,14 @@ export function App() {
             </Button>
           </div>
           <div className="header-controls">
-            <span className="connection">
-              {error
-                ? "Disconnected"
-                : loaded
-                  ? "Running locally"
-                  : "Connecting…"}
-            </span>
             <Toggle
               aria-label="Dark mode"
+              title={dark ? "Switch to light mode" : "Switch to dark mode"}
+              className="size-8 p-0"
               pressed={dark}
               onPressedChange={setDark}
             >
               <MoonIcon />
-              <span className="theme-label">Dark mode</span>
             </Toggle>
             <Button
               variant="outline"
@@ -200,9 +193,6 @@ export function App() {
             <div className="page">
               <EmptyState title="Open from your terminal">
                 <code>previewhost dashboard</code>
-                <br />
-                The launcher opens a private local session. No account is
-                needed.
               </EmptyState>
             </div>
           ) : selection === "secrets" ? (
@@ -380,11 +370,6 @@ function Navigation({
           ) : null;
         })}
       </SidebarContent>
-      <SidebarFooter>
-        <p className="text-xs text-muted-foreground">
-          Closing this window leaves previews running.
-        </p>
-      </SidebarFooter>
     </Sidebar>
   );
 }
