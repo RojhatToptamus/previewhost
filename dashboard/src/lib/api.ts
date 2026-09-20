@@ -21,16 +21,6 @@ export async function call<T>(body: object, signal?: AbortSignal): Promise<T> {
     body: JSON.stringify(body),
   });
   const data = await response.json();
-  if (
-    data.error?.code === "NOT_FOUND" &&
-    data.error.message === "Unknown control operation." &&
-    "action" in body &&
-    body.action === "saveConfiguration"
-  ) {
-    throw new Error(
-      "This owner does not support configuration saving. Ask your agent to save preview.yml, or upgrade the owner when you are ready to stop its previews.",
-    );
-  }
   if (data.error)
     throw new Error(
       data.error.code === "STALE_ATTEMPT"

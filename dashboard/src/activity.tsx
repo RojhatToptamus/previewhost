@@ -98,21 +98,18 @@ export function Activity(props: Props) {
         <>
           {p.active && latest && p.active.id !== latest.id ? (
             <div className="attempt-split">
-              {[
+              {([
                 ["Serving", p.active],
                 ["Latest update", latest],
-              ].map(([label, value]) => {
-                const attempt = value as AttemptSummary;
-                return (
-                  <div key={String(label)}>
-                    <p className="text-muted-foreground">{String(label)}</p>
-                    <code title={attempt.id}>{attempt.id.slice(0, 8)}</code>
-                    <Status tone={tone(attempt.state)}>
-                      {capitalize(attempt.state)}
-                    </Status>
-                  </div>
-                );
-              })}
+              ] as const).map(([label, attempt]) => (
+                <div key={label}>
+                  <p className="text-muted-foreground">{label}</p>
+                  <code title={attempt.id}>{attempt.id.slice(0, 8)}</code>
+                  <Status tone={tone(attempt.state)}>
+                    {capitalize(attempt.state)}
+                  </Status>
+                </div>
+              ))}
             </div>
           ) : (
             (p.active ?? latest) && (
