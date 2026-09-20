@@ -120,7 +120,11 @@ confirmation; CLI offline deletion requires `--allow-exec`.
 Removing an entry is blocked while work, private setup, data, or cleanup remains.
 An empty automatic owner closes after its last entry is removed, ending dynamic approvals.
 A crash or failed cleanup keeps the connection record. An unreachable listener does not prove application cleanup.
-Before removing that record, verify the old owner's resources and any externally prepared processes have stopped.
+Dashboard removal checks that the recorded PID is absent, the connection record is unchanged,
+and validated managed-data records are empty. It holds both existing locks through removal.
+The user must separately confirm that application processes have stopped; these checks do
+not prove orphaned native-process cleanup. Unknown data locations block removal.
+No process is stopped, data deleted, secret accessed, or authorization restored by removal.
 Never kill a process based only on the recorded PID; it can have been reused. See [recovery](troubleshooting.md#the-client-cannot-find-the-daemon).
 
 ## Retained storage identifiers

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { MoreHorizontalIcon } from "lucide-react";
-import type { Mutate } from "./lib/api";
+import { call, errorMessage, type Mutate } from "./lib/api";
+import type { ProjectRecord } from "../../src/project";
 import {
   deletionNeedsRetry,
   needsCleanup,
@@ -159,8 +160,9 @@ export function PreviewMenu({
   const [review, setReview] = useState<Confirmation>();
   const trigger = useRef<HTMLButtonElement>(null);
   const { owner, preview: p, name } = entry;
-  if (owner.error) return null;
-  const actions = managementOnly || owner.offline ? [] : previewActions(entry);
+
+  const actions =
+    managementOnly || owner.offline || owner.error ? [] : previewActions(entry);
   const idle =
     !p?.active &&
     !p?.candidate &&
@@ -168,17 +170,74 @@ export function PreviewMenu({
     !p?.url &&
     !pending(entry).length;
   const canDelete =
-    idle && p?.data && (!needsCleanup(p) || deletionNeedsRetry(p));
+    !owner.error &&
+    idle &&
+    p?.data &&
+    (!needsCleanup(p) || deletionNeedsRetry(p));
   const canRemove = idle && !p?.data && !needsCleanup(p);
-  const reset = resetRequest(entry);
-  if (
-    !actions.length &&
-    !canDelete &&
-    !canRemove &&
-    !reset &&
-    !(p?.active && p.url && !managementOnly)
-  )
-    return null;
+  const reset = owner.error ? undefined : resetRequest(entry);
+  const [checking, setChecking] = useState(false);
+  async function reviewRemoval() {
+    const request: Confirmation = {
+      title: `Remove ${name ?? shortProject(owner)}?`,
+      description: owner.error
+        ? "An unreachable owner may have left application processes running. Removal does not stop them or delete data."
+        : "Removes this entry and its retained logs. Source files and saved secrets stay untouched. An empty project closes and ends its private approvals.",
+      details: <Path value={owner.project ?? "Unverified record"} />,
+      body: {
+        action: "remove",
+        owner: owner.id,
+        name,
+        attemptId: p?.latest?.id ?? null,
+      },
+      message: "Entry removed.",
+      confirmLabel: "Remove entry",
+    };
+    if (!owner.error) {
+      setReview({
+        ...request,
+        blocked: canRemove
+          ? undefined
+          : pending(entry).length
+            ? "Finish or cancel private setup first."
+            : !idle
+              ? "Stop this preview before removing its entry."
+              : needsCleanup(p)
+                ? "Resolve incomplete cleanup before removing this entry."
+                : "Delete the retained managed data before removing this entry.",
+      });
+      return;
+    }
+    setChecking(true);
+    setReview({ ...request, blocked: "Checking owner and retained data…" });
+    try {
+      const result = await call<{ expected?: ProjectRecord; blocked?: string }>(
+        { action: "reviewRemoval", owner: owner.id },
+      );
+      setReview((current) =>
+        current
+          ? {
+              ...request,
+              blocked: result.blocked,
+              acknowledgement:
+                "I verified that this project's application processes have stopped.",
+              body: {
+                action: "removeStale",
+                owner: owner.id,
+                expected: result.expected,
+                cleanupVerified: true,
+              },
+            }
+          : undefined,
+      );
+    } catch (error) {
+      setReview((current) =>
+        current ? { ...request, blocked: errorMessage(error) } : undefined,
+      );
+    } finally {
+      setChecking(false);
+    }
+  }
   return (
     <>
       <DropdownMenu>
@@ -187,7 +246,7 @@ export function PreviewMenu({
             ref={trigger}
             variant="ghost"
             size="icon-sm"
-            disabled={acting}
+            disabled={acting || checking}
             aria-label={`Actions for ${name ?? shortProject(owner)}`}
           >
             <MoreHorizontalIcon />
@@ -207,6 +266,16 @@ export function PreviewMenu({
                 </a>
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              onSelect={() =>
+                void mutate(
+                  { action: "recheck", owner: owner.id },
+                  "Status updated.",
+                )
+              }
+            >
+              Recheck status
+            </DropdownMenuItem>
             {actions.map((action) => (
               <DropdownMenuItem
                 key={action.label}
@@ -216,10 +285,7 @@ export function PreviewMenu({
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
-          {(actions.length > 0 || (!managementOnly && p?.active)) &&
-          (reset || canDelete || canRemove) ? (
-            <DropdownMenuSeparator />
-          ) : null}
+          <DropdownMenuSeparator />
           <DropdownMenuGroup>
             {reset && (
               <DropdownMenuItem onSelect={() => setReview(reset)}>
@@ -252,28 +318,9 @@ export function PreviewMenu({
                 Delete data…
               </DropdownMenuItem>
             )}
-            {canRemove && (
-              <DropdownMenuItem
-                onSelect={() =>
-                  setReview({
-                    title: `Remove ${name ?? shortProject(owner)}?`,
-                    description:
-                      "Removes this entry and its retained logs. Source files and saved secrets stay untouched. An empty project closes and ends its private approvals.",
-                    details: <Path value={owner.project ?? ""} />,
-                    body: {
-                      action: "remove",
-                      owner: owner.id,
-                      name,
-                      attemptId: p?.latest?.id ?? null,
-                    },
-                    message: "Entry removed.",
-                    confirmLabel: "Remove entry",
-                  })
-                }
-              >
-                Remove entry…
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem onSelect={() => void reviewRemoval()}>
+              Remove entry…
+            </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -289,7 +336,7 @@ export function PreviewMenu({
             event.preventDefault();
             trigger.current?.focus();
           }}
-          disabled={acting}
+          disabled={acting || checking}
           danger
           mutate={mutate}
         />

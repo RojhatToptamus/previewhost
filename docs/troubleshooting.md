@@ -74,8 +74,11 @@ settings on restart, especially with a custom data location.
 Clean shutdown keeps an offline record while managed data remains. The dashboard and
 `previewhost projects` still list it. Use **Delete data** to erase its managed databases,
 then **Remove entry** to clear the empty record. Source files need not still exist.
-Saved user secrets are unaffected. An unreachable owner is not a cleanly stopped owner;
-its entry cannot be removed through this shortcut.
+Saved user secrets are unaffected. For unavailable entries, use **Recheck status** to retry
+the connection. **Remove entry** checks the recorded process, locks, and retained data.
+If those checks pass, confirm that application processes have stopped before removing it.
+An unreachable owner alone is not evidence of cleanup. Missing data-location metadata,
+live processes, or retained data block removal; the review shows the reason.
 
 For an explicit manual connection, start `previewhost serve` in a foreground terminal.
 Use the same `--endpoint` and `--token-file` for its clients. Explicit connection mode never starts or reconfigures an owner.

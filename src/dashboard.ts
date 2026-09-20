@@ -10,13 +10,16 @@ import { limits, requestSchemas, secretIdSchema } from './contracts.js';
 import { readBody } from './daemon.js';
 import { failure, PreviewError, throwIfAborted } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
-import { deleteOfflineData, offlinePreviews, removeOfflineProject, discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
+import { reviewStaleProject, removeStaleProject, projectRecordSchema, deleteOfflineData, offlinePreviews, removeOfflineProject, discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
 import { listSecrets } from './secrets.js';
 import { keychain } from './keychain.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('list'), after: ownerId.optional() }),
+  z.strictObject({ action: z.literal('recheck'), owner: ownerId }),
+  z.strictObject({ action: z.literal('reviewRemoval'), owner: ownerId }),
+  z.strictObject({ action: z.literal('removeStale'), owner: ownerId, expected: projectRecordSchema, cleanupVerified: z.literal(true) }),
   z.strictObject({ action: z.literal('listSecrets') }),
   z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
@@ -77,6 +80,34 @@ export async function startDashboard(options: {
     } finally { clearTimeout(timer); clients.delete(client); await client.close(); }
   }
 
+  async function readOwner(owner: Awaited<ReturnType<typeof discover>>[number]) {
+    const identity = { id: owner.id, project: (owner.connection ?? owner.retained)?.projectDirectory };
+    if (owner.retained) {
+      try { return { ...identity, offline: true, previews: await offlinePreviews(owner.retained), requests: [] }; }
+      catch (error) { return { ...identity, offline: true, error: failure(error) }; }
+    }
+    try {
+      if (owner.error) return { ...identity, error: owner.error };
+      return await withOwner(owner, async (client, info) => {
+        const file = join(info.projectDirectory, 'preview.yml');
+        let configuration: { file: string; error?: ReturnType<typeof failure> } | undefined;
+        try {
+          await lstat(file);
+          configuration = { file };
+          await normalizeSources(parseSpec(await loadPreviewSpec(file, { allowedRoots: info.allowedRoots, signal: controller.signal })), info.allowedRoots);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') configuration = { file, error: failure(error, 'INVALID_INPUT') };
+        }
+        const previews = await client.list();
+        return { ...identity, configuration, previews, requests: await client.secretsList() };
+      }, 3000);
+    } catch (error) {
+      const problem = failure(error);
+      if (problem.code === 'DAEMON_UNAVAILABLE') problem.message = 'The owner is not responding. Application processes may still be running. Recheck status or review removal before clearing this entry.';
+      return { ...identity, error: problem };
+    }
+  }
+
   async function dispatch(input: unknown, signal: AbortSignal) {
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
@@ -94,29 +125,7 @@ export async function startDashboard(options: {
     if (p.action === 'list') {
       const candidates = owners.filter(owner => !p.after || owner.id > p.after).sort((a, b) => a.id.localeCompare(b.id));
       // Bound network fan-out and response size independently of the number of known projects.
-      const results = await Promise.all(candidates.slice(0, 16).map(async owner => {
-        const identity = { id: owner.id, project: (owner.connection ?? owner.retained)?.projectDirectory };
-        if (owner.retained) {
-          try { return { ...identity, offline: true, previews: await offlinePreviews(owner.retained), requests: [] }; }
-          catch (error) { return { ...identity, offline: true, error: failure(error) }; }
-        }
-        try {
-          if (owner.error) return { ...identity, error: owner.error };
-          return await withOwner(owner, async (client, info) => {
-            const file = join(info.projectDirectory, 'preview.yml');
-            let configuration: { file: string; error?: ReturnType<typeof failure> } | undefined;
-            try {
-              await lstat(file);
-              configuration = { file };
-              await normalizeSources(parseSpec(await loadPreviewSpec(file, { allowedRoots: info.allowedRoots, signal: controller.signal })), info.allowedRoots);
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') configuration = { file, error: failure(error, 'INVALID_INPUT') };
-            }
-            const previews = await client.list();
-            return { ...identity, configuration, previews, requests: await client.secretsList() };
-          }, 3000);
-        } catch (error) { return { ...identity, error: failure(error) }; }
-      }));
+      const results = await Promise.all(candidates.slice(0, 16).map(readOwner));
       const page: typeof results = [];
       let bytes = 128;
       for (const result of results) {
@@ -132,6 +141,21 @@ export async function startDashboard(options: {
     }
     const owner = owners.find(owner => owner.id === p.owner);
     if (!owner) throw new PreviewError('NOT_FOUND', 'This owner is no longer available. Refresh the list.');
+    if (p.action === 'recheck') {
+      const result = await readOwner(owner);
+      if ('error' in result && result.error) throw new PreviewError(result.error.code, result.error.message);
+      return result;
+    }
+    if (p.action === 'reviewRemoval') {
+      try { return { expected: await reviewStaleProject(dirname(owner.tokenFile)) }; }
+      catch (error) { return { blocked: failure(error).message }; }
+    }
+    if (p.action === 'removeStale') {
+      throwIfAborted(signal);
+      const update = removeStaleProject(dirname(owner.tokenFile), p.expected);
+      updates.add(update);
+      try { await update; return null; } finally { updates.delete(update); }
+    }
     if (owner.retained) {
       const directory = dirname(owner.tokenFile);
       if (p.action === 'deleteData' || p.action === 'remove') {

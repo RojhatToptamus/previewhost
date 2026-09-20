@@ -97,7 +97,7 @@
 [data-slot="button"],
 [data-slot="toggle"],
 [data-slot="input"],
-[data-slot="native-select"],
+[data-slot="select-trigger"],
 [data-slot="textarea"],
 [data-slot="input-group"] {
   font-size: 13px;
@@ -264,23 +264,53 @@
 [data-slot="sidebar-menu-button"] {
   font-size: 13px;
 }
+.sidebar-find {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.sidebar-filter[data-slot="select-trigger"] {
+  width: 100%;
+  height: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--t3);
+  padding: 0 8px;
+}
+.sidebar-filter[data-slot="select-trigger"]:hover {
+  background: var(--hover);
+  color: var(--t1);
+}
 .preview-nav-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  align-items: center;
-  gap: 2px;
+  position: relative;
+  border-radius: 6px;
+}
+.preview-nav-row:hover {
+  background: var(--hover);
+}
+.preview-nav-row[data-active="true"] {
+  background: var(--sel);
 }
 .preview-nav-row > [data-slot="dropdown-menu-trigger"] {
+  position: absolute;
+  top: 7px;
+  right: 4px;
   width: 28px;
   height: 28px;
   color: var(--t3);
 }
-.preview-nav {
+.preview-nav[data-slot="sidebar-menu-button"] {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
   height: auto;
-  padding: 8px;
-  gap: 2px 8px;
+  padding: 8px 36px 8px 8px;
+  gap: 3px;
+  background: transparent;
+}
+.preview-nav .status {
+  grid-row: 3;
 }
 .preview-nav .nav-name {
   min-width: 0;
@@ -460,11 +490,9 @@
   padding: 10px 24px;
   border-bottom: 1px solid var(--border);
 }
-.diagnostic-toolbar [data-slot="native-select-wrapper"] {
-  max-width: 100%;
-}
-.diagnostic-toolbar select {
-  max-width: 240px;
+.diagnostic-toolbar [data-slot="select-trigger"] {
+  min-width: 0;
+  max-width: min(240px, 100%);
   text-overflow: ellipsis;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -830,7 +858,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
   }
-  .logs-toolbar > [data-slot="native-select-wrapper"] {
+  .logs-toolbar > [data-slot="select-trigger"] {
     width: 100%;
   }
   .diagnostic-toolbar .refresh-details {

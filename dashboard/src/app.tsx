@@ -47,9 +47,13 @@ import {
 import { Preview } from "./preview";
 import { PreviewMenu } from "./preview-actions";
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "./components/ui/native-select";
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+} from "./components/ui/select";
 import { SecretManager } from "./secrets";
 
 type Selection = { owner: string; name?: string } | "secrets" | undefined;
@@ -328,11 +332,6 @@ function Navigation({
   return (
     <Sidebar>
       <SidebarHeader>
-        <SearchField
-          value={query}
-          onChange={setQuery}
-          label="Search previews"
-        />
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -356,21 +355,32 @@ function Navigation({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <NativeSelect
-          className="w-full"
-          aria-label="Filter previews"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value as PreviewFilter)}
-        >
-          <NativeSelectOption value="all">All statuses</NativeSelectOption>
-          <NativeSelectOption value="active">Active</NativeSelectOption>
-          <NativeSelectOption value="attention">
-            Needs attention
-          </NativeSelectOption>
-          <NativeSelectOption value="stopped">
-            Stopped / offline
-          </NativeSelectOption>
-        </NativeSelect>
+        <div className="sidebar-find">
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            label="Search previews"
+          />
+          <Select
+            value={filter}
+            onValueChange={(value) => setFilter(value as PreviewFilter)}
+          >
+            <SelectTrigger
+              aria-label="Filter previews"
+              className="sidebar-filter"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectGroup>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="attention">Needs attention</SelectItem>
+                <SelectItem value="stopped">Stopped / offline</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
       </SidebarHeader>
       <SidebarContent aria-label="Projects and previews">
         <SidebarGroup>
@@ -379,6 +389,11 @@ function Navigation({
               <SidebarMenuItem
                 key={entry.owner.id + "/" + (entry.name ?? "")}
                 className="preview-nav-row"
+                data-active={
+                  typeof selection === "object" &&
+                  selection.owner === entry.owner.id &&
+                  selection.name === entry.name
+                }
               >
                 <SidebarMenuButton
                   className="preview-nav"

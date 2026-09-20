@@ -198,6 +198,7 @@ In **Logs**, choose an attempt and source, then search its captured output. Sear
 | Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
 | Test with fresh managed data | From the preview’s menu, select **Reset data**. Confirm the databases; setup runs again. |
 | Delete data without restarting | Stop the preview, then select **Delete data** from its menu. Deletion cannot be undone. |
+| Recheck an unavailable preview | Select **Recheck status** from its menu. **Remove entry** checks whether removal is safe and explains any blockers. |
 | Clear an old entry | Select **Remove entry** after stopping it and deleting any retained data. Source files and saved secrets remain. |
 | Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
 | Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the dialog and save. |

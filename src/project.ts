@@ -12,7 +12,7 @@ import { checkTokenDirectory, connectPreviewDaemon, type ClientOptions } from '.
 import { limits, secretIdSchema, type Failure, type DeleteDataOptions, type PreviewStatus } from './contracts.js';
 import { PreviewError, failure } from './errors.js';
 import { canonicalDirectory, isWithin } from './spec.js';
-import { createDataOwner, readRetainedData } from './data.js';
+import { createDataOwner, withRetainedData } from './data.js';
 
 export interface ProjectOptions extends ClientOptions {
   projectDirectory?: string;
@@ -76,7 +76,7 @@ export function projectOwnerDirectory(project: string): string {
   return join(homedir(), '.local', 'share', 'previewd', 'projects', createHash('sha256').update(project).digest('hex'));
 }
 
-const projectRecordSchema = z.strictObject({
+export const projectRecordSchema = z.strictObject({
   projectDirectory: directorySchema.refine(isAbsolute),
   dataDirectory: directorySchema.refine(isAbsolute).optional(), dockerSocket: directorySchema.refine(isAbsolute).optional(),
   endpoint: z.string().optional(), pid: z.number().int().positive().optional(),
@@ -113,7 +113,7 @@ export async function lockProject(directory: string): Promise<FileHandle> {
   }
 }
 
-/** Called under the project lock. Connection removal remains reserved for verified clean shutdown. */
+/** Connection record writes are serialized by the project lock. */
 export async function writeProjectRecord(directory: string, record: ProjectRecord): Promise<void> {
   const temporary = join(directory, 'connection.tmp');
   await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });
@@ -180,7 +180,7 @@ async function manageOfflineProject<T>(directory: string, operation: (record: Pr
 
 export async function offlinePreviews(record: ProjectRecord): Promise<PreviewStatus[]> {
   if (!record.dataDirectory) return [];
-  return (await readRetainedData(record.dataDirectory)).map(({ name, data }) => ({ name, busy: false, data }));
+  return withRetainedData(record.dataDirectory, async records => records.map(({ name, data }) => ({ name, busy: false, data })));
 }
 
 export async function deleteOfflineData(directory: string, name: string, options: DeleteDataOptions, signal?: AbortSignal) {
@@ -202,9 +202,44 @@ export async function deleteOfflineData(directory: string, name: string, options
 
 export async function removeOfflineProject(directory: string) {
   await manageOfflineProject(directory, async record => {
-    if ((await offlinePreviews(record)).length) throw new PreviewError('BUSY', 'Delete the retained managed data before removing this project.');
-    await unlink(join(directory, 'connection.json'));
+    await withRetainedData(record.dataDirectory!, async records => {
+      if (records.length) throw new PreviewError('BUSY', 'Delete the retained managed data before removing this project.');
+      await unlink(join(directory, 'connection.json'));
+    });
   });
+}
+
+/** Hold both existing locks through review/removal; native process cleanup still requires human verification. */
+async function withStaleProject<T>(directory: string, expected: ProjectRecord | undefined, operation: (record: ProjectRecord) => Promise<T>): Promise<T> {
+  const lock = await lockProject(directory);
+  try {
+    const record = await readProjectRecord(directory);
+    if (!record) throw new PreviewError('NOT_FOUND', 'This project is no longer listed.');
+    if (expected && !isDeepStrictEqual(record, expected)) throw new PreviewError('STALE_ATTEMPT', 'The project record changed. Recheck before removing it.');
+    if (record.pid) {
+      let present = true;
+      try { process.kill(record.pid, 0); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new PreviewError('CLEANUP_INCOMPLETE', 'Cannot verify whether the recorded owner process has exited. Removal is blocked.');
+        present = false;
+      }
+      if (present) throw new PreviewError('BUSY', 'The recorded process still exists. Restore the owner connection or verify its identity and cleanup in the terminal.');
+    }
+    if (!record.dataDirectory) throw new PreviewError('CLEANUP_INCOMPLETE', 'This record does not identify its managed-data directory. Verify process and database cleanup in the terminal before removing the record.');
+    return await withRetainedData(record.dataDirectory, async records => {
+      if (records.length) throw new PreviewError('CLEANUP_INCOMPLETE', 'Managed data is still retained. Recover the owner and use Delete data only if you want to erase it. This entry cannot be removed while data remains.');
+      return operation(record);
+    });
+  } finally { await lock.close(); }
+}
+
+export async function reviewStaleProject(directory: string): Promise<ProjectRecord> {
+  return withStaleProject(directory, undefined, async record => record);
+}
+
+/** Explicit human verification replaces manual crash-record removal, never process cleanup. */
+export async function removeStaleProject(directory: string, expected: ProjectRecord): Promise<void> {
+  await withStaleProject(directory, expected, async () => unlink(join(directory, 'connection.json')));
 }
 
 async function launchOptions(options: ProjectOptions, project: string): Promise<ProjectLaunch> {

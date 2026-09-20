@@ -77,6 +77,13 @@ test('dashboard authenticates browser access, discovers isolated owners, and con
   assert.equal(list.body.result.owners.length, 2);
   assert.ok(!JSON.stringify(list.body).includes('tokenFile'));
   assert.ok(!JSON.stringify(list.body).includes(capability));
+  const reviewed = await api({ action: 'reviewRemoval', owner: fixtures[0].id });
+  assert.match(reviewed.body.result.blocked, /process still exists/);
+  const recordedOwner = { endpoint: fixtures[0].daemon.endpoint, pid: process.pid, projectDirectory: fixtures[0].projectDirectory };
+  assert.equal((await api({ action: 'removeStale', owner: fixtures[0].id, expected: recordedOwner })).body.error?.code, 'INVALID_INPUT');
+  assert.equal((await api({ action: 'removeStale', owner: fixtures[0].id, expected: recordedOwner, cleanupVerified: true }, { origin: 'http://evil.example' })).status, 401);
+  assert.equal((await api({ action: 'removeStale', owner: fixtures[0].id, expected: recordedOwner, cleanupVerified: true })).body.error?.code, 'BUSY');
+  assert.ok((await api({ action: 'recheck', owner: fixtures[0].id })).body.result.previews.length);
   const first = fixtures[0];
   await writeFile(join(first.projectDirectory, 'preview.yml'), 'name: app\nservices: [\n');
   const invalidConfig = (await api({ action: 'list' })).body.result.owners.find((owner: any) => owner.id === first.id);

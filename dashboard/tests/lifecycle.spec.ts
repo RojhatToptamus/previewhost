@@ -105,7 +105,8 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
     await expect(search).toHaveValue("worktree-099");
     const neighborUrl = (await fixtures[99].runtime.get("app")).url!;
     await search.fill("");
-    await filter.selectOption("active");
+    await filter.click();
+    await page.getByRole("option", { name: "Active", exact: true }).click();
     await expect(nav.locator(".preview-nav")).toHaveCount(2);
     const row = nav
       .locator(".preview-nav-row")
@@ -117,7 +118,10 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
       page.getByRole("article", { name: "Preview details" }),
     ).toContainText("worktree-099");
     expect(await (await fetch(neighborUrl)).text()).toBe("99");
-    await filter.selectOption("stopped");
+    await filter.click();
+    await page
+      .getByRole("option", { name: "Stopped / offline", exact: true })
+      .click();
     await search.fill("worktree-098");
     await row.getByRole("button", { name: "Actions for app" }).click();
     await page.getByRole("menuitem", { name: "Start preview" }).click();
@@ -125,10 +129,14 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
     await expect
       .poll(async () => (await fixtures[98].runtime.get("app")).active?.state)
       .toBe("ready");
-    await filter.selectOption("active");
+    await filter.click();
+    await page.getByRole("option", { name: "Active", exact: true }).click();
     await row.getByRole("button", { name: "Actions for app" }).click();
     await page.getByRole("menuitem", { name: "Stop", exact: true }).click();
-    await filter.selectOption("stopped");
+    await filter.click();
+    await page
+      .getByRole("option", { name: "Stopped / offline", exact: true })
+      .click();
     await row.getByRole("button", { name: "Actions for app" }).click();
     await page.getByRole("menuitem", { name: "Remove entry…" }).click();
     await expect(page.getByRole("alertdialog")).toContainText("worktree-098");
@@ -144,11 +152,14 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
       .click();
     await expect(row).toHaveCount(0);
     expect(await (await fetch(neighborUrl)).text()).toBe("99");
-    await filter.selectOption("all");
+    await filter.click();
+    await page
+      .getByRole("option", { name: "All statuses", exact: true })
+      .click();
     await search.fill("");
     await page.getByRole("button", { name: /All previews/ }).click();
     await expect(nav.locator(".preview-nav")).toHaveCount(99);
-    const evidence = ".local/dashboard-review";
+    const evidence = "/private/tmp/previewhost-sidebar-review";
     await mkdir(evidence, { recursive: true });
     await page.screenshot({ path: join(evidence, "projects-light.png") });
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();

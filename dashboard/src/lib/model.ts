@@ -137,6 +137,7 @@ export function attempts(p?: PreviewStatus) {
 }
 
 export function hint(entry: Entry) {
+  if (entry.owner.error) return "";
   const p = entry.preview;
   if (entry.owner.offline)
     return p?.data

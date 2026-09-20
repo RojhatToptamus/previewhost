@@ -647,7 +647,14 @@ data directory, and Docker socket only when managed data remains. Offline status
 from the existing database ownership records. It does not restore configuration, logs,
 execution permission, or private approvals. Start through the agent or CLI to run again.
 Offline deletion and removal use the same project lock as owner startup. An unreachable
-live connection never qualifies for offline cleanup.
+live connection never qualifies for offline data deletion.
+
+Every dashboard entry offers **Recheck status** and **Remove entry**. For an unavailable
+owner, removal requires the recorded process to be absent, unchanged connection metadata,
+and no retained data or cleanup records. The project and data locks stay held through removal.
+The user must also confirm that application processes have stopped; Previewhost cannot
+verify orphaned native processes from the connection record alone. Missing or invalid
+data-location metadata blocks removal. This operation only removes the connection file.
 
 CLI management also works when the registered source directory no longer exists:
 

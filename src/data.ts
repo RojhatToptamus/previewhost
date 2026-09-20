@@ -91,11 +91,11 @@ async function retainedRecords(root: Awaited<ReturnType<typeof acquireRoot>>): P
 }
 
 /** Read ownership records under their existing lock without Docker recovery, Keychain access, or writes. */
-export async function readRetainedData(directory: string): Promise<Array<{ name: string; data: DataStatus }>> {
+export async function withRetainedData<T>(directory: string, read: (records: Array<{ name: string; data: DataStatus }>) => Promise<T>): Promise<T> {
   if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Owned databases currently require macOS.');
   const root = await acquireRoot(directory, true);
   try {
-    return (await retainedRecords(root)).map(record => ({ name: record.name, data: {
+    const records = (await retainedRecords(root)).map(record => ({ name: record.name, data: {
       resources: record.resources.map(({ name, type }) => ({ name, type })), running: false,
       ...(record.pending || record.resources.some(resource => resource.container) ? { cleanup: {
         code: 'CLEANUP_INCOMPLETE' as const,
@@ -103,6 +103,7 @@ export async function readRetainedData(directory: string): Promise<Array<{ name:
         ...(record.pending?.operation === 'remove-credential' ? { operation: 'remove-credential' as const } : {}),
       } } : {}),
     } }));
+    return await read(records);
   } finally { await root.close(); }
 }
 

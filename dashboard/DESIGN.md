@@ -84,11 +84,14 @@ Align the header's sidebar trigger with the navigation icons below it. Use a 24p
 
 A preview name opens its details with one click. Keep the worktree path adjacent so previews with similar names remain distinguishable.
 
-Keep search and status filters above the scrolling list. Opening details preserves both.
+Group search and the compact status filter between navigation and the scrolling list. Opening details preserves both.
 Order active work first, then entries that need attention, with stable path/name ordering.
 Each sidebar row has a separate action menu; using it must not navigate to that preview.
-Reuse the same actions in the overview and details. Hide unsafe operations and let the
-server reject stale confirmations. Never offer Remove entry for an unreachable owner.
+Keep each action trigger inside its row, aligned with the preview name. Show the path
+and status below the name. Reuse the same actions in the overview and details.
+Every entry offers Recheck status and Remove entry. Removal explains blockers in its
+review; an unreachable owner never counts as stopped. The server rechecks cleanup
+evidence and rejects changed records before removal.
 
 Paths stay on one line. Let parent directories truncate while preserving the final segments at full contrast. Use the shared `Path` component; never use right-to-left text direction to fake truncation.
 
@@ -121,7 +124,7 @@ Compose the maintained components in `dashboard/src/components/ui/`. Reuse view-
 | Action / navigation action | `Button`, appropriate variant; native anchor for URLs |
 | Text or search input | `Input`, `InputGroup`, shared `SearchField` |
 | Labeled field and validation | `Field`, `FieldLabel`, `FieldDescription`, `FieldError` |
-| Small fixed choice list | `NativeSelect` |
+| Choice list | shadcn `Select`; no native dropdowns |
 | Preview actions | `DropdownMenu`, shared `PreviewMenu` |
 | View navigation | `Tabs`, `Sidebar`, mobile `Sheet` |
 | Tabular data | `Table` and its semantic children |

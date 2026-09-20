@@ -10,7 +10,8 @@ import { createPreviewRuntime } from './runtime.js';
 import { connectPreviewDaemon } from './client.js';
 import { startDaemon } from './daemon.js';
 import { startDashboard } from './dashboard.js';
-import { connectProject, deleteOfflineData, discoverProjectOwners, lockProject, offlinePreviews, projectOwnerDirectory, readProjectRecord, removeOfflineProject } from './project.js';
+import { reviewStaleProject, removeStaleProject, writeProjectRecord, connectProject, deleteOfflineData, discoverProjectOwners, lockProject, offlinePreviews, projectOwnerDirectory, readProjectRecord, removeOfflineProject } from './project.js';
+import { createDataOwner } from './data.js';
 import { SecretSetup } from './secrets-setup.js';
 import { testKeychain } from './testSupport/keychain.js';
 import type { PreviewSpec } from './contracts.js';
@@ -176,6 +177,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
     record = (await readProjectRecord(ownerDirectory))!;
     const data = (await offlinePreviews(record))[0].data!;
     await assert.rejects(removeOfflineProject(ownerDirectory), { code: 'BUSY' });
+    await assert.rejects(reviewStaleProject(ownerDirectory), { code: 'CLEANUP_INCOMPLETE' });
     await assert.rejects(client.deleteData('app'), { code: 'EXECUTION_DENIED' });
     await assert.rejects(deleteOfflineData(ownerDirectory, 'app', { expected: { attemptId: null, resources: [{ name: 'other', type: 'postgres' }] } }), { code: 'STALE_ATTEMPT' });
     const lock = await lockProject(ownerDirectory);
@@ -199,4 +201,42 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
     await client.close(); await authorized.close();
     await rm(ownerDirectory, { recursive: true, force: true }); await rm(project, { recursive: true, force: true });
   }
+});
+
+
+test('stale removal checks process liveness, locks, exact records, and data metadata without stopping anything', mac, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-stale-record-'));
+  const projectDirectory = join(directory, 'removed-source');
+  const recordDirectory = join(directory, createHash('sha256').update(projectDirectory).digest('hex'));
+  await mkdir(recordDirectory, { mode: 0o700 });
+  const dataDirectory = join(directory, 'data');
+  const data = await createDataOwner({ directory: dataDirectory }); await data.close();
+  const exitedPid = Number((await execute(process.execPath, ['-e', 'console.log(process.pid)'])).stdout);
+  const record = { projectDirectory, dataDirectory, endpoint: 'http://127.0.0.1:1', pid: exitedPid };
+  try {
+    await writeProjectRecord(recordDirectory, { ...record, pid: process.pid });
+    await assert.rejects(reviewStaleProject(recordDirectory), { code: 'BUSY' });
+    await writeProjectRecord(recordDirectory, record);
+    const lock = await lockProject(recordDirectory);
+    try { await assert.rejects(removeStaleProject(recordDirectory, record), { code: 'BUSY' }); }
+    finally { await lock.close(); }
+    const dataInUse = await createDataOwner({ directory: dataDirectory });
+    try { await assert.rejects(reviewStaleProject(recordDirectory), { code: 'BUSY' }); }
+    finally { await dataInUse.close(); }
+    const invalid = join(dataDirectory, 'app.json');
+    await writeFile(invalid, '{}', { mode: 0o600 });
+    await assert.rejects(reviewStaleProject(recordDirectory), { code: 'CLEANUP_INCOMPLETE' });
+    assert.equal(await readFile(invalid, 'utf8'), '{}');
+    await rm(invalid);
+    assert.deepEqual(await reviewStaleProject(recordDirectory), record);
+    await writeProjectRecord(recordDirectory, { ...record, endpoint: 'http://127.0.0.1:2' });
+    await assert.rejects(removeStaleProject(recordDirectory, record), { code: 'STALE_ATTEMPT' });
+    await writeProjectRecord(recordDirectory, { projectDirectory, endpoint: record.endpoint, pid: exitedPid });
+    await assert.rejects(reviewStaleProject(recordDirectory), { code: 'CLEANUP_INCOMPLETE' });
+    await writeProjectRecord(recordDirectory, record);
+    await removeStaleProject(recordDirectory, record);
+    assert.equal(await readProjectRecord(recordDirectory), undefined);
+    assert.deepEqual(await offlinePreviews(record), []);
+    assert.ok(await readFile(join(recordDirectory, '.lock')));
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
