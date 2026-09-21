@@ -162,7 +162,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
   try {
     const args = [resolve('dist/cli.js'), 'start', '--project', project, '--file', file, '--allow-exec'];
     const first = JSON.parse((await traceStep('offline.first-start', () => execute(process.execPath, [...args, '--data-dir', dataDirectory, '--docker-socket', dockerSocket!], {
-      env: { ...process.env, NODE_OPTIONS: `--import=${hook}` }, timeout: 30_000,
+      env: { ...process.env, NODE_OPTIONS: `--import=${hook} --import=${JSON.stringify(resolve('scripts/diagnose-operations.mjs'))}` }, timeout: 30_000,
     }))).stdout);
     await traceStep('offline.first-query', async () => { assert.equal(await (await fetch(first.url)).text(), '1'); });
     await traceStep('offline.active-remove-denial', () => assert.rejects(client.remove('app', first.id), { code: 'BUSY' }));
@@ -172,7 +172,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
     let record = (await readProjectRecord(ownerDirectory))!;
     assert.equal(record.endpoint, undefined); assert.equal(record.dataDirectory, dataDirectory);
     assert.deepEqual((await offlinePreviews(record)).map(p => p.name), ['app']);
-    const second = JSON.parse((await traceStep('offline.second-start', () => execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` }, timeout: 30_000 }))).stdout);
+    const second = JSON.parse((await traceStep('offline.second-start', () => execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${hook} --import=${JSON.stringify(resolve('scripts/diagnose-operations.mjs'))}` }, timeout: 30_000 }))).stdout);
     await traceStep('offline.second-query', async () => { assert.equal(await (await fetch(second.url)).text(), '1'); });
     await traceStep('offline.second-shutdown', () => client.shutdown()); await rm(project, { recursive: true });
     record = (await readProjectRecord(ownerDirectory))!;
