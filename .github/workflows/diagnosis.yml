@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: c1db8700fd49a6d41013f70f0642573e03e6abc8
+          ref: f07e375b9ce886b3eb1f2efaaff32c563037232b
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -31,7 +31,7 @@ jobs:
       - run: npx tsc -p tsconfig.test.json
       - name: Windows ownership, processes, transport, and password storage
         if: runner.os == 'Windows'
-        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js .local/test-build/jobs.integration.test.js .local/test-build/project.integration.test.js .local/test-build/mcp-access.integration.test.js
       - name: Verify installed package
         shell: bash
         run: |
