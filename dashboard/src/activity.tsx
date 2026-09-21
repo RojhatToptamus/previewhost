@@ -53,10 +53,10 @@ export function Activity(props: Props) {
   return (
     <>
       {deletionNeedsRetry(p) ? (
-        <Notice title="Data reset incomplete" error>
+        <Notice title="Data deletion incomplete" error>
           Managed data was deleted, but its database credential could not be
-          removed. Resolve the Keychain error, then choose Reset data to finish
-          and start again.
+          removed. Resolve the Keychain error, then retry Delete data or Reset
+          data.
         </Notice>
       ) : needsCleanup(p) ? (
         <Notice title="Cleanup needs attention" error>
@@ -69,10 +69,7 @@ export function Activity(props: Props) {
           there.
         </Notice>
       ) : !p?.candidate && latest?.state === "failed" && !failedJob ? (
-        <Notice
-          title={p?.active ? "Update failed" : "Startup failed"}
-          error
-        >
+        <Notice title={p?.active ? "Update failed" : "Startup failed"} error>
           <p>
             {latest.error?.message ?? "Review the latest attempt for details."}
           </p>
@@ -81,27 +78,21 @@ export function Activity(props: Props) {
           </Button>
         </Notice>
       ) : !p?.candidate && latest?.state === "canceled" ? (
-        <Notice
-          title={p?.active ? "Update canceled" : "Startup canceled"}
-        >
+        <Notice title={p?.active ? "Update canceled" : "Startup canceled"}>
           Nothing was started again automatically. Ask your agent to continue
           only when you are ready.
         </Notice>
       ) : null}
-      {owner.legacy && (
-        <Notice title="Owner update needed">
-          This owner runs an older build. New controls require an explicit owner
-          upgrade; this page will not restart it.
-        </Notice>
-      )}
       {p && (
         <>
           {p.active && latest && p.active.id !== latest.id ? (
             <div className="attempt-split">
-              {([
-                ["Serving", p.active],
-                ["Latest update", latest],
-              ] as const).map(([label, attempt]) => (
+              {(
+                [
+                  ["Serving", p.active],
+                  ["Latest update", latest],
+                ] as const
+              ).map(([label, attempt]) => (
                 <div key={label}>
                   <p className="text-muted-foreground">{label}</p>
                   <code title={attempt.id}>{attempt.id.slice(0, 8)}</code>
@@ -131,11 +122,6 @@ export function Activity(props: Props) {
         <Notice title="Configuration needs attention" error>
           {owner.configuration.error.message}
           {p?.active ? " The running app is unchanged." : ""}
-        </Notice>
-      )}
-      {owner.legacy && p?.active && (
-        <Notice title="Stop through the CLI">
-          Run <code>previewhost stop {p.name}</code> from this project.
         </Notice>
       )}
       <Section title="Recent attempts">
@@ -246,7 +232,7 @@ export function Activity(props: Props) {
   );
 }
 
-function Services({ entry, mutate, acting, openLogs }: Props) {
+function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
   const p = entry.preview!;
   const attempt = p.active ?? p.candidate ?? p.latest;
   if (!attempt && !p.data) return null;
@@ -277,15 +263,6 @@ function Services({ entry, mutate, acting, openLogs }: Props) {
                 : "stopped",
       } as ServiceStatus,
     ]);
-  const canReset = Boolean(
-    p.data?.resources.length &&
-    p.latest &&
-    (p.active || ["stopped", "failed"].includes(p.latest.state)) &&
-    !p.busy &&
-    !p.candidate &&
-    (!needsCleanup(p) || deletionNeedsRetry(p)) &&
-    !entry.owner.legacy,
-  );
   return (
     <Section title="Services">
       <div className="data-table service-table">
@@ -363,49 +340,6 @@ function Services({ entry, mutate, acting, openLogs }: Props) {
           </TableBody>
         </Table>
       </div>
-      {canReset && (
-        <div className="reset-row">
-          <ConfirmAction
-            label="Reset data"
-            danger
-            disabled={acting}
-            mutate={mutate}
-            request={{
-              title: `Reset data for ${p.name}?`,
-              description: `Stops this preview, deletes the managed data below, then starts the ${p.active ? "serving" : "latest"} configuration and runs setup again. Deletion and job writes cannot be rolled back.`,
-              details: (
-                <>
-                  <Path value={entry.owner.project ?? ""} />
-                  <ul className="list-disc pl-5">
-                    {p.data!.resources.map((resource) => (
-                      <li key={resource.name}>
-                        {resource.name} · {types[resource.type]}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-muted-foreground">
-                    External databases and saved secrets are not deleted.
-                  </p>
-                </>
-              ),
-              body: {
-                action: "resetData",
-                owner: entry.owner.id,
-                name: p.name,
-                resources: p.data!.resources,
-                expected: {
-                  active: p.active?.id ?? null,
-                  candidate: p.candidate?.id ?? null,
-                  latest: p.latest!.id,
-                },
-              },
-              message:
-                "Data deleted. Startup requested; check setup jobs below.",
-              confirmLabel: "Delete data and start",
-            }}
-          />
-        </div>
-      )}
       {!!attempt?.sources?.length && (
         <details>
           <summary>Source folders</summary>

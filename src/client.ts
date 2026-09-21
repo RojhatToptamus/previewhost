@@ -146,6 +146,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
     saveConfiguration: (name, attemptId) => call('saveConfiguration', { name, attemptId }),
     secretsList: () => call('secrets/list', {}),
     secretsOpen: (id, opts = {}) => call('secrets/open', { id }, opts.signal),
+    remove: async (name, attemptId = null) => { await call('remove', { name, attemptId }); },
     info: () => call('info', {}),
     inspect: (spec) => call('inspect', { spec }),
     start: (spec) => call('start', { spec }),

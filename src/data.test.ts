@@ -1,5 +1,5 @@
 import test, { beforeEach } from 'node:test';
-import { testKeychain } from './testSupport/keychain.js';
+import { testKeystore } from './testSupport/keystore.js';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { Socket } from 'node:net';
@@ -12,8 +12,8 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createDataOwner, type DataOwner } from './data.js';
 beforeEach(async (t) => {
-  assert.ok('mock' in t, 'The isolated Keychain must belong to a test context.');
-  if (process.platform === 'darwin') await testKeychain(t);
+  assert.ok('mock' in t, 'The isolated keystore must belong to a test context.');
+  if (process.platform === 'darwin') await testKeystore(t);
 });
 import { createPreviewRuntime } from './runtime.js';
 
@@ -73,6 +73,24 @@ test('a FIFO retained record cannot block owner startup while holding the kernel
     await rm(join(directory, 'sample.json'));
     const next = await createDataOwner({ directory }); await next.close();
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('older retained records require an explicit reset without changing files or Docker resources', mac, async () => {
+  const fixture = await faultEngine('volume-lost-absent');
+  try {
+    const owner = await createDataOwner({ directory: fixture.data });
+    await owner.close();
+    const ownerId = (await readFile(join(fixture.data, '.lock'), 'utf8')).trim();
+    for (const schema of [1, 2]) {
+      const contents = JSON.stringify({ schema, name: 'sample', owner: ownerId,
+        engine: { id: fixture.engineId, socket: fixture.socket }, resources: [{ name: 'database', type: 'postgres',
+          ...(schema === 1 ? { password: 'FAKE_previous_password' } : { credentialRef: 'a'.repeat(32) }) }] });
+      await writeFile(join(fixture.data, 'sample.json'), contents, { mode: 0o600 });
+      await assert.rejects(createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket }), /new data directory/i);
+      assert.equal(await readFile(join(fixture.data, 'sample.json'), 'utf8'), contents);
+      assert.equal(fixture.mutationRequests, 0);
+    }
+  } finally { await fixture.close(); }
 });
 
 test('absent lost creation remains owned until positively observed; failed close retains the lock', mac, async () => {
@@ -239,9 +257,9 @@ test('concurrent new names cannot exceed the retained-data limit', mac, async ()
   const ownerId = (await readFile(join(fixture.data, '.lock'), 'utf8')).trim();
   for (let i = 0; i < 127; i++) {
     const name = `saved-${i}`;
-    await writeFile(join(fixture.data, `${name}.json`), JSON.stringify({ schema: 1, name, owner: ownerId,
+    await writeFile(join(fixture.data, `${name}.json`), JSON.stringify({ schema: 3, name, owner: ownerId,
       engine: { id: fixture.engineId, socket: fixture.socket }, resources: [{ name: 'database', type: 'postgres',
-        password: randomBytes(32).toString('hex') }] }), { mode: 0o600 });
+        credentialRef: randomBytes(16).toString('hex') }] }), { mode: 0o600 });
   }
   owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
   const controller = new AbortController();

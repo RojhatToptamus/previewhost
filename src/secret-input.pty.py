@@ -12,7 +12,7 @@ import sys
 import termios
 import time
 
-node, module = sys.argv[1:]
+node, module = sys.argv[1:3]
 driver = """
 import {readSecretInput} from MODULE;
 import {createHash} from 'node:crypto';
@@ -82,6 +82,46 @@ def terminal(mode, chunks, shell=False):
         finally:
             os.close(master)
 
+
+if len(sys.argv) == 5:
+    # Exercise the actual CLI across separate processes, with a disposable home.
+    cli_driver, home = sys.argv[3:]
+    password = b'FAKE_cli_password'
+
+    def cli(args, prompts, expected):
+        master, slave = pty.openpty()
+        process = subprocess.Popen([node, '--disable-warning=ExperimentalWarning', cli_driver, 'secrets', *args],
+                                   stdin=slave, stdout=slave, stderr=slave,
+                                   env={**environment, 'HOME': home}, start_new_session=True)
+        os.close(slave)
+        output = b''
+        try:
+            for prompt, value in prompts:
+                part = read(master, prompt, 5)
+                assert prompt in part, part
+                output += part
+                os.write(master, value + b'\r')
+            output += read(master, seconds=2)
+            process.wait(timeout=3)
+            assert expected in output, output
+            assert b'FAKE_' not in output, 'Private input was echoed.'
+            assert termios.tcgetattr(master)[3] & termios.ECHO
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=3)
+            os.close(master)
+
+    unlock = (b'Keystore password', password)
+    cli(['init'], [unlock, (b'Confirm password', password)], b'"created":true')
+    cli(['init'], [], b'already exists')
+    cli(['list'], [(b'Keystore password', b'FAKE_wrong')], b'password is incorrect')
+    cli(['set', 'cli/ref'], [unlock, (b'Secret value', b'FAKE_value')], b'"saved":"cli/ref"')
+    cli(['list'], [unlock], b'"ids":["cli/ref"]')
+    cli(['remove', 'cli/ref'], [unlock], b'"removed":"cli/ref"')
+    cli(['list'], [unlock], b'"ids":[]')
+    print(json.dumps({'checks': 7, 'hiddenInput': True, 'terminalRestored': True}))
+    sys.exit(0)
 
 normal = 'FAKE_hidden_ü'.encode()
 output = terminal('hidden', [(normal + b'\r', 0.2)])

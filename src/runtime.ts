@@ -14,6 +14,7 @@ import type { Resource } from './resources.js';
 import { startEnvironment } from './environment.js';
 import { createDataOwner, type DataOwner } from './data.js';
 import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
+import { Keystore } from './keystore.js';
 import { savePreviewSpec } from './config.js';
 
 interface Attempt {
@@ -41,7 +42,11 @@ interface Slot {
 }
 
 export interface PreviewRuntime extends PreviewApi {
+  readonly keystore: Keystore;
   sourceRoots(): string[];
+  /** Forget stopped history only; resource deletion is a separate authorized operation. */
+  remove(name: string | undefined, attemptId: string | null): boolean;
+  isEmpty(): boolean;
   allowSources(directories: string[], signal: AbortSignal): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
@@ -76,8 +81,9 @@ export async function createPreviewRuntime(options: RuntimeOptions): Promise<Pre
     throw new PreviewError('INVALID_INPUT', 'Owner inputs must be at most 128 named strings of at most 4096 characters.');
   }
   if (options.dockerSocket && !options.dataDirectory) throw new PreviewError('INVALID_INPUT', 'dockerSocket requires a dataDirectory.');
-  const data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket }) : undefined;
-  return new Runtime(roots, options.authorize, inputs, secretIds, data);
+  const keystore = new Keystore();
+  const data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket, keystore }) : undefined;
+  return new Runtime(roots, options.authorize, inputs, secretIds, data, keystore);
 }
 
 class Runtime implements PreviewRuntime {
@@ -87,8 +93,9 @@ class Runtime implements PreviewRuntime {
   private closing?: Promise<void>;
   constructor(
     private readonly roots: string[], private readonly authorize: RuntimeOptions['authorize'],
-    private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data?: DataOwner,
+    private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data: DataOwner | undefined, readonly keystore: Keystore,
   ) {
+    this.privateDirectories.add(keystore.directory);
     if (data) this.privateDirectories.add(data.directory);
     for (const name of data?.names() ?? []) this.slots.set(name, { name, cleanup: new Set() });
   }
@@ -198,6 +205,22 @@ class Runtime implements PreviewRuntime {
     }
     this.checkNodeCapacity(spec);
     return this.begin(slot, spec, 'replace');
+  }
+
+  isEmpty(): boolean { return this.slots.size === 0; }
+
+  remove(name: string | undefined, attemptId: string | null): boolean {
+    this.assertOpen();
+    if (!requestSchemas.remove.safeParse({ name, attemptId }).success) throw new PreviewError('INVALID_INPUT', 'Invalid entry removal request.');
+    if (name === undefined) {
+      if (this.slots.size) throw new PreviewError('BUSY', 'Remove this project’s previews first.');
+      return false;
+    }
+    const slot = this.slots.get(name);
+    if ((slot?.latest?.summary.id ?? null) !== attemptId) throw new PreviewError('STALE_ATTEMPT', 'This preview changed. Review it before removing its entry.');
+    if (slot && isLive(slot)) throw new PreviewError('BUSY', 'Stop the preview and resolve cleanup before removing its entry.');
+    if (this.data?.status(name)) throw new PreviewError('BUSY', 'Delete the retained managed data before removing its entry.');
+    return this.slots.delete(name);
   }
 
   async list(): Promise<PreviewStatus[]> { return [...this.slots.values()].map((slot) => this.status(slot)); }
@@ -311,7 +334,7 @@ class Runtime implements PreviewRuntime {
     if (options.expected) {
       const expected = options.expected;
       const resources = data.resources;
-      if (slot.latest?.summary.id !== expected.attemptId || resources.length !== expected.resources.length ||
+      if ((slot.latest?.summary.id ?? null) !== expected.attemptId || resources.length !== expected.resources.length ||
           resources.some(resource => !expected.resources.some(item => item.name === resource.name && item.type === resource.type))) {
         throw new PreviewError('STALE_ATTEMPT', 'The preview or managed databases changed. Review them before deleting data.');
       }
@@ -341,6 +364,7 @@ class Runtime implements PreviewRuntime {
         throw new PreviewError('CLEANUP_INCOMPLETE', 'Some preview resources could not be verified as stopped. Inspect status and retry stop.');
       }
       await this.data?.close();
+      this.keystore.close();
     })();
     try { await this.closing; }
     catch (error) { this.closing = undefined; throw error; }
@@ -389,7 +413,7 @@ class Runtime implements PreviewRuntime {
         throw new PreviewError('SOURCE_DENIED', 'The source directory changed during authorization.');
       }
       this.admitted(slot, attempt);
-      secrets = await resolveSecrets(secretRequirements(spec, this.secretIds), signal);
+      secrets = await resolveSecrets(secretRequirements(spec, this.secretIds), signal, this.keystore);
       validateResolvedInputs(spec, this.inputs, secrets);
       this.admitted(slot, attempt);
       if (!slot.gateway) {

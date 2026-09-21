@@ -169,7 +169,7 @@ previewhost serve --root "$PWD" --allow-exec \
 Leave this terminal open.
 `--root` permits these application directories. `--allow-exec` permits application commands and managed database operations with your user permissions.
 The commands do not run in an OS sandbox.
-`--data-dir` retains this environment's database records. Generated database credentials stay in macOS Keychain.
+`--data-dir` retains this environment's database records. Generated database credentials stay in the password-backed encrypted keystore.
 `--token-file` selects this daemon's control token. Keep its value private.
 
 In a second terminal in the same example directory, inspect the recipe:
@@ -179,7 +179,14 @@ previewhost inspect --file environment.yaml --token-file .local/token
 ```
 
 Inspection verifies the recipe and source paths. It does not start services or prove that the databases are healthy.
-Start the environment:
+Unlock the owner’s keystore through private setup first. The browser can create it if needed:
+
+```sh
+previewhost secrets setup --file environment.yaml --token-file .local/token
+```
+
+This unlocks storage for generated database passwords. It starts no application.
+Then start the environment:
 
 ```sh
 previewhost start --file environment.yaml --token-file .local/token

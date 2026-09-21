@@ -102,7 +102,7 @@ For migration logs, run `previewhost logs shop ATTEMPT_ID --source migrate`.
 Replace `ATTEMPT_ID` with the failed attempt ID. MCP `preview_logs` accepts the same `source` and an optional `after` cursor.
 See [log limits and incremental reads](api.md#methods).
 
-**Reset data** in Activity stops the environment, deletes managed data, and starts the retained configuration again.
+**Reset data** in the preview menu stops the environment, deletes managed data, and starts the retained configuration again.
 Once-only jobs run against the new data. External databases and saved user secrets remain.
 
 If deletion fails, startup does not run. If startup fails after deletion, fix the cause before **Retry start**.

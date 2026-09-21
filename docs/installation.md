@@ -6,11 +6,14 @@ Install the CLI for terminal and MCP use, or add Previewhost to a Node.js projec
 
 | Requirement | When you need it |
 | --- | --- |
-| macOS and Node.js 22.23 or later | The supported Previewhost runtime. Linux and Windows remain unverified. |
+| macOS and Node.js 22.23 or later | Native commands, automatic owners, and managed databases. |
 | `ps` and `lsof` | Native application commands use the macOS tools for process and listener checks. |
-| macOS 13 or later | Stored secrets and managed database credentials use Keychain. |
+| macOS 13 or later | Optional automatic keystore unlock through Keychain. |
+| An unlocked keystore | Stored secrets and managed database credentials. See [Secrets](secrets.md). |
 | A local Docker Engine | Managed PostgreSQL and Redis only. See [Databases](databases.md#prepare-docker). |
 | Your application's dependencies | Install these before startup, or declare [setup jobs](jobs.md). |
+
+Password-only keystore access also has Linux test coverage. Windows remains unverified. This does not establish cross-platform preview support.
 
 The published npm package includes the native helper. Installation needs no compiler or GitHub access.
 
@@ -41,6 +44,8 @@ See the [library guide](library.md) for a complete program.
 
 ## Update an installation
 
+If you used Previewhost before the encrypted keystore, follow the [reset instructions](../README.md#reset-required-for-earlier-installations) before restarting previews.
+
 For a global installation:
 
 ```sh
@@ -56,4 +61,4 @@ previewhost shutdown
 ```
 
 Then start the preview again. Managed data and stored values remain, but owner shutdown ends secret access approvals.
-An updated Keychain helper can need approval again. See [secret access troubleshooting](troubleshooting.md#stored-secrets-are-missing-or-inaccessible).
+Each restarted owner needs keystore unlock unless automatic unlock is available. See [secret access troubleshooting](troubleshooting.md#stored-secrets-are-missing-or-inaccessible).

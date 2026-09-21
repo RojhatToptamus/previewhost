@@ -73,6 +73,15 @@ The callback must decide whether to allow the requested operation. Without it, t
 Managed databases also require `dataDirectory`, a private directory outside the source tree, and the [database prerequisites](databases.md#prepare-docker).
 See [runtime configuration](api.md#runtime-and-client) for callback arguments and selected inputs.
 
+For stored secrets, select the exact reference names in `secretIds` when you create the runtime.
+Stored secrets and managed databases also require an unlocked `runtime.keystore` session.
+`runtime.keystore.status()` reports `new`, `locked`, or `unlocked` and attempts remembered automatic unlock on macOS.
+For an existing locked keystore, collect the password through your host's private input.
+Call `runtime.keystore.unlock({ password })` before startup.
+
+Use [keystore setup](secrets.md) to create storage before this workflow. Unlocking the CLI or dashboard does not unlock this runtime.
+`runtime.close()` also closes its keystore session.
+
 ## Connect to an existing daemon
 
 Use `connectPreviewDaemon` to control a daemon that already runs. It implements the same `PreviewApi` interface as the runtime.

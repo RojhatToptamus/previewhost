@@ -21,7 +21,11 @@ Stop ends owned processes and retains managed database data.
 ## Get started
 
 Previewhost supports macOS and requires Node.js 22.23 or later.
-Stored secrets and managed databases require macOS 13 or later. Linux and Windows remain unverified.
+Native commands, automatic project owners, and managed databases require macOS.
+The encrypted keystore supports password access across platforms. Password-only tests also run on Linux; Windows remains unverified.
+Automatic unlock requires macOS 13 or later.
+
+For an installation from before the encrypted keystore, follow the [reset instructions](#reset-required-for-earlier-installations) before starting previews.
 
 Choose the interface you need:
 
@@ -69,6 +73,20 @@ The dashboard opens in your browser and needs its terminal to remain open. Closi
 The [optional agent skill](https://github.com/RojhatToptamus/previewhost/blob/main/skills/previewhost/SKILL.md) ships in the npm package under
 `dist/skills/previewhost`. Install it through your client's skill mechanism.
 MCP registration and skill installation are separate operations.
+
+## Reset required for earlier installations
+
+This release does not read, migrate, or delete earlier Keychain secrets or retained-data records.
+
+1. Stop earlier Previewhost owners.
+2. Run `previewhost secrets init`, then [enter required user secrets](docs/secrets.md#change-a-stored-value) through private input.
+3. For new managed databases, choose a fresh `--data-dir`.
+4. Keep old data directories, Docker volumes, and Keychain items until you decide how to retain them.
+
+For valuable old database data, use the earlier release to access and export it first.
+Use that release for any explicit cleanup of old data.
+Removing a record or generating a new password does not recover its database.
+See [keystore recovery](docs/troubleshooting.md#stored-secrets-are-missing-or-inaccessible) for backups and lost passwords.
 
 ## Development
 

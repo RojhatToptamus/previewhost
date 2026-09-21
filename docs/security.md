@@ -65,13 +65,12 @@ A spec cannot select arbitrary host environment values.
 Only the service with the binding receives the selected value.
 PostgreSQL probes ignore ambient PG credentials and `.pgpass`.
 
-`RuntimeOptions.secretIds` and repeated `--secret ID` select exact user Keychain
+`RuntimeOptions.secretIds` and repeated `--secret ID` select exact user keystore
 entries. Any execution-authorized client can bind a selected ID to its supplied code.
 
 Private setup can add names only after the owner approves them through its browser capability.
 Approval revalidates source scope and preserves the 128-name bound. It lasts until owner shutdown.
-The exact name identifies one shared Keychain value across owners. No worktree prefix is added.
-
+The exact name identifies one shared keystore value across owners; no worktree prefix is added.
 These selections provide no isolation between clients.
 The binding limits which service receives a value. It does not establish trust
 in the receiving code.
@@ -107,10 +106,8 @@ Direct CLI/library file input retains the caller's filesystem authority.
 The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewd/projects`.
 A SHA-256 digest of that path gives it a fixed-length filesystem address. It is not a configuration signature or permission grant.
 A permanent Darwin kernel lock prevents concurrent owners for one project. It is held through runtime cleanup.
-
-The connection file contains only endpoint, PID and project path, and is published after the listener is ready.
-Clients authenticate with the existing private token, then check the responding project and requested launch options.
-
+The private connection file contains endpoint, PID, project path, data directory, and any explicit Docker socket. It is published after listener readiness.
+Clients authenticate with the existing private token, then verify the responding project and requested launch options.
 The file cannot authorize a new owner or restore browser-added name grants.
 
 Cold startup uses current CLI arguments or MCP registration options. `--allow-exec` retains its broad trusted-owner authority.
@@ -118,11 +115,23 @@ Omitted options can reuse a living owner. Incompatible explicit options are reje
 Explicit endpoint/token mode never automatically starts or adopts an owner.
 An idle owner remains alive so approvals and applications survive agent pauses and adapter disconnection.
 
-Clean shutdown removes the connection record after runtime cleanup. It retains stored credentials and managed data.
-
+Clean shutdown removes the endpoint and PID after runtime cleanup. If managed data remains,
+the same file retains its location and project path. Otherwise the file is removed.
+Stored credentials and managed data remain. These paths restore no execution or secret grants.
+Offline status reads validated ownership records without Docker recovery or keystore access.
+Explicit offline deletion holds the project lock, checks the selected resources, then reuses
+the existing data owner’s deletion checks. The dashboard requires its private session and
+confirmation; CLI offline deletion requires `--allow-exec`.
+Offline deletion requires an unlocked keystore before it changes Docker resources. The dashboard uses its Secret Manager session; offline CLI deletion needs macOS automatic unlock.
+Removing an entry is blocked while work, private setup, data, or cleanup remains.
+An empty automatic owner closes after its last entry is removed, ending dynamic approvals.
 A crash or failed cleanup keeps the connection record. An unreachable listener does not prove application cleanup.
-Before removing that record, check that the old owner's resources and external preparation processes stopped.
-Never kill a process based only on the recorded PID. The system can reuse a PID. See [recovery](troubleshooting.md#the-client-cannot-find-the-daemon).
+Dashboard removal checks that the recorded PID is absent, the connection record is unchanged,
+and validated managed-data records are empty. It holds both existing locks through removal.
+The user must separately confirm that application processes have stopped; these checks do
+not prove orphaned native-process cleanup. Unknown data locations block removal.
+No process is stopped, data deleted, secret accessed, or authorization restored by removal.
+Never kill a process based only on the recorded PID; it can have been reused. See [recovery](troubleshooting.md#the-client-cannot-find-the-daemon).
 
 ## Retained storage identifiers
 
@@ -133,7 +142,7 @@ The following storage identifiers are unchanged:
 - Docker names retain `previewd-`. Ownership labels retain `io.previewd.*`.
 - Managed PostgreSQL retains its `previewd` user and database.
 
-The [Keychain access rules](#stored-secrets-and-private-entry) still apply to package updates.
+The [Keystore access rules](#stored-secrets-and-private-entry) still apply to package updates.
 The internal `x-previewd-hops` header also remains unchanged so old and new gateways detect loops together.
 
 ## Native processes
@@ -172,14 +181,14 @@ See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
 
 ## Database ownership and recovery
 
-Managed PostgreSQL and Redis require macOS Keychain, a local Docker Engine, downloaded database images, and private data storage.
+Managed PostgreSQL and Redis require macOS and an unlocked keystore, a local Docker Engine, downloaded database images, and private data storage.
 Automatic project owners create their own storage directories. Manual daemons and embedded runtimes require an explicit data directory.
 See [database prerequisites](databases.md#prepare-docker).
 previewhost does not pull images, create networks, use remote Engines, or change Docker contexts.
 
 The data directory uses mode 0700 and records use mode 0600.
-Schema 2 records retain resource identities, credential references, and pending mutations.
-Generated passwords use individual Keychain items in an internal namespace.
+Schema 3 records retain resource identities, credential references, and pending mutations.
+Generated passwords use the internal database namespace in the encrypted keystore.
 User-secret commands cannot read or edit those items.
 
 A lifetime kernel lock permits one owner per data directory.
@@ -193,22 +202,18 @@ The local account and Docker administrator still control these resources.
 
 ### Credentials and backups
 
-On authorized open, previewhost migrates schema 1 records by copying and checking
-each password before it atomically saves the reference-only record.
-A conflict or failed copy preserves the original record.
-Retry compares exact values and never rotates the database password.
-Explicit schema 1 deletion also removes identifiable partial migration copies.
+Earlier data record formats are unsupported. Loading them fails before Docker cleanup or credential changes.
+There is no migration path. See the [reset instructions](../README.md#reset-required-for-earlier-installations).
 
-For a new database, previewhost stores and checks its password before it saves the
-owner record and requests Docker creation. A crash before record creation can
-leave an unused Keychain item. No Docker data exists at that point.
-Keychain and filesystem writes do not share a transaction.
+For a new database, Previewhost stores its password before publishing the owner record or requesting Docker creation.
+A crash before record creation can leave an unused encrypted credential. No Docker data exists at that point.
+Keystore and data-record writes do not share a transaction.
 Missing retained credentials block database open without password or volume regeneration.
 
-A data-directory backup does not contain schema 2 passwords.
-Back up or transfer the Keychain separately.
-Old schema 1 backups can contain plaintext passwords.
-previewhost provides no credential export or automatic synchronization.
+A data-directory backup contains credential references, not passwords.
+A credential backup needs both the keystore directory and retained-data directories, copied with all owners, dashboards, and secret commands stopped.
+Back up database contents separately. These directories do not contain Docker volume data.
+The password must remain available separately. Previewhost provides no plaintext export or automatic synchronization.
 
 ### Stop and data deletion
 
@@ -217,7 +222,7 @@ Authorized `deleteData` removes a stopped environment's owned data.
 It excludes source directories, external databases, images, caches, and networks.
 
 After Docker removal, previewhost records the pending credential deletion before it
-calls Keychain. An unknown result remains pending for an explicit retry.
+updates the keystore. An unknown result remains pending for an explicit retry.
 Stop and daemon shutdown remain available. The next owner permits deletion retry
 and blocks database reopen until it completes.
 New databases use fresh credential references, so late deletion cannot target a
@@ -265,36 +270,35 @@ Keep secrets out of command arguments. Read logs only in trusted local clients.
 
 ## Stored secrets and private entry
 
-User entries use individual, nonsynchronizing items in the default user Keychain.
-Their service is `dev.previewhost.user`. Internal database and migration entries use
-`dev.previewhost.database` and `dev.previewhost.migration`. Item labels start with
-`previewhost: `. Entries under the former service names are not read or migrated.
+One encrypted payload contains user secrets and internal database credentials.
+The file is `~/.local/share/previewhost/keystore/secrets.sqlite`.
+AES-256-GCM authenticates the payload. Each write uses a fresh 12-byte nonce.
+Scrypt derives a 32-byte key from the password and a random 16-byte salt (`N=32768`, `r=8`, `p=1`).
+SQLite stores only the encrypted payload and its salt, nonce, and authentication tag.
+Its transactions serialize writers and recover interrupted commits. POSIX directories use mode 0700 and files use mode 0600.
+Windows uses the user's profile and its filesystem permissions.
 
-The packaged helper uses macOS Security.framework to access each entry by its service and account names.
-It supports metadata, read, atomic add-if-absent, update-in-place, and exact deletion.
-It does not grant access to all applications.
+Each owner and dashboard retains only its own unlock key. Each operation reads current stored values.
+Closing the session clears its key buffer. JavaScript strings and application processes prevent a promise of complete memory erasure.
+Unlocking does not grant reference access, source access, or execution authority.
+Same-user native code is not isolated by this mechanism.
 
-Runtime and MCP reads cannot display an OS prompt.
-Explicit owner writes can request an OS access decision.
-There is no plaintext fallback or decrypted value cache.
+On macOS, “Remember unlock” stores one derived key in the default user Keychain under `dev.previewhost.unlock`.
+The salt identifies that keystore's item. Earlier user/database Keychain namespaces are never read, modified, or deleted.
+Automatic reads cannot display an OS prompt. Explicit remember/forget operations can request an OS access decision.
+The existing helper uses bounded pipes, deadlines, and process cleanup. An interrupted OS write can have an unknown outcome.
+The helper contains arm64 and x86_64 code and has an ad hoc signature. Updates can require renewed item access approval.
+An unavailable helper or locked Keychain leaves password unlock available.
+Windows and Linux use password unlock. No plaintext fallback or cross-platform credential dependency exists.
 
-The helper contains arm64 and x86_64 code for macOS 13 or later.
-It has an ad hoc signature with identifier `dev.previewhost.keychain`.
-Package updates or architecture changes can require approval for that helper
-again in Keychain Access. The signing identifier alone does not preserve access.
-Moving an unchanged helper file preserves its signature.
-The signature does not authenticate JavaScript callers or isolate same-user processes.
-
-Values pass through pipes as base64. This encoding does not encrypt them.
-Helper input, output, and execution time have limits.
-Timeout or cancellation terminates the helper but cannot prove that a dispatched
-Keychain write failed. The result reports that the write outcome is unknown.
+Forget removes automatic unlock for future sessions. Already unlocked sessions remain usable until shutdown.
+Wrong passwords and damaged payloads never initialize a replacement store.
+Creation requires an explicit request, password confirmation, and an empty store checked inside a transaction.
 
 Private setup uses a public request ID and a separate, unpredictable write grant
 in daemon memory. Owner authorization fixes the mode, requested names, sources, and declared recipients.
 For unselected names, a private approval step adds access to the existing owner selection.
-
-Unselected entries receive no Keychain presence check before approval. Canceling later does not undo an earlier grant.
+Unselected entries receive no keystore presence check before approval. Canceling later does not undo an earlier grant.
 Missing-value setup only adds absent entries. Edit updates one existing entry.
 
 Neither operation authorizes execution or starts an application.
@@ -357,14 +361,14 @@ and user-secret entries are excluded from deletion. Jobs retain their normal per
 
 The dashboard can reopen an owner’s pending private form. Secret Manager also lists
 user-reference names and edits an existing entry in a dashboard dialog, without
-requiring a running owner. Internal database and migration entries are excluded.
-
-The authenticated dashboard session can submit a replacement value to Keychain. It cannot read stored values or grant runtime access. Values stay out of browser
+requiring a running owner. Internal database entries are excluded.
+The authenticated dashboard session may submit a replacement value to the keystore;
+it cannot read stored values or grant runtime access. Values stay out of browser
 storage, URLs, and responses. Cancel clears the field without a write. Saving uses
-the existing Keychain update operation and never recreates a removed entry.
-
-Editing changes future reads of the exact reference. It does not restart previews,
-change bindings, or extend approvals. Agent setup uses separate, expiring private forms. MCP cannot write secret values.
+the existing update-only operation and never recreates a removed entry.
+Editing changes future reads of the exact reference; it does not restart previews,
+change bindings, or extend approvals. Agent setup still uses separate, expiring
+private-form capabilities; no MCP or owner-control value-write operation is added.
 
 Explicit configuration saving selects an exact retained attempt and writes only the
 automatic owner's root `preview.yaml`. It checks source access and refuses to save if `preview.yaml` or `preview.yml` exists, including a directory or symlink. Secret/input references

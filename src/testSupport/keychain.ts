@@ -28,11 +28,5 @@ export async function testKeychain(t: TestContext) {
   t.mock.method(Keychain.prototype, 'invoke', function (request: Parameters<Keychain['invoke']>[0], options: Parameters<Keychain['invoke']>[1]) {
     return invoke.call(store, request, options);
   });
-  const installSource = `
-    import {Keychain as FixtureKeychain} from ${JSON.stringify(new URL('../keychain.js', import.meta.url).href)};
-    const fixtureStore = new FixtureKeychain(${JSON.stringify(helper)}, [${JSON.stringify(path)}]);
-    const fixtureInvoke = FixtureKeychain.prototype.invoke;
-    FixtureKeychain.prototype.invoke = function(request, options) { return fixtureInvoke.call(fixtureStore, request, options); };
-  `;
-  return { directory, path, helper, control, store, installSource };
+  return { directory, path, helper, control, store };
 }

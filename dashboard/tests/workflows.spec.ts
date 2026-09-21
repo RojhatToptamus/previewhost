@@ -205,9 +205,9 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       .filter({ hasText: "migrate" })
       .getByRole("button", { name: "Logs", exact: true })
       .click();
-    await expect(
-      page.getByRole("combobox", { name: "Log source" }),
-    ).toHaveValue("migrate");
+    await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText(
+      "migrate",
+    );
     await expect(page.locator(".logs")).toContainText("missing table");
     await page.getByRole("searchbox", { name: "Search logs" }).fill("MISSING");
     await expect(page.locator(".logs")).toContainText("missing table");
@@ -370,9 +370,8 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("link", { name: "Open app", exact: true }),
     ).toBeVisible();
     await page.getByRole("tab", { name: "Logs", exact: true }).click();
-    await page
-      .getByRole("combobox", { name: "Log source" })
-      .selectOption("web");
+    await page.getByRole("combobox", { name: "Log source" }).click();
+    await page.getByRole("option", { name: "web", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("<script>");
     await expect(page.locator(".logs")).toContainText("[browser] request failed");
     const logPanel = page.getByRole("region", { name: "Log output" });

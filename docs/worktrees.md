@@ -85,7 +85,8 @@ See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete) 
 
 ## Share or separate secrets
 
-The same exact `{secret: ID}` uses one Keychain value wherever that reference is approved.
+The same exact `{secret: ID}` uses one keystore value wherever that reference is approved.
+Each owner needs private password unlock unless automatic unlock is available on macOS.
 Each automatic owner needs its own approval unless the reference was selected at startup.
 For a different value in another worktree, use a different reference. See [Secrets](secrets.md).
 

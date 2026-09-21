@@ -1,5 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Mutate } from "../lib/api";
+import { Checkbox } from "./ui/checkbox";
+import { Field, FieldLabel } from "./ui/field";
 import { Button } from "./ui/button";
 import {
   AlertDialog,
@@ -13,8 +15,10 @@ import {
   AlertDialogAction,
 } from "./ui/alert-dialog";
 
-type Request = {
+export type Confirmation = {
   title: string;
+  blocked?: string;
+  acknowledgement?: string;
   description: string;
   details?: ReactNode;
   body: object;
@@ -34,11 +38,11 @@ export function ConfirmAction({
   accessibleLabel?: string;
   danger?: boolean;
   disabled: boolean;
-  request: Request;
+  request: Confirmation;
   mutate: Mutate;
 }) {
   // Polling must not change the operation the user is currently reviewing.
-  const [review, setReview] = useState<Request>();
+  const [review, setReview] = useState<Confirmation>();
   return (
     <AlertDialog
       open={Boolean(review)}
@@ -54,27 +58,68 @@ export function ConfirmAction({
           {label}
         </Button>
       </AlertDialogTrigger>
-      {review && (
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{review.title}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {review.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {review.details}
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant={danger ? "destructive" : "default"}
-              disabled={disabled}
-              onClick={() => void mutate(review.body, review.message)}
-            >
-              {review.confirmLabel}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      )}
+      <ConfirmationContent
+        review={review}
+        disabled={disabled}
+        danger={danger}
+        mutate={mutate}
+      />
     </AlertDialog>
   );
+}
+
+export function ConfirmationContent({
+  review,
+  disabled,
+  danger = false,
+  mutate,
+  onCloseAutoFocus,
+}: {
+  review?: Confirmation;
+  onCloseAutoFocus?: (event: Event) => void;
+  disabled: boolean;
+  danger?: boolean;
+  mutate: Mutate;
+}) {
+  const [confirmed, setConfirmed] = useState(false);
+  useEffect(() => setConfirmed(false), [review]);
+  return review ? (
+    <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{review.title}</AlertDialogTitle>
+        <AlertDialogDescription>{review.description}</AlertDialogDescription>
+      </AlertDialogHeader>
+      {review.details}
+      {review.blocked ? (
+        <p role="alert" className="text-sm text-destructive">
+          {review.blocked}
+        </p>
+      ) : review.acknowledgement ? (
+        <Field orientation="horizontal">
+          <Checkbox
+            id="cleanup-verified"
+            checked={confirmed}
+            onCheckedChange={(value) => setConfirmed(value === true)}
+          />
+          <FieldLabel htmlFor="cleanup-verified">
+            {review.acknowledgement}
+          </FieldLabel>
+        </Field>
+      ) : null}
+      <AlertDialogFooter>
+        <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogAction
+          variant={danger ? "destructive" : "default"}
+          disabled={
+            disabled ||
+            !!review.blocked ||
+            (!!review.acknowledgement && !confirmed)
+          }
+          onClick={() => void mutate(review.body, review.message)}
+        >
+          {review.confirmLabel}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  ) : null;
 }

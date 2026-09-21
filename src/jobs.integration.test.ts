@@ -11,7 +11,7 @@ import { parseSpec } from './spec.js';
 import { loadPreviewSpec, savePreviewSpec } from './config.js';
 import { PreviewError } from './errors.js';
 import type { PreviewSpec, PreviewStatus, RuntimeOptions } from './contracts.js';
-import { testKeychain } from './testSupport/keychain.js';
+import { testKeystore } from './testSupport/keystore.js';
 
 type Spec = Extract<PreviewSpec, { type: 'environment' }>;
 const native = { skip: process.platform !== 'darwin', timeout: 30_000 };
@@ -127,7 +127,7 @@ async function databaseFixture(t: test.TestContext, authorize: RuntimeOptions['a
     if (runtime) { for (const p of await runtime.list()) { await runtime.stop(p.name); if (p.data) await runtime.deleteData(p.name); } await runtime.close(); }
     await rm(directory, { recursive: true, force: true });
   });
-  const keys = await testKeychain(t);
+  const keys = await testKeystore(t);
   await keys.store.add('user', 'disposable/jobs-seed', 'fake-job-secret-value');
   const options = { allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket, secretIds: ['disposable/jobs-seed'], authorize };
   runtime = await createPreviewRuntime(options);
@@ -248,7 +248,7 @@ test('owner crash leaves an in-flight seed blocked until explicit recovery', dat
 
 test('real process logs preserve redaction, source selection, bounded output and attempt isolation', native, async t => {
   const directory = await folder(t);
-  const keys = await testKeychain(t);
+  const keys = await testKeystore(t);
   const secret = 'FAKE_split_process_secret';
   await keys.store.add('user', 'disposable/logs', secret);
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], secretIds: ['disposable/logs'], authorize: () => true });
@@ -368,7 +368,7 @@ test('dashboard reset requires explicit recovery after deletion, startup and can
     assert.equal((await rows(ready.url!, 'POST')).length, 2);
     const migration = await readFile(join(f.directory, 'migrate.mjs'), 'utf8');
     await writeFile(join(f.directory, 'migrate.mjs'), "console.error('deliberate migration failure');process.exit(6);");
-    // Volume deletion can succeed before Keychain cleanup fails. Startup must not begin.
+    // Volume deletion can succeed before keystore cleanup fails. Startup must not begin.
     const interrupted = await post(await resetRequest());
     assert.equal(interrupted.error?.code, 'SECRET_STORE_UNAVAILABLE');
     const stopped = await f.runtime.get(f.spec.name);

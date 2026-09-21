@@ -125,7 +125,7 @@ env:
   API_TOKEN: {secret: "shop/dev/api-token"}
 ```
 
-The `secret` binding names a stored Keychain value. Enter missing values through [private secret setup](secrets.md).
+The `secret` binding names a stored keystore value. Enter missing values through [private secret setup](secrets.md).
 The same exact reference shares one value across projects that approve it.
 Use a project-specific reference for credentials that must stay separate.
 

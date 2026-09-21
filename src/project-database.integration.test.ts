@@ -7,7 +7,7 @@ import test from 'node:test';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { AttemptResult, PreviewSpec, PreviewStatus, SecretSetupStatus } from './contracts.js';
-import { testKeychain } from './testSupport/keychain.js';
+import { testKeystore } from './testSupport/keystore.js';
 
 const execute = promisify(execFile);
 const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
@@ -15,20 +15,20 @@ const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
 test('global MCP defaults support private setup, isolated worktree databases and owner restart without launch overrides', {
   skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000,
 }, async t => {
-  const keychain = await testKeychain(t);
+  const keystore = await testKeystore(t);
   // Give the child a disposable home with the documented default socket, including on Colima CI.
-  const home = join(keychain.directory, 'home');
+  const home = join(keystore.directory, 'home');
   await mkdir(join(home, '.docker/run'), { recursive: true });
   await symlink(await realpath(dockerSocket!), join(home, '.docker/run/docker.sock'));
-  const capture = join(keychain.directory, 'private-url');
-  const hook = join(keychain.directory, 'preload.mjs');
-  await writeFile(hook, keychain.installSource.replace('/.local/test-build/keychain.js', '/dist/keychain.js') + `
+  const capture = join(keystore.directory, 'private-url');
+  const hook = join(keystore.directory, 'preload.mjs');
+  await writeFile(hook, keystore.installSource.replaceAll('/.local/test-build/', '/dist/') + `
     import {SecretSetup} from ${JSON.stringify(new URL('../../dist/secrets-setup.js', import.meta.url).href)};
     import {writeFile} from 'node:fs/promises';
     SecretSetup.prototype.openBrowser = async url => { await writeFile(${JSON.stringify(capture)}, url, {mode: 0o600}); };
   `, { mode: 0o600 });
-  const source = join(keychain.directory, 'source');
-  const worktree = join(keychain.directory, 'worktree');
+  const source = join(keystore.directory, 'source');
+  const worktree = join(keystore.directory, 'worktree');
   await mkdir(source);
   const api = `
     import http from 'node:http';

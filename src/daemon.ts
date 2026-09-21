@@ -200,7 +200,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       if (req.headers.host !== authority || headerCount('host') !== 1) {
         throw new PreviewError('UNAUTHORIZED', 'Requests require the exact numeric loopback Host.');
       }
-      const browser = ['/secrets/form', '/secrets/approve', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
+      const browser = ['/secrets/form', '/secrets/unlock', '/secrets/approve', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
       const asset: [string | Buffer, string] | undefined = req.url === '/secrets' ? [secretsPage, 'text/html; charset=utf-8'] : req.url === '/secrets.js' ? [secretsScript, 'text/javascript; charset=utf-8'] :
         req.url === '/secrets.css' ? [secretsStyle, 'text/css; charset=utf-8'] :
         req.url === '/fonts/geist.woff2' ? [geist, 'font/woff2'] : req.url === '/fonts/geist-mono.woff2' ? [geistMono, 'font/woff2'] : undefined;
@@ -238,12 +238,27 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       const value = await readBody(req, controller.signal);
       if (controller.signal.aborted) throw new PreviewError('CLOSED', 'The control request was closed.');
       if (browser) {
-        const result = method === 'secrets/save' ? await secrets.save(supplied, value) : (parse(requestSchemas.list, value),
+        const result = method === 'secrets/unlock' ? await secrets.unlock(supplied, value) : method === 'secrets/save' ? await secrets.save(supplied, value) : (parse(requestSchemas.list, value),
           method === 'secrets/cancel' ? secrets.cancel(supplied) : method === 'secrets/approve' ? await secrets.approve(supplied) : secrets.form(supplied));
         send(res, 200, { result });
       } else if (method === 'info') {
         parse(requestSchemas.list, value);
         send(res, 200, { result: options.owner ? { ...options.owner, allowedRoots: runtime.sourceRoots() } : null });
+      } else if (method === 'remove') {
+        const p = parse(requestSchemas.remove, value);
+        // No await between checking private setup, removing history, and retiring an empty owner.
+        secrets.assertRemovable(p.name);
+        const removed = runtime.remove(p.name, p.attemptId);
+        const removedRequest = secrets.remove(p.name);
+        if (p.name !== undefined && !removed && !removedRequest) throw new PreviewError('NOT_FOUND', 'This preview entry is no longer available.');
+        if (options.owner && runtime.isEmpty() && secrets.isEmpty()) {
+          try { await stopRuntime(); send(res, 200, { result: null }); }
+          catch (error) { fail(res, error); }
+          finally {
+            if (res.destroyed || res.writableFinished) await closeControl();
+            else res.once('finish', () => { void closeControl(); });
+          }
+        } else send(res, 200, { result: null });
       } else if (method === 'shutdown') {
         parse(requestSchemas.list, value);
         try { await stopRuntime(); send(res, 200, { result: null }); }

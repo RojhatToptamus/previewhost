@@ -6,9 +6,10 @@ import { limits, type AttemptResult, type PreviewSpec } from './contracts.js';
 import { loadPreviewSpec, readPreviewSpec, resolvePreviewFile } from './config.js';
 import { startDaemon } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
-import { listSecrets, removeSecret, setSecret, validateSecretId } from './secrets.js';
+import { validateSecretId } from './secrets.js';
+import { Keystore } from './keystore.js';
 import { readSecretInput } from './secret-input.js';
-import { connectProject, projectDirectory, type ProjectOptions } from './project.js';
+import { connectProject, managementProject, discoverProjectOwners, projectDirectory, type ProjectOptions } from './project.js';
 import { version } from './version.js';
 
 const help = `previewhost — local previews and application environments
@@ -27,12 +28,14 @@ Preview operations:
   previewhost rerun-job NAME ATTEMPT_ID JOB  (stop first; writes are not rolled back)
   previewhost replace [--file spec.yaml] [--no-wait] [--timeout-ms 30000]
   previewhost list
+  previewhost projects
+  previewhost remove [NAME]  (stopped entries only; keeps source and secrets)
   previewhost get NAME
   previewhost wait NAME ATTEMPT_ID [--timeout-ms 30000]
   previewhost logs NAME [ATTEMPT_ID] [--source SERVICE_OR_JOB] [--after CURSOR] [--max-bytes 65536]
   previewhost cancel NAME ATTEMPT_ID
   previewhost stop NAME [--after-engine-restart]
-  previewhost delete-data NAME
+  previewhost delete-data NAME [--allow-exec]
   previewhost shutdown
 
 Secrets:
@@ -40,6 +43,9 @@ Secrets:
   previewhost secrets edit ID
   previewhost secrets status REQUEST_ID [--timeout-ms 25000]
   previewhost secrets set ID [--stdin]
+  previewhost secrets init [--remember]
+  previewhost secrets remember
+  previewhost secrets forget
   previewhost secrets list
   previewhost secrets remove ID
 
@@ -60,10 +66,10 @@ of status. Managed PostgreSQL/Redis require private storage and local Docker ima
 --docker-socket selects a local Engine socket. Automatic project owners default
 to private per-project data storage; --data-dir overrides that location.
 Foreground serve still requires --data-dir for managed databases.
---secret ID selects an exact macOS Keychain entry for {secret: ID} bindings.
+--secret ID selects an exact stored reference for {secret: ID} bindings.
 --allow-exec selects no secrets by itself. Private browser setup/edit needs owner
 authorization. The private form approves unselected names for this owner lifetime,
-then collects only missing values. Shared names reuse one Keychain value.
+then collects only missing values. Shared names reuse one keystore value.
 Save starts nothing; check status and retry the ordinary preview operation afterward.
 Set/list/remove work without a daemon. Set uses hidden terminal input or bounded
 UTF-8 stdin, never an argument value. Stdin preserves whitespace and newlines.
@@ -126,7 +132,7 @@ async function main(): Promise<void> {
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
   if (command === 'secrets') { await secretCommand(positionals.slice(1), values); return; }
   const accepted: Record<string, string[]> = {
-    dashboard: [],
+    dashboard: [], projects: [], remove: ['endpoint', 'token-file'],
     serve: ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket', 'port', 'token-file'],
     mcp: ['endpoint', 'token-file'],
     inspect: ['file', 'endpoint', 'token-file'],
@@ -136,19 +142,23 @@ async function main(): Promise<void> {
     wait: ['timeout-ms', 'endpoint', 'token-file'], logs: ['max-bytes', 'source', 'after', 'endpoint', 'token-file'],
     cancel: ['endpoint', 'token-file'], stop: ['after-engine-restart', 'endpoint', 'token-file'],
     'rerun-job': ['endpoint', 'token-file'],
-    'delete-data': ['endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
+    'delete-data': ['allow-exec', 'endpoint', 'token-file'], shutdown: ['endpoint', 'token-file'],
   };
   if (!Object.hasOwn(accepted, command)) throw new PreviewError('INVALID_INPUT', 'Unknown command. Run previewhost --help.');
-  if (!['serve', 'dashboard'].includes(command)) accepted[command].push('project');
+  if (!['serve', 'dashboard', 'projects'].includes(command)) accepted[command].push('project');
   if (['mcp', 'inspect', 'start', 'replace'].includes(command)) accepted[command].push(...launchFlags);
   for (const key of Object.keys(values)) if (!accepted[command].includes(key)) throw new PreviewError('INVALID_INPUT', `--${key} is not supported for ${command}.`);
-  const counts: Record<string, [number, number]> = { 'rerun-job': [4, 4], get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
+  const counts: Record<string, [number, number]> = { remove: [1, 2], 'rerun-job': [4, 4], get: [2, 2], wait: [3, 3], logs: [2, 3], cancel: [3, 3], stop: [2, 2], 'delete-data': [2, 2] };
   const [minimum, maximum] = counts[command] ?? [1, 1];
   if (positionals.length < minimum || positionals.length > maximum) throw new PreviewError('INVALID_INPUT', `Invalid arguments for ${command}. Run previewhost --help.`);
   const tokenFile = values['token-file'] ? resolve(values['token-file']) : defaultTokenFile();
   const timeoutMs = integer(values['timeout-ms'], '--timeout-ms', limits.waitMs);
   const maxBytes = integer(values['max-bytes'], '--max-bytes', limits.logBytes, 4);
 
+  if (command === 'projects') {
+    process.stdout.write(`${JSON.stringify((await discoverProjectOwners()).map(owner => ({ id: owner.id, project: (owner.connection ?? owner.retained)?.projectDirectory, connection: owner.connection ? 'recorded' : owner.retained ? 'offline' : 'unavailable', ...(owner.error ? { error: owner.error } : {}) })))}\n`);
+    return;
+  }
   if (command === 'dashboard') {
     const { startDashboard } = await import('./dashboard.js');
     const dashboard = await startDashboard();
@@ -198,7 +208,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const project = await projectDirectory(values.project);
+  const project = await (['inspect', 'start', 'replace'].includes(command) ? projectDirectory(values.project) : managementProject(values.project));
   const client = connectProject(projectOptions(values, project));
   const inputController = new AbortController();
   const interrupt = () => { process.exitCode = 130; inputController.abort(); void client.close(); };
@@ -230,6 +240,12 @@ async function main(): Promise<void> {
         }
         break;
       }
+      case 'remove': {
+        const name = positionals[1];
+        const preview = name ? (await client.list()).find(preview => preview.name === name) : undefined;
+        await client.remove(name, preview?.latest?.id ?? null);
+        result = { removed: name ?? project }; break;
+      }
       case 'list': result = await client.list(); break;
       case 'get': result = await client.get(positionals[1]); break;
       case 'wait': attempt = { name: positionals[1], attemptId: positionals[2] }; result = await client.wait(attempt.name, attempt.attemptId, { timeoutMs }); break;
@@ -254,30 +270,48 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
   const command = positionals[0];
   const accepted: Record<string, string[]> = {
     setup: ['file', 'endpoint', 'token-file', 'reopen'], edit: ['endpoint', 'token-file'], status: ['endpoint', 'token-file', 'timeout-ms'],
-    set: ['stdin'], list: [], remove: [],
+    set: ['stdin'], list: [], remove: [], init: ['remember'], remember: [], forget: [],
   };
   for (const name of ['setup', 'edit', 'status']) accepted[name].push('project');
   for (const name of ['setup', 'edit']) accepted[name].push(...launchFlags);
   if (!Object.hasOwn(accepted, command) || Object.keys(values).some((key) => !accepted[command].includes(key))
-    || positionals.length !== (['setup', 'list'].includes(command) ? 1 : 2)) {
+    || positionals.length !== (['setup', 'list', 'init', 'remember', 'forget'].includes(command) ? 1 : 2)) {
     throw new PreviewError('INVALID_INPUT', 'Invalid secrets command arguments. Values belong only in hidden terminal input or --stdin. Run previewhost --help.');
   }
   if (['set', 'edit', 'remove'].includes(command)) validateSecretId(positionals[1]);
   const controller = new AbortController();
   let client: ReturnType<typeof connectPreviewDaemon> | undefined;
+  const store = new Keystore();
   const interrupt = () => { process.exitCode = 130; controller.abort(); void client?.close(); };
   process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
   try {
     let result: unknown;
-    if (command === 'set') {
-      const value = await readSecretInput(values.stdin === true, controller.signal);
-      await setSecret(positionals[1], value, { signal: controller.signal, interactive: true });
-      result = { saved: positionals[1] };
-    } else if (command === 'remove') {
-      await removeSecret(positionals[1], { signal: controller.signal, interactive: true });
-      result = { removed: positionals[1] };
-    } else if (command === 'list') result = await listSecrets({ signal: controller.signal });
-    else {
+    if (['init', 'set', 'remove', 'list', 'remember', 'forget'].includes(command)) {
+      if (command === 'forget') {
+        await store.forget({ signal: controller.signal });
+        result = { forgotten: true, message: 'Future sessions need your password. Already unlocked owners remain unlocked until shutdown.' };
+      } else {
+        const status = await store.status({ signal: controller.signal });
+        let warning: string | undefined;
+        if (command === 'init' || status.state !== 'unlocked') {
+          if (command === 'init' && status.state !== 'new') throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'A keystore already exists. Use secrets set, list, or remember to unlock it. Nothing was reset.');
+          if (status.state === 'new' && command !== 'init') throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Run previewhost secrets init or use private setup to create the keystore first.');
+          if (!process.stdin.isTTY) throw new PreviewError('SECRET_STORE_UNAVAILABLE', 'Keystore password entry requires a terminal or private browser setup. Unattended previews can use explicitly selected environment inputs.');
+          const password = await readSecretInput(false, controller.signal, 'Keystore password (hidden): ');
+          const confirmation = command === 'init' ? await readSecretInput(false, controller.signal, 'Confirm password (hidden): ') : undefined;
+          warning = (await store.unlock({ password, confirmation, create: command === 'init', remember: values.remember === true }, { signal: controller.signal })).warning;
+        }
+        if (command === 'set') {
+          const value = await readSecretInput(values.stdin === true, controller.signal);
+          await store.set('user', positionals[1], value, { signal: controller.signal });
+          result = { saved: positionals[1], message: 'Future starts use the new value. Running applications are unchanged.' };
+        } else if (command === 'remove') {
+          await store.remove('user', positionals[1], { signal: controller.signal }); result = { removed: positionals[1] };
+        } else if (command === 'list') result = await store.list({ signal: controller.signal });
+        else if (command === 'remember') { await store.remember({ signal: controller.signal }); result = { remembered: true }; }
+        else result = { created: true, ...(warning ? { warning } : {}) };
+      }
+    } else {
       const project = await projectDirectory(values.project);
       client = connectProject(projectOptions(values, project));
       result = command === 'setup' ? await client.secretsSetup(await readSpec(values.file, controller.signal, project), { reopen: values.reopen, signal: controller.signal }) :
@@ -289,6 +323,7 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
   } finally {
     process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt);
     await client?.close();
+    store.close();
   }
 }
 
@@ -297,7 +332,7 @@ function parseCliArgs() {
     help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' }, project: { type: 'string' }, root: { type: 'string', multiple: true },
     'allow-exec': { type: 'boolean' }, port: { type: 'string' },
     env: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'data-dir': { type: 'string' }, 'docker-socket': { type: 'string' },
-    stdin: { type: 'boolean' }, reopen: { type: 'boolean' },
+    stdin: { type: 'boolean' }, remember: { type: 'boolean' }, reopen: { type: 'boolean' },
     'after-engine-restart': { type: 'boolean' },
     endpoint: { type: 'string' }, 'token-file': { type: 'string' },
     file: { type: 'string', short: 'f' }, 'no-wait': { type: 'boolean' },

@@ -1,6 +1,6 @@
 # Dashboard
 
-Inspect previews across live project owners, open the right application, and diagnose a failed start or update.
+Inspect local previews, manage retained database data, and diagnose a failed start or update.
 
 ## Open the dashboard
 
@@ -13,13 +13,14 @@ previewhost dashboard
 The command opens your default browser. Keep its terminal running while you use the dashboard.
 Closing the page or stopping this command does not stop your previews.
 
-The dashboard lists live automatic project owners. Standalone `serve` instances and embedded runtimes do not appear automatically.
+The dashboard lists automatic project owners and data retained after clean owner shutdown. Deleted worktrees can still have retained data. Standalone `serve` instances and embedded runtimes do not appear automatically.
 It does not start owners or grant execution permissions.
 
 ## Find the right preview
 
 ![Preview overview with separate Storefront worktrees](../assets/dashboard-worktrees.png)
 
+Use search and the status filter to narrow the list. Active previews appear first. Each row has its own action menu.
 Use the source path to distinguish worktrees. **Open app** opens the serving attempt, even if a later update failed.
 
 ## Inspect services and updates
@@ -36,9 +37,15 @@ Open a preview's **Activity** tab to see services, setup jobs, and available rec
 | Stop the preview | **Stop** ends owned processes and retains managed data. |
 | Start after stop | **Start preview** uses retained configuration and current source. Its URL can change. |
 | Retry a failed initial start | **Retry start** reruns that attempt after you fix its cause. |
-| Start with fresh managed data | **Reset data** names the databases before confirmation. Deletion cannot be undone. |
+| Start with fresh managed data | In the preview menu, **Reset data** names the databases before confirmation, then starts the preview again. |
+| Delete data without restarting | After stop, **Delete data** removes the selected managed databases. Deletion cannot be undone. |
+| Clear an old entry | **Remove entry** requires no remaining work, managed data, or incomplete cleanup. Sources and saved secrets remain. |
+| Check an unavailable owner | **Recheck status** retries the connection. **Remove entry** explains blockers and requires confirmation that application processes stopped. |
 
 Start and retry do not reload `preview.yaml`. To apply file changes, use CLI or MCP start/replace with the updated file.
+Retry start does not open private setup. Complete any required secret approval and owner unlock before retrying.
+Removing the last entry closes an empty automatic owner and ends its secret approvals.
+Offline entries contain no restart configuration. Start them again through the CLI or MCP.
 See [setup jobs](jobs.md#progress-and-recovery) for explicit reruns and reset behavior.
 
 ## Read logs
@@ -55,5 +62,7 @@ In **Configuration**, **Save as preview.yaml** writes the selected attempt's rec
 Saving fails if `preview.yaml` or `preview.yml` already exists. It does not change the running application.
 Secret references remain references. Stored values do not appear in this view.
 
-**Secret Manager** edits existing stored references. **Open private form** handles missing values and access approval.
+**Secret Manager** creates or unlocks the dashboard’s keystore session, then lists references for editing.
+It also offers automatic unlock controls on macOS. Project owners unlock separately through private setup.
+**Open private form** handles missing values and access approval.
 See [Secrets](secrets.md) before changing a value shared across projects.

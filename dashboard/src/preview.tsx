@@ -1,96 +1,15 @@
 import { useState } from "react";
 import type { AttemptSummary } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
-import {
-  attempts,
-  deletionNeedsRetry,
-  hint,
-  needsCleanup,
-  pending,
-  shortProject,
-  state,
-  type Entry,
-} from "./lib/model";
+import { attempts, hint, shortProject, state, type Entry } from "./lib/model";
 import { Button } from "./components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import { AppLink, CopyButton, Notice, Path, Status } from "./components/shared";
+import { previewActions, PreviewMenu } from "./preview-actions";
 import { Activity } from "./activity";
 import { Diagnostics } from "./diagnostics";
 
 export type Tab = "activity" | "logs" | "configuration";
-export type PreviewAction = {
-  label: string;
-  danger?: boolean;
-  body: object;
-  message: string;
-};
-
-export function previewActions(entry: Entry): PreviewAction[] {
-  const { owner, preview: p, name } = entry;
-  const result: PreviewAction[] = [];
-  const request = pending(entry).find((request) => request.state === "pending");
-  if (request)
-    result.push({
-      label: "Open private form",
-      body: { action: "secretsOpen", owner: owner.id, id: request.id },
-      message: "Private form requested in your system browser.",
-    });
-  if (!p) return result;
-  if (p.candidate)
-    result.push({
-      label: p.active ? "Cancel update" : "Cancel startup",
-      danger: true,
-      body: {
-        action: "cancel",
-        owner: owner.id,
-        name,
-        attemptId: p.candidate.id,
-      },
-      message: "The selected attempt was canceled.",
-    });
-  if (
-    (p.active || needsCleanup(p) || p.url) &&
-    !deletionNeedsRetry(p) &&
-    !p.busy &&
-    !owner.legacy
-  )
-    result.push({
-      label: needsCleanup(p) ? "Retry cleanup" : "Stop",
-      danger: !needsCleanup(p),
-      body: {
-        action: "stop",
-        owner: owner.id,
-        name,
-        expected: {
-          active: p.active?.id ?? null,
-          candidate: p.candidate?.id ?? null,
-          latest: p.latest?.id ?? null,
-        },
-      },
-      message: "Preview stopped. Your database data is retained.",
-    });
-  if (
-    !p.active &&
-    !p.busy &&
-    !p.candidate &&
-    ["stopped", "failed"].includes(p.latest?.state ?? "") &&
-    !owner.legacy &&
-    !needsCleanup(p)
-  )
-    result.push({
-      label: p.latest?.state === "failed" ? "Retry start" : "Start preview",
-      body: {
-        action: "startAgain",
-        owner: owner.id,
-        name,
-        attemptId: p.latest!.id,
-      },
-      message:
-        "Startup requested with the same configuration and current source.",
-    });
-  return result;
-}
-
 export function Preview({
   entry,
   mutate,
@@ -112,9 +31,9 @@ export function Preview({
   const actions = previewActions(entry);
   const canOpen = Boolean(p?.active && p.url);
   const address = canOpen
-    ? Object.values(p?.active?.services ?? {}).find(
+    ? (Object.values(p?.active?.services ?? {}).find(
         (service) => service.url === p?.url,
-      )?.browserUrl ?? p?.url
+      )?.browserUrl ?? p?.url)
     : undefined;
   const primary = !canOpen
     ? actions.find((action) => !action.danger)
@@ -188,6 +107,12 @@ export function Preview({
               {action.label}
             </Button>
           ))}
+          <PreviewMenu
+            entry={entry}
+            mutate={mutate}
+            acting={acting}
+            managementOnly
+          />
         </div>
       </div>
       {owner.error ? (
@@ -215,7 +140,7 @@ export function Preview({
                 Logs
               </TabsTrigger>
             )}
-            {selected && !owner.legacy && (
+            {selected && (
               <TabsTrigger value="configuration" id="tab-configuration">
                 Configuration
               </TabsTrigger>

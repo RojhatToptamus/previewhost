@@ -51,7 +51,8 @@ An MCP denial remains a denial: do not switch to CLI or another daemon to bypass
 ## Operate the preview
 
 For a person comparing or managing local applications, suggest `previewhost dashboard`.
-It lists automatic project owners and supports diagnostics, Stop, Start preview, Retry start, and explicit create-only configuration saving.
+It lists automatic project owners and retained data, including offline entries.
+Use its preview menus for stop, start, reset, data deletion, and entry removal. Configuration saving remains explicit and create-only.
 Start preview reuses the retained configuration and current source without reloading YAML.
 The dashboard does not start owners or replace the private secret form.
 Keep ordinary startup in the existing CLI/MCP workflow; do not open management automatically for every preview.
@@ -117,10 +118,13 @@ Do not serialize inspection output: it omits literal environment bindings.
 - Framework arguments, allowed hosts, HMR, or origins: [framework configuration](references/docs/integrations.md#framework-configuration).
 - Multiple services or databases: [frontend, backends, PostgreSQL, and Redis walkthrough](references/examples/multi-repo/README.md), then the relevant [environment bindings](references/docs/api.md#environment-specs).
 - Existing task worktrees or shared preparation: [worktree guide](references/docs/worktrees.md).
-- Missing stored credentials: [private secret entry](references/docs/api.md#stored-secrets).
+- Stored credentials or managed database unlock: [private secret entry](references/docs/api.md#stored-secrets).
   Use `preview_secrets_setup` / `preview_secrets_status`, or CLI `secrets setup` / `secrets status` with the selected connection.
   Use private secret bindings for required credential variables, including dummy local API keys. Never invent credential literals.
-  Let the owner approve unselected names and enter missing values in the private browser form. Never request values in chat or tool arguments, or inspect the form.
+  Let the owner approve unselected names, create or unlock the keystore, and enter missing values in the private browser form.
+  Never request passwords or secret values in chat or tool arguments. Never inspect the private form.
+  Managed databases also require an unlocked keystore, even without user-secret references.
+  Dashboard unlock applies only to the dashboard. Each project owner unlocks separately unless automatic unlock is available on macOS.
   For new bindings, choose a project-specific stored reference, such as `API_SECRET: {secret: "my-project/dev/api"}`.
   `API_SECRET` is the application variable; `my-project/dev/api` is the stored reference. Preserve existing references.
   Share an exact reference across projects or worktrees only when sharing is intended and approved.
@@ -132,7 +136,8 @@ Do not serialize inspection output: it omits literal environment bindings.
   A wait timeout with `pending` or `saving` is not cancellation. Continue with the same request ID.
   `browser: "failed"` means launch failure; `expired` means the form expired. Ask before opening a new expired form.
   If the turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue”.
-  A locked store requires owner unlock. Shutdown ends approvals but keeps stored values.
+  A locked store requires private owner unlock. Shutdown ends approvals and that unlocked session, but keeps stored values.
+  Do not read or migrate old Keychain entries. For unsupported retained records, follow the documented reset procedure without deleting old data.
 - Data retention, deletion, or exceptional recovery: [security and recovery](references/docs/security.md#recovery).
 
 The reference examples are source material for recipes.

@@ -13,6 +13,7 @@ After a package update, restart the MCP connection and any affected [project own
 ## Tested clients
 
 These are recorded checks of earlier local builds, not certification of every client version or permission mode.
+These client checks predate the encrypted keystore. See [Secrets](secrets.md) for current setup.
 The September 15 checks used a local `0.1.0` development build on macOS, disposable projects, local Docker PostgreSQL, and fake credentials.
 
 | Client | Recorded result | Limit |

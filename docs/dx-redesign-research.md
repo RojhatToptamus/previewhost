@@ -1,5 +1,8 @@
 # Developer experience redesign
 
+Storage descriptions and recorded checks in this historical report predate the encrypted keystore.
+For current behavior, see [stored secrets](api.md#stored-secrets).
+
 Implementation status: September 14, 2026. Branch: `codex/dx-workflow`, based on `origin/main` at `ec36175`.
 
 This report now describes the implemented design and its verified limits. The September 12 proposal was treated as guidance. Existing runtime, configuration, authorization, Keychain and cleanup mechanisms remain the basis of the system.
@@ -76,7 +79,7 @@ The automatic owner is the existing runtime and daemon in a detached process. It
 
 A private directory under `~/.local/share/previewd/projects` contains a token, permanent lock and connection record. A SHA-256 digest of the canonical project path supplies a fixed-length filesystem address for arbitrary path lengths. This digest is neither a configuration signature nor an authority check.
 
-The lifetime lock uses Darwin `O_EXLOCK`, the same mechanism already used by the data owner. It prevents competing first callers from owning the project. The connection record is published after listener readiness and contains only endpoint, PID and project path. Clients authenticate, then compare the responding project and explicitly requested launch settings. They never reconstruct authority from the record.
+The lifetime lock uses Darwin `O_EXLOCK`, the same mechanism already used by the data owner. It prevents competing first callers from owning the project. The connection record is published after listener readiness and contains endpoint, PID, project path, data directory, and any explicit Docker socket. Clients authenticate, then compare the responding project and explicitly requested launch settings. They never reconstruct authority from the record.
 
 Omitted launch flags can reuse an existing owner. Incompatible explicit options report an error without terminating or reconfiguring it. Initial secret selections are compared as launch settings; browser additions are not copied back into those settings. Selected input values remain the values captured at owner startup.
 
@@ -84,7 +87,7 @@ Read/status/cleanup operations never start an owner. A secret UUID lookup theref
 
 Explicit `--endpoint` or `--token-file` selects connection-only mode and rejects launch-permission flags. A bare client does not silently adopt the legacy default daemon. Manual `serve`, explicit shared owners and embedded runtimes remain supported.
 
-Clean shutdown completes runtime cleanup and removes its connection record. Project clients wait for that removal so immediate restart works. Concurrent readers handle an opened record being unlinked. Startup contenders retry the existing lock when an older owner is releasing it.
+Clean shutdown completes runtime cleanup and removes the endpoint and PID. It retains the data location in the same record while managed data remains; otherwise it removes the record. Project clients wait for this change so immediate restart works. Concurrent readers handle an opened record being unlinked. Startup contenders retry the existing lock when an older owner is releasing it.
 
 A crash or uncertain cleanup retains the record. A dead endpoint proves neither process cleanup nor rollback of an external operation. Automatic startup stops with an actionable recovery error. Verify the old owner's application resources and external preparation before removing that project's connection record. Keep the permanent lock inode. Never signal a process based only on the recorded PID.
 

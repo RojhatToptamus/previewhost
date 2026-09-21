@@ -193,7 +193,7 @@ listed above but no per-service `name`. Owned resource types are `postgres` and
 | --- | --- |
 | `"literal"` | The supplied string. |
 | `{fromEnv: "NAME"}` | An exact key from `RuntimeOptions.inputs`. |
-| `{secret: "ID"}` | One selected user Keychain entry, read once for this attempt. |
+| `{secret: "ID"}` | One selected user keystore entry, read once for this attempt. |
 | `{service: "api"}` | The candidate HTTP origin or database connection URL. This reference waits for that service. |
 | `{publicUrl: "web"}` | The stable numeric URL. Only the primary service supports this reference. |
 | `{browserUrl: "api"}` | The stable browser alias for an HTTP service. |
@@ -361,8 +361,7 @@ Automatic MCP tools select the `project` supplied with each call.
 `--project DIR` selects another project. Each project has one persistent owner with a dynamic loopback port.
 
 Start, replace, and secret setup/edit can start it. Read/status/cleanup commands never create an owner.
-
-Inspection validates offline before an owner exists. It does not open managed storage or resolve Keychain values.
+Inspection validates offline before an owner exists. It does not open managed storage or resolve keystore values.
 MCP discovery needs no owner or skill installation.
 
 `mcp`, `inspect`, `start`, `replace`, and `secrets setup/edit` accept `--root`, `--allow-exec`, `--env`, `--secret`, `--data-dir`, and `--docker-socket`.
@@ -409,7 +408,8 @@ If an owner already runs with different settings, follow the [owner restart inst
 
 ## Stored secrets
 
-Stored secrets require macOS 13 or later and the packaged Keychain helper.
+Stored secrets use a password-backed encrypted keystore on macOS, Windows, and Linux.
+Optional automatic unlock uses the existing macOS Keychain helper. Native commands, automatic owners, and managed databases still require macOS.
 Commands below use `previewhost` from PATH, or `./node_modules/.bin/previewhost` from your application directory.
 `shop/dev/token` is an example name, bound with `{secret: shop/dev/token}` in a direct spec or optional file.
 
@@ -419,8 +419,7 @@ Replace `REQUEST_ID` with the ID from setup or edit.
 Select exact names through `RuntimeOptions.secretIds` or repeated `serve --secret ID`.
 The initial selection is copied at owner creation and defaults to empty.
 Private setup can add exact names after browser approval. Grants last until owner shutdown.
-
-The same exact name reuses one Keychain value across worktrees and projects that approve it.
+The same exact name reuses one keystore value across worktrees and projects that approve it.
 Use a distinct explicit reference for a different value. Missing-value setup never overwrites shared entries. Names match
 `[A-Za-z0-9][A-Za-z0-9._/-]{0,127}`. Slashes have no inheritance or filesystem meaning.
 
@@ -431,7 +430,7 @@ Setup checks neither presence nor values for an unselected name until private ap
 Approval checks source access again and adds selected names, up to 128 per owner.
 
 Inspect returns `secrets: [{id, selected, bindings: [{service?, key}]}]` without
-reading Keychain values. Start/replace resolves each required ID once, after
+reading keystore values. Start/replace resolves each required ID once, after
 authorization and source checks, before candidate resources or databases start.
 Only declared recipients receive each value. Failed replacement preserves active routes.
 
@@ -440,6 +439,9 @@ previewhost secrets setup --file preview.yaml --allow-exec
 previewhost secrets setup --file preview.yaml --allow-exec --reopen
 previewhost secrets edit shop/dev/token
 previewhost secrets status REQUEST_ID --timeout-ms 25000
+previewhost secrets init
+previewhost secrets remember
+previewhost secrets forget
 previewhost secrets set shop/dev/token
 previewhost secrets set shop/dev/token --stdin
 previewhost secrets list
@@ -447,8 +449,16 @@ previewhost secrets remove shop/dev/token
 ```
 
 Setup/edit/status use the daemon and accept `--endpoint` and `--token-file`.
-Set/list/remove operate directly on user entries without a daemon and never change
+Init/remember/forget/set/list/remove operate directly on user entries without a daemon and never change
 its selection. They cannot modify internal database credentials.
+
+Commands unlock their own session through hidden password input when needed.
+`init` requires a password of at least 12 characters and confirmation.
+Add `--remember` to `init` to request automatic unlock on macOS.
+`remember` enables automatic unlock on macOS. `forget` removes it without locking existing sessions.
+Private setup unlocks its project owner. Dashboard unlock applies only to the dashboard.
+For piped `set --stdin`, automatic unlock must already work. Otherwise, use hidden terminal entry or private setup.
+Unattended previews can use explicitly selected environment inputs without opening the keystore.
 
 Set creates or replaces one item. Hidden terminal entry supports backspace, Ctrl-U,
 Ctrl-C, and bracketed paste. Enter submits outside a paste. `--stdin` requires a
@@ -461,13 +471,13 @@ Missing-value setup adds only absent entries. Explicit edit requires an existing
 If the entry disappeared, edit fails. Every field is validated before saving begins.
 
 Writes are atomic per item, with no cross-item transaction or ordering guarantee.
-Partial results keep successful writes. A dispatched write without a confirmed
-response reports `error.outcome: "unknown"`. An absent response does not imply rollback.
+Partial results keep successful writes. An absent response does not imply rollback.
+Automatic-unlock helper writes can report `error.outcome: "unknown"`.
 
 The client adds `secretsSetup(spec, {reopen?, signal?})`, `secretsStatus(id, {timeoutMs?, signal?})`, and
 `secretsEdit(id, {signal?})`. Results include public `id`, `mode`, optional `name`,
 `sources`, `requirements`, `expiresAt`, `browser`, `state`, `saved`, `alreadyPresent`,
-`remaining`, and optional `error`. No result contains a private URL or capability.
+`remaining`, optional `error`, and keystore availability (`new`, `locked`, or `unlocked`). No result contains a private URL or capability.
 
 | Setup result | Meaning and next action |
 | --- | --- |
@@ -513,7 +523,7 @@ After use, stop the preview.
 Shut down its daemon.
 To remove the example entry, run `previewhost secrets remove shop/dev/token`.
 
-See [Keychain permissions and recovery](security.md#stored-secrets-and-private-entry).
+See [Keystore unlock and recovery](security.md#stored-secrets-and-private-entry).
 
 ## HTTP and MCP
 
@@ -612,14 +622,15 @@ headers and WebSocket handshakes have a 10-second deadline. Active streams do no
 Control bodies and responses have a 1 MiB limit. The daemon permits 32 active
 requests, including at most 16 waits, with two slots reserved for cleanup.
 
-An attempt can select or require at most 128 secret IDs. Metadata listing returns
-up to 128 names with `truncated`. Keychain work permits four helpers and 32 queued
-operations. Reads have a 10-second deadline. Explicit interactive writes have 30 seconds.
+At most 128 IDs can be selected or required per attempt. Metadata listing returns
+up to 128 names with `truncated`. The encrypted payload has a 16 MiB limit.
+SQLite write contention waits at most three seconds before returning `BUSY`.
+Optional Keychain access permits four helpers and 32 queued operations. Reads have a 10-second deadline. Interactive writes have 30 seconds.
 
 Forms expire after five minutes, with eight pending/saving forms and 32 recent
 results. Browser launches are limited to one per second. A save has a 30-second
 deadline and retains partial or uncertain outcomes. Ordinary status and preview
-traffic perform no Keychain reads.
+traffic never returns keystore values.
 
 After a lost response to start, replace, cancel, stop, or delete-data, read `get` or `list` before another attempt.
 A transport failure does not prove that the original operation failed.
@@ -631,8 +642,13 @@ See [Dashboard](dashboard.md) for its controls and [dashboard security](security
 
 The authenticated owner client also supports:
 
+- `remove(name, attemptId)`: remove an inactive entry and its bounded history. Supply
+  its latest attempt ID, or `null` for a private request without an attempt. Active
+  work, pending secret forms, retained data, and incomplete cleanup block removal.
+  Removing the last entry closes an automatic owner and ends dynamic approvals.
+  Source files and saved secrets remain. `remove()` clears an empty project entry.
 - `describe(name, attemptId)`: redacted requested configuration for a retained attempt,
-  including secret reference metadata without checking Keychain presence.
+  including secret reference metadata without checking keystore presence.
 - `startAgain(name, attemptId)`: rerun the current stopped or failed attempt's declaration
   through ordinary startup, source validation, and authorization. Existing active,
   busy, and cleanup checks still apply. No YAML is reloaded. The dashboard labels a
@@ -650,6 +666,48 @@ The authenticated owner client also supports:
 observed attempt IDs (or `null`) before changing state. A mismatch returns
 `STALE_ATTEMPT`. The dashboard always supplies this guard. CLI and MCP calls can omit this guard. MCP forwards it when supplied.
 
+The sidebar and overview share the preview action menu. Search remains set when
+opening details. Status filters and active-first ordering keep running work easy to find.
+Discovery reads owners in bounded pages; an unavailable owner does not hide others.
+
+**Delete data** confirms the exact environment and managed databases without restarting.
+It requires a stopped preview. Its optional `expected` guard contains the latest
+`attemptId` and resource list; `attemptId: null` identifies retained data with no attempt.
+The dashboard always supplies this guard. External databases and user secrets are untouched.
+
+After clean owner shutdown, the existing private connection file keeps the project path,
+data directory, and Docker socket only when managed data remains. Offline status comes
+from the existing database ownership records. It does not restore configuration, logs,
+execution permission, or private approvals. Start through the agent or CLI to run again.
+Offline deletion and removal use the same project lock as owner startup. An unreachable
+live connection never qualifies for offline data deletion.
+
+Every dashboard entry offers **Recheck status** and **Remove entry**. For an unavailable
+owner, removal requires the recorded process to be absent, unchanged connection metadata,
+and no retained data or cleanup records. The project and data locks stay held through removal.
+The user must also confirm that application processes have stopped; Previewhost cannot
+verify orphaned native processes from the connection record alone. Missing or invalid
+data-location metadata blocks removal. This operation only removes the connection file.
+
+CLI management also works when the registered source directory no longer exists:
+
+```sh
+previewhost projects
+previewhost list --project /absolute/worktree/path
+previewhost stop app --project /absolute/worktree/path
+previewhost delete-data app --project /absolute/worktree/path --allow-exec
+previewhost remove app --project /absolute/worktree/path
+```
+
+`projects` lists recorded paths without contacting owners; `recorded` does not mean running.
+Offline deletion requires `--allow-exec`. For a running owner, use its existing permission
+settings; omit the flag if it already has execution permission.
+Offline CLI deletion also needs macOS automatic unlock. Otherwise, unlock Secret Manager
+in the dashboard and use **Delete data** there. A locked keystore blocks deletion before any data changes.
+After offline data deletion,
+use `previewhost remove --project /absolute/worktree/path` to clear the empty project entry.
+No removal operation deletes source files, saved secrets, or the permanent project lock.
+
 Dashboard **Reset data** confirms the managed resource list, then calls guarded Stop,
 guarded `deleteData`, and `startAgain` in order. It restarts the serving configuration
 when available. Otherwise it uses the latest stopped or failed attempt. It starts only
@@ -661,8 +719,9 @@ deletion. After a lost response, inspect the current state before resetting agai
 Declarations and logs remain bounded owner memory. They are unavailable after owner
 shutdown or history eviction. Start again can allocate a different URL and keeps
 managed data. An authorized agent can start a preview again after you stop it.
+In the dashboard, Retry start creates no private setup request. It does not bypass secret approval or keystore unlock.
 
-Saving keeps secret/input references unexpanded. It never reads Keychain values or
+Saving keeps secret/input references unexpanded. It never reads keystore values or
 exports the raw declaration through the dashboard response. Sources inside the project
 become relative paths. External sources keep absolute paths and appear in `externalSources`.
 If either default filename exists, saving returns `ALREADY_EXISTS` without overwriting it. Directories and symlinks also block saving.

@@ -71,7 +71,16 @@ Retain sources and check old application/process-group cleanup, using the existi
 The record's PID is a diagnostic clue, not authority to kill a process. An absent owner does not prove its children stopped.
 
 Only after cleanup is confirmed, remove that project's `connection.json` and retry. Keep the permanent `.lock` inode.
-Clean shutdown handles record removal automatically and retains stored values and managed data.
+Before removing a crash record, note its data directory and Docker socket. Reuse those
+settings on restart, especially with a custom data location.
+Clean shutdown keeps an offline record while managed data remains. The dashboard and
+`previewhost projects` still list it. Use **Delete data** to erase its managed databases,
+then **Remove entry** to clear the empty record. Source files need not still exist.
+Saved user secrets are unaffected. For unavailable entries, use **Recheck status** to retry
+the connection. **Remove entry** checks the recorded process, locks, and retained data.
+If those checks pass, confirm that application processes have stopped before removing it.
+An unreachable owner alone is not evidence of cleanup. Missing data-location metadata,
+live processes, or retained data block removal; the review shows the reason.
 
 For an explicit manual connection, start `previewhost serve` in a foreground terminal.
 Use the same `--endpoint` and `--token-file` for its clients. Explicit connection mode never starts or reconfigures an owner.
@@ -218,10 +227,13 @@ For `SECRET_DENIED`, request private setup for the exact current references, or 
 Do not bypass owner denial through another interface.
 `--allow-exec` alone does not select stored secrets.
 
-For locked storage, unlock the default Keychain in Keychain Access.
-For access errors, check the packaged helper's permission for the item.
-An updated helper can require approval. Do not grant all applications access.
-A missing helper requires a macOS package build.
+For a locked keystore, enter its password in private setup. Wrong passwords leave the form available for retry.
+The dashboard unlocks only its own session. Each owner needs private setup or a remembered macOS unlock key.
+If automatic unlock fails, use your password. Keychain Access can repair the helper's item permission on macOS.
+An updated helper can require renewed permission. Never grant all applications access.
+A failed “Remember” leaves the current session unlocked and shows a warning.
+“Forget” affects new sessions, not existing owners. Shut down an owner to end its session and approvals.
+For old installations, follow the [reset instructions](../README.md#reset-required-for-earlier-installations).
 
 Partial saves retain completed writes.
 `partial` is terminal. Its private form cannot accept another submission.
@@ -240,7 +252,7 @@ including after a daemon restart.
 If deletion reports active applications, stop the environment first.
 If Docker cleanup is incomplete, resolve its error before data deletion.
 For `data.cleanup.operation: "remove-credential"`, Docker data is already gone.
-Unlock Keychain and retry `previewhost delete-data NAME` directly.
+Unlock the owner through private setup and retry `previewhost delete-data NAME` directly.
 Stop and daemon shutdown remain available while credential deletion is pending.
 
 If another runtime owns the data directory, use that owner or stop it normally.
@@ -260,10 +272,9 @@ A previewhost restart alone does not meet this prerequisite.
 A changed Engine or conflicting object identity still prevents cleanup.
 Broad Docker prune or manual record deletion bypasses ownership checks and cannot repair this uncertainty.
 
-A missing retained credential requires restoration from its Keychain backup.
-previewhost does not regenerate a password for existing data.
-Migration conflicts preserve schema 1 records and existing database authentication.
-Keep the record intact during repair of the copied item in Keychain Access.
+A missing retained credential requires restoration of a complete encrypted keystore backup.
+Previewhost does not regenerate a password for existing data.
+Unsupported old records remain intact. Use the earlier release to export valuable data before an explicit reset.
 See [credentials and backups](security.md#credentials-and-backups).
 
 ## The browser shows old content or HMR disconnects

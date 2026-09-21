@@ -38,7 +38,7 @@ const directory = z.string().min(1).max(4096)
 const envKey = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(128);
 const literal = z.string().max(4096).refine((value) => !value.includes('\0'), 'Values cannot contain NUL.');
 export const secretIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'Use a secret name of 1–128 letters, numbers, dots, dashes, underscores or slashes.')
-  .describe('Stored Keychain reference, not the application environment-variable name. For a new binding, choose a project-specific reference, for example API_SECRET: {secret: "my-project/dev/api"}. Preserve existing references. Use an existing exact reference only for intentional sharing; matching references share one value across projects and worktrees after approval.');
+  .describe('Stored secret reference, not the application environment-variable name. For a new binding, choose a project-specific reference, for example API_SECRET: {secret: "my-project/dev/api"}. Preserve existing references. Use an existing exact reference only for intentional sharing; matching references share one value across projects and worktrees after approval.');
 const inputReferenceSchema = z.strictObject({ fromEnv: envKey.describe('Environment input explicitly selected by the daemon owner; not an arbitrary client or shell variable.') });
 export const scalarValueSchema = z.union([literal, inputReferenceSchema, z.strictObject({ secret: secretIdSchema })]);
 export type ScalarValue = z.output<typeof scalarValueSchema>;
@@ -131,6 +131,7 @@ export interface SecretSetupStatus extends SecretSetupContext {
   alreadyPresent: string[];
   remaining: string[];
   error?: Failure;
+  keystore?: import('./keystore.js').KeystoreStatus;
 }
 export interface SecretSetupApi {
   secretsSetup(spec: PreviewSpec, options?: { reopen?: boolean; signal?: AbortSignal }): Promise<SecretSetupStatus>;
@@ -193,7 +194,7 @@ export interface PreviewDescription {
 }
 export interface LogOptions { source?: string; after?: number; maxBytes?: number }
 export interface LogResult { name: string; attemptId: string; text: string; truncated: boolean; cursor: number }
-export interface DeleteDataOptions { expected?: { attemptId: string; resources: DataStatus['resources'] } }
+export interface DeleteDataOptions { expected?: { attemptId: string | null; resources: DataStatus['resources'] } }
 export interface WaitOptions { timeoutMs?: number; signal?: AbortSignal }
 export interface StopOptions {
   afterEngineRestart?: boolean;
@@ -202,6 +203,7 @@ export interface StopOptions {
 }
 export type SecretSetupSummary = Pick<SecretSetupStatus, 'id' | 'name' | 'mode' | 'state' | 'browser' | 'expiresAt'>;
 export interface PreviewManagementApi {
+  remove(name?: string, attemptId?: string | null): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
   saveConfiguration(name: string, attemptId: string): Promise<{ file: string; externalSources: string[] }>;
@@ -257,5 +259,6 @@ export const requestSchemas = {
   startAgain: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   saveConfiguration: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   rerunJob: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, job: nameSchema }),
-  deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema, resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis']) })).min(1).max(limits.environmentDatabases) }).optional() }),
+  remove: z.strictObject({ name: nameSchema.optional(), attemptId: attemptIdSchema.nullable() }),
+  deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema.nullable(), resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis']) })).min(1).max(limits.environmentDatabases) }).optional() }),
 };

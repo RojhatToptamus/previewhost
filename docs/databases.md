@@ -15,7 +15,7 @@ Two external entries with the same connection URL still share data.
 
 ## Prepare Docker
 
-Managed databases require macOS 13 or later, Keychain access, and a running local Docker Engine.
+Managed databases require macOS, an unlocked keystore, and a running local Docker Engine.
 Download the images for the database types you intend to use:
 
 ```sh
@@ -37,6 +37,21 @@ If an owner already uses different options, [shut it down before changing them](
 
 Automatic owners use private storage per project. A foreground `serve` or embedded runtime also needs an explicit private data directory.
 Do not share one data directory between simultaneous owners.
+
+## Unlock database credentials
+
+After you save your configuration, run private setup before startup:
+
+```sh
+previewhost secrets setup --allow-exec
+```
+
+Create or unlock the keystore in the private form, then wait for setup to complete.
+This step also applies when the configuration has managed databases but no user-secret references.
+MCP uses `preview_secrets_setup` and `preview_secrets_status`. See [private setup](secrets.md#approve-and-enter-values).
+
+Automatic unlock on macOS lets new owners open the keystore without another password prompt.
+Unlocking only the dashboard does not unlock a project owner.
 
 ## Connect an application
 
@@ -90,7 +105,12 @@ previewhost delete-data shop
 ```
 
 Deletion cannot be undone. It removes owned volumes and their credentials, but excludes source files, external databases, and saved user secrets.
-The dashboard's **Reset data** also starts the retained configuration again after deletion. Setup jobs can write new data.
+The preview menu also offers **Delete data** without restarting, or **Reset data** to start the retained configuration after deletion.
+Setup jobs can write new data after reset.
+
+After owner shutdown, the dashboard still lists retained data. Unlock **Secret Manager** before deleting it there.
+For CLI deletion while the owner is offline, add `--allow-exec`. macOS automatic unlock must be available.
+After data deletion, **Remove entry** clears the empty dashboard entry. It leaves source files and saved user secrets intact.
 
 If cleanup fails, follow [database recovery](troubleshooting.md#database-data-or-recovery-is-incomplete).
-A backup of the data directory does not include database passwords. Keychain needs its own backup.
+Back up the encrypted keystore, retained-data directories, and database contents separately. See [credential recovery](troubleshooting.md#database-data-or-recovery-is-incomplete).

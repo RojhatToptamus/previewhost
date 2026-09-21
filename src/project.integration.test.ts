@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { connectProject, projectOwnerDirectory } from './project.js';
 import type { AttemptResult, PreviewSpec, PreviewStatus, SecretSetupStatus } from './contracts.js';
-import { testKeychain } from './testSupport/keychain.js';
+import { testKeystore } from './testSupport/keystore.js';
 
 const cli = resolve('dist/cli.js');
 const executeFile = promisify(execFile);
@@ -28,7 +28,13 @@ async function fixture(t: TestContext) {
   t.after(async () => {
     for (const project of projects) {
       const cleanup = connectProject({ projectDirectory: project });
-      try { await cleanup.shutdown(); }
+      try {
+        for (const preview of await cleanup.list()) {
+          await cleanup.stop(preview.name);
+          if (preview.data) await cleanup.deleteData(preview.name);
+        }
+        await cleanup.shutdown();
+      }
       catch (error) { if ((error as { code?: string }).code !== 'DAEMON_UNAVAILABLE') throw error; }
       finally { await cleanup.close(); }
     }
@@ -43,9 +49,13 @@ async function fixture(t: TestContext) {
 
 test('CLI and real stdio MCP share an automatically started owner, optional root file, direct spec and explicit saving', enabled, async t => {
   const { directory, client } = await fixture(t);
+  const keystore = await testKeystore(t);
+  const hook = join(keystore.directory, 'preload.mjs');
+  await writeFile(hook, keystore.installSource.replaceAll('/.local/test-build/', '/dist/'));
   await assert.rejects(client.list(), { code: 'DAEMON_UNAVAILABLE' });
   const mcp = new Client({ name: 'project-workflow', version: '1' });
-  const transport = new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', '--project', directory, '--allow-exec'], stderr: 'pipe' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', '--project', directory, '--allow-exec'], stderr: 'pipe',
+    env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } });
   let stderr = ''; transport.stderr?.on('data', data => { stderr += data; });
   t.after(() => mcp.close());
   await mcp.connect(transport);
@@ -129,20 +139,20 @@ test('CLI and real stdio MCP share an automatically started owner, optional root
   assert.equal(stderr, '');
 });
 
-test('real Git worktrees and an unrelated project share exact Keychain names with separate private approvals and distinct overrides', enabled, async t => {
+test('real Git worktrees and an unrelated project share exact keystore names with separate private approvals and distinct overrides', enabled, async t => {
   const { directory, projects } = await fixture(t);
-  const keychain = await testKeychain(t);
-  const capture = join(keychain.directory, 'private-urls');
-  const hook = join(keychain.directory, 'preload.mjs');
-  const dataDirectory = join(keychain.directory, 'data');
-  await writeFile(hook, keychain.installSource.replace('/.local/test-build/keychain.js', '/dist/keychain.js') + `
+  const keystore = await testKeystore(t);
+  const capture = join(keystore.directory, 'private-urls');
+  const hook = join(keystore.directory, 'preload.mjs');
+  const dataDirectory = join(keystore.directory, 'data');
+  await writeFile(hook, keystore.installSource.replaceAll('/.local/test-build/', '/dist/') + `
     import {SecretSetup} from ${JSON.stringify(new URL('../../dist/secrets-setup.js', import.meta.url).href)};
     import {appendFile} from 'node:fs/promises';
     SecretSetup.prototype.openBrowser = async url => { await appendFile(${JSON.stringify(capture)}, url + '\\n', {mode: 0o600}); };
   `, { mode: 0o600 });
   const shared = `disposable/worktrees/${directory.split('/').at(-1)}`;
   const distinct = `${shared}/variant`;
-  await keychain.store.add('user', shared, 'FAKE_SHARED');
+  await keystore.store.add('user', shared, 'FAKE_SHARED');
   const yaml = (id: string) => `name: tree\ntype: command\ncwd: .\ncommand: [${JSON.stringify(process.execPath)}, app.mjs]\nenv:\n  TOKEN: {secret: ${id}}\n`;
   await writeFile(join(directory, 'app.mjs'), `import http from 'node:http'; http.createServer((req,res) => res.end(process.env.TOKEN)).listen(Number(process.env.PORT), process.env.HOST);`);
   await writeFile(join(directory, 'preview.yaml'), yaml(shared));
@@ -207,7 +217,7 @@ test('real Git worktrees and an unrelated project share exact Keychain names wit
     const replaced = await call<PreviewStatus>('preview_replace', { name: 'tree', file: 'preview.yaml' });
     const ready = await call<AttemptResult>('preview_wait', { name: 'tree', attemptId: replaced.candidate!.id });
     assert.equal(await (await fetch(ready.url!)).text(), 'FAKE_VARIANT');
-    assert.equal(await keychain.store.get('user', shared), 'FAKE_SHARED');
+    assert.equal(await keystore.store.get('user', shared), 'FAKE_SHARED');
     await writeFile(join(worktree, 'preview.yaml'), yaml(`${shared}/edited`));
     const edited = await call<PreviewStatus>('preview_replace', { name: 'tree', file: 'preview.yaml' });
     const denied = await call<AttemptResult>('preview_wait', { name: 'tree', attemptId: edited.candidate!.id });
@@ -286,6 +296,9 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   ...enabled, skip: process.platform !== 'darwin' || !process.env.PREVIEWD_TEST_DOCKER_SOCKET,
 }, async t => {
   const { directory, projects } = await fixture(t);
+  const keystore = await testKeystore(t);
+  const hook = join(keystore.directory, 'preload.mjs');
+  await writeFile(hook, keystore.installSource.replaceAll('/.local/test-build/', '/dist/'));
   await writeFile(join(directory, 'preview.yaml'), 'name: notes\ntype: environment\nprimary: web\nservices:\n  web: {type: static, directory: .}\n  db: {type: postgres}\n');
   await execute('git', ['init', directory]);
   await execute('git', ['-C', directory, 'add', '.']);
@@ -300,7 +313,8 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   const client = new Client({ name: 'worktree-launch', version: '1' });
   t.after(() => client.close());
   await client.connect(new StdioClientTransport({ command: process.execPath,
-    args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWD_TEST_DOCKER_SOCKET!], stderr: 'pipe' }));
+    args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWD_TEST_DOCKER_SOCKET!],
+    env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } as Record<string, string>, stderr: 'pipe' }));
   const tools = (await client.listTools()).tools;
   assert.ok(tools.every(tool => tool.inputSchema.required?.includes('project')));
   assert.equal((await client.callTool({ name: 'preview_list', arguments: {} })).isError, true);

@@ -66,8 +66,8 @@ The agent can reuse root `preview.yaml`, fall back to `preview.yml`, or supply a
 If both files exist, the agent must report the conflict instead of choosing silently. You do not need to write a file first.
 An invalid existing file is an error. To keep a working spec for later use, ask the agent to save it as `preview.yaml`.
 
-If credentials are missing, approve the intended references in the private browser form.
-Enter the missing values there.
+For stored secrets or managed databases, use private setup to approve references and create or unlock the owner’s keystore session.
+Enter the password and missing values only in that form. Dashboard unlock does not unlock the project owner.
 If the agent turn ended before you saved, tell it to continue after the save. See [Secrets](secrets.md).
 
 ## Understand what stays running
