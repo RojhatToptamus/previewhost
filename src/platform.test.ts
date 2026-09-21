@@ -82,7 +82,7 @@ if (process.platform === 'win32') test('Windows rejects non-inheritable private 
       } else {
         $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'None', 'None', 'Allow'))
       }
-      Set-Acl -LiteralPath $env:PREVIEWHOST_ACL_DIRECTORY -AclObject $acl
+      [System.IO.Directory]::SetAccessControl($env:PREVIEWHOST_ACL_DIRECTORY, $acl)
     `], { env: { ...process.env, PREVIEWHOST_ACL_DIRECTORY: path, PREVIEWHOST_ACL_INHERITANCE: inherited ? 'yes' : 'no' }, timeout: 10_000 });
     return path;
   }

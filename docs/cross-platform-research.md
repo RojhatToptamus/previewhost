@@ -48,7 +48,9 @@ Job Objects remain process management, not a sandbox for hostile same-user code.
 ## 2. Private Windows storage
 
 New private directories receive an explicit protected ACL during `CreateDirectoryW`, before any private contents exist.
-The current user owns the directory. The user, SYSTEM, and Administrators receive inherited full-access entries.
+The current user owns newly created private directories. The user, SYSTEM, and Administrators receive inherited full-access entries.
+New files can use the process token's default owner. Elevated Windows execution produced administrator-owned files in hosted testing.
+Validation accepts that owner only when it equals the current token owner and is the Administrators group. Other account owners remain rejected.
 Existing ACLs are validated without repair. Unknown ACE forms and other principals fail closed.
 Inspected files and directories must not be reparse points.
 Inheritable entries are also checked, because later token and temporary-file creation depends on them.

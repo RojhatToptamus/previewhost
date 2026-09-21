@@ -53,18 +53,22 @@ function sidText(sid: unknown): string {
   try { return koffi.decode(out[0], 'char16_t', -1); }
   finally { win().free(out[0]); }
 }
-let userSid: string | undefined;
-function currentSid(): string {
-  if (userSid) return userSid;
+let identity: { user: string; owner: string } | undefined;
+function currentIdentity() {
+  if (identity) return identity;
   const token = [null];
   if (!win().openToken(win().current(), 0x0008, token)) throw failure('token inspection');
   try {
-    const length = [0];
-    win().tokenInfo(token[0], 1, null, 0, length);
-    if (!length[0] || length[0] > 65_536) throw failure('token size');
-    const buffer = Buffer.alloc(length[0]);
-    if (!win().tokenInfo(token[0], 1, buffer, buffer.length, length)) throw failure('token inspection');
-    return userSid = sidText(koffi.decode(buffer, 'void *'));
+    const value = { user: '', owner: '' };
+    for (const [key, type] of [['user', 1], ['owner', 4]] as const) {
+      const length = [0];
+      win().tokenInfo(token[0], type, null, 0, length);
+      if (!length[0] || length[0] > 65_536) throw failure('token size');
+      const buffer = Buffer.alloc(length[0]);
+      if (!win().tokenInfo(token[0], type, buffer, buffer.length, length)) throw failure('token inspection');
+      value[key] = sidText(koffi.decode(buffer, 'void *'));
+    }
+    return identity = value;
   } finally { win().close(token[0]); }
 }
 
@@ -76,7 +80,12 @@ export function assertWindowsPrivate(path: string): void {
   const result = win().securityInfo(path, 1, 0x00000001 | 0x00000004, owner, null, dacl, null, descriptor);
   if (result !== 0) throw new PreviewError('UNAUTHORIZED', `Cannot inspect private storage ACL (${result}).`);
   try {
-    if (!owner[0] || sidText(owner[0]) !== currentSid() || !dacl[0]) throw new PreviewError('UNAUTHORIZED', 'Private storage must be owned by the current user with a restricted ACL.');
+    if (!owner[0] || !dacl[0]) throw new PreviewError('UNAUTHORIZED', 'Private storage requires an owner and a restricted ACL.');
+    const account = currentIdentity(), actualOwner = sidText(owner[0]);
+    // Elevated Windows tokens can create administrator-owned files. That group is already inside the ACL trust boundary.
+    if (actualOwner !== account.user && !(actualOwner === account.owner && actualOwner === 'S-1-5-32-544')) {
+      throw new PreviewError('UNAUTHORIZED', 'Private storage has an untrusted owner.');
+    }
     const count = koffi.decode(dacl[0], 4, 'uint16') as number;
     let inheritance = 0;
     for (let i = 0; i < count; i++) {
@@ -86,7 +95,7 @@ export function assertWindowsPrivate(path: string): void {
       // Accept only ordinary allow entries for known principals. Unknown ACE forms fail closed.
       if (header[0] !== 0 || header.readUInt16LE(2) < 16) throw new PreviewError('UNAUTHORIZED', 'Private storage has an unsupported ACL entry.');
       const sid = sidText(koffi.address(entry[0]) + 8n);
-      if (![currentSid(), 'S-1-5-18', 'S-1-5-32-544'].includes(sid)) throw new PreviewError('UNAUTHORIZED', 'Private storage permits another account.');
+      if (![account.user, 'S-1-5-18', 'S-1-5-32-544'].includes(sid)) throw new PreviewError('UNAUTHORIZED', 'Private storage permits another account.');
       if (!(header[1] & 0x04)) inheritance |= header[1] & 0x03; // OI/CI without NO_PROPAGATE.
     }
     // Otherwise new children can fall back to the creator token's default DACL.
@@ -107,7 +116,8 @@ export function makeWindowsPrivateDirectory(path: string): void {
     makeWindowsPrivateDirectory(parent);
   }
   const descriptor = [null];
-  const sddl = `O:${currentSid()}D:P(A;OICI;FA;;;${currentSid()})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`;
+  const user = currentIdentity().user;
+  const sddl = `O:${user}D:P(A;OICI;FA;;;${user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`;
   if (!win().descriptor(sddl, 1, descriptor, null)) throw failure('private descriptor creation');
   try {
     if (!win().mkdir(path, { length: koffi.sizeof(win().attributes), descriptor: descriptor[0], inherit: 0 }) && win().error() !== 183) throw failure('private directory creation');
