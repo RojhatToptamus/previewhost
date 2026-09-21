@@ -2,6 +2,7 @@
   "name": "previewhost",
   "version": "0.2.0-alpha.0",
   "description": "Local HTTP previews for applications and coding agents.",
+  "homepage": "https://previewhost.app",
   "type": "module",
   "license": "MIT",
   "engines": {
