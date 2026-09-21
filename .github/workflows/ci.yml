@@ -20,51 +20,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  diagnose:
-    name: Profile database contention (temporary)
-    if: github.event_name == 'pull_request' && github.head_ref == 'codex/ci-performance'
-    runs-on: macos-15-intel
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - run: npm ci
-      - run: npm run build && npx tsc -p tsconfig.test.json
-      - run: brew install colima docker
-      - name: Prepare the failed trial's Docker capacity
-        run: |
-          colima start --runtime docker --vm-type vz --cpus 2 --memory 4
-          docker info
-          docker pull postgres:17-alpine
-          docker pull redis:7-alpine
-          echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
-      - name: Profile unchanged retention assertions alone and in pairs
-        run: |
-          mkdir -p .local/ci-profile
-          colima ssh -- vmstat -V
-          colima ssh -- vmstat -w 1 > .local/ci-profile/guest-vmstat.log 2>&1 &
-          guest_monitor=$!
-          iostat -w 1 > .local/ci-profile/host-iostat.log 2>&1 &
-          host_monitor=$!
-          trap 'kill "$guest_monitor" "$host_monitor" 2>/dev/null || true' EXIT
-          node .github/ci-profile.mjs
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: ci-contention-profile
-          path: .local/ci-profile
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-      - name: Stop diagnostic Docker
-        if: always()
-        run: colima stop
-
   docs:
     name: Verify documentation
     runs-on: ubuntu-latest
