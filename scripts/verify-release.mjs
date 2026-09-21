@@ -13,7 +13,10 @@ export function checkReleaseResult(code, output) {
   // npm test explicitly selects Node's TAP reporter. Require its final summary,
   // so a missing/truncated test run cannot look like successful verification.
   const counts = {};
-  for (const match of output.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\d+)\r?$/gm)) counts[match[1]] = Number(match[2]);
+  for (const match of output.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\d+)\r?$/gm)) {
+    if (Object.hasOwn(counts, match[1])) throw new Error('Release verification requires one complete test summary.');
+    counts[match[1]] = Number(match[2]);
+  }
   if (!(counts.tests > 0) || counts.pass !== counts.tests ||
       ['fail', 'cancelled', 'skipped', 'todo'].some((key) => counts[key] !== 0)) {
     throw new Error(`Release verification requires a complete test summary with zero failures, cancellations, skips, or TODOs: ${JSON.stringify(counts)}`);

@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   platforms:
     name: Verify ${{ matrix.os }}
@@ -149,6 +153,15 @@ jobs:
           path: ${{ runner.temp }}/previewhost-release
           if-no-files-found: error
           retention-days: 30
+      - name: Require verified release artifact
+        if: github.event_name != 'pull_request' || inputs.publish-plan-artifact-id != ''
+        env:
+          PACK_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          assert.match(process.env.PACK_ARTIFACT_ID ?? '', /^[1-9][0-9]*$/, 'Release requires the verified package artifact.');
+          NODE
       - name: Docker startup diagnostics
         if: failure() && steps.docker.outcome == 'failure'
         run: |

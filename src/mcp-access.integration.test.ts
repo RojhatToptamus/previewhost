@@ -44,7 +44,9 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
     assert.equal((await call('preview_list')).error.code, 'SOURCE_DENIED');
   }
   decision = 'accept';
-  const granted = await call('preview_access'); assert.equal(granted.result.project, front);
+  const granted = await call('preview_access');
+  assert.equal(granted.error, undefined, 'initial project approval failed');
+  assert.equal(granted.result.project, front);
   const count = confirmations;
   await call('preview_access'); assert.equal(confirmations, count);
   const first = (await call('preview_start', front, { spec: { name: 'app', type: 'static', directory: front } })).result as PreviewStatus;
@@ -84,7 +86,9 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
   assert.ok((await call('preview_inspect', front, { spec })).result);
   // Approval grants sources, never command execution when --allow-exec is absent.
   const staticOnly = await adapter(false);
-  assert.ok((await call('preview_access', backend, {}, staticOnly)).result);
+  const staticAccess = await call('preview_access', backend, {}, staticOnly);
+  assert.equal(staticAccess.error, undefined, 'project approval without command execution failed');
+  assert.ok(staticAccess.result);
   const staticStart = (await call('preview_start', backend, { spec: { name: 'static-only', type: 'static', directory: backend } }, staticOnly)).result;
   assert.equal((await call('preview_wait', backend, { name: 'static-only', attemptId: staticStart.candidate.id }, staticOnly)).result.state, 'ready');
   const command = (await call('preview_start', backend, { spec: { name: 'denied', type: 'command', cwd: backend, command: [process.execPath, '-e', 'process.exit(0)'] } }, staticOnly)).result;
