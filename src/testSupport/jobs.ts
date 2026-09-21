@@ -8,6 +8,7 @@ import { createPreviewRuntime, type PreviewRuntime } from '../runtime.js';
 import { PreviewError } from '../errors.js';
 import type { PreviewSpec, PreviewStatus, RuntimeOptions } from '../contracts.js';
 import { testKeystore } from './keystore.js';
+import { traceStep } from './diagnosis.js';
 
 export type Spec = Extract<PreviewSpec, { type: 'environment' }>;
 
@@ -41,16 +42,22 @@ export async function seedWaiting(f: Awaited<ReturnType<typeof databaseFixture>>
 export const job = (cwd: string, script: string) => ({ type: 'job' as const, cwd, command: [process.execPath, '-e', script] });
 
 export async function databaseFixture(t: TestContext, authorize: RuntimeOptions['authorize'] = () => true) {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-jobs-')));
+  const directory = await traceStep(`${t.name}: fixture 01 directory`, async () => realpath(await mkdtemp(join(tmpdir(), 'previewhost-jobs-'))));
   let runtime: PreviewRuntime;
   t.after(async () => {
-    if (runtime) { for (const p of await runtime.list()) { await runtime.stop(p.name); if (p.data) await runtime.deleteData(p.name); } await runtime.close(); }
-    await rm(directory, { recursive: true, force: true });
+    if (runtime) {
+      for (const p of await traceStep(`${t.name}: cleanup 01 list`, () => runtime.list())) {
+        await traceStep(`${t.name}: cleanup 02 stop`, () => runtime.stop(p.name));
+        if (p.data) await traceStep(`${t.name}: cleanup 03 delete data`, () => runtime.deleteData(p.name));
+      }
+      await traceStep(`${t.name}: cleanup 04 close runtime`, () => runtime.close());
+    }
+    await traceStep(`${t.name}: cleanup 05 remove directory`, () => rm(directory, { recursive: true, force: true }));
   });
-  const keys = await testKeystore(t);
-  await keys.store.add('user', 'disposable/jobs-seed', 'fake-job-secret-value');
+  const keys = await traceStep(`${t.name}: fixture 02 keystore`, () => testKeystore(t));
+  await traceStep(`${t.name}: fixture 03 add secret`, () => keys.store.add('user', 'disposable/jobs-seed', 'fake-job-secret-value'));
   const options = { allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket, secretIds: ['disposable/jobs-seed'], authorize };
-  runtime = await createPreviewRuntime(options);
+  runtime = await traceStep(`${t.name}: fixture 04 create runtime`, () => createPreviewRuntime(options));
   const connection = `import {Client} from ${JSON.stringify(import.meta.resolve('pg'))}; const db=new Client({connectionString:process.env.DATABASE_URL}); await db.connect();`;
   await writeFile(join(directory, 'migrate.mjs'), connection + `await db.query('CREATE TABLE IF NOT EXISTS items (id serial primary key, label text)'); console.log('schema ready'); await db.end();`);
   await writeFile(join(directory, 'seed.mjs'), connection + `import fs from 'node:fs'; await db.query("INSERT INTO items(label) VALUES ('demo')"); console.log('seed wrote',process.env.TEST_TOKEN); const mode=fs.existsSync('mode')?fs.readFileSync('mode','utf8'):''; if(mode==='fail')process.exit(9); if(mode==='wait'){fs.writeFileSync('waiting','');await new Promise(()=>{});} await db.end();`);
@@ -63,7 +70,10 @@ export async function databaseFixture(t: TestContext, authorize: RuntimeOptions[
     api: { type: 'command', cwd: directory, command: [process.execPath, 'api.mjs'], dependsOn: ['seed'], readyPath: '/health', env: { DATABASE_URL: { service: 'db' }, CORS_ORIGIN: { browserUrl: 'web' } } },
     web: { type: 'command', cwd: directory, command: [process.execPath, 'web.mjs'], env: { API_URL: { service: 'api' } } },
   } };
-  return { directory, spec, keys, options, get runtime() { return runtime; }, async reconnect() { await runtime.close(); runtime = await createPreviewRuntime(options); } };
+  return { directory, spec, keys, options, get runtime() { return runtime; }, async reconnect() {
+    await traceStep(`${t.name}: reconnect 01 close runtime`, () => runtime.close());
+    runtime = await traceStep(`${t.name}: reconnect 02 create runtime`, () => createPreviewRuntime(options));
+  } };
 }
 
 export async function rows(url: string, method = 'GET') {

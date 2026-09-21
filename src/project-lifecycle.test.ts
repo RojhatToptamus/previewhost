@@ -14,6 +14,7 @@ import { reviewStaleProject, removeStaleProject, writeProjectRecord, connectProj
 import { createDataOwner } from './data.js';
 import { SecretSetup } from './secrets-setup.js';
 import { testKeystore } from './testSupport/keystore.js';
+import { traceStep } from './testSupport/diagnosis.js';
 import type { PreviewSpec } from './contracts.js';
 
 const execute = promisify(execFile);
@@ -140,7 +141,7 @@ const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 test('offline projects keep real PostgreSQL data discoverable and delete only explicitly confirmed resources', {
   skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000,
 }, async t => {
-  const fixture = await testKeystore(t);
+  const fixture = await traceStep('offline.fixture', () => testKeystore(t));
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-offline-project-')));
   const ownerDirectory = projectOwnerDirectory(project);
   const dataDirectory = join(fixture.directory, 'retained');
@@ -160,34 +161,36 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
   const authorized = connectProject({ projectDirectory: project, allowExec: true });
   try {
     const args = [resolve('dist/cli.js'), 'start', '--project', project, '--file', file, '--allow-exec'];
-    const first = JSON.parse((await execute(process.execPath, [...args, '--data-dir', dataDirectory, '--docker-socket', dockerSocket!], {
+    const first = JSON.parse((await traceStep('offline.first-start', () => execute(process.execPath, [...args, '--data-dir', dataDirectory, '--docker-socket', dockerSocket!], {
       env: { ...process.env, NODE_OPTIONS: `--import=${hook}` }, timeout: 30_000,
-    })).stdout);
-    assert.equal(await (await fetch(first.url)).text(), '1');
-    await assert.rejects(client.remove('app', first.id), { code: 'BUSY' });
-    await client.stop('app');
-    await assert.rejects(client.remove('app', first.id), { code: 'BUSY' });
-    await client.shutdown();
+    }))).stdout);
+    await traceStep('offline.first-query', async () => { assert.equal(await (await fetch(first.url)).text(), '1'); });
+    await traceStep('offline.active-remove-denial', () => assert.rejects(client.remove('app', first.id), { code: 'BUSY' }));
+    await traceStep('offline.first-stop', () => client.stop('app'));
+    await traceStep('offline.retained-remove-denial', () => assert.rejects(client.remove('app', first.id), { code: 'BUSY' }));
+    await traceStep('offline.first-shutdown', () => client.shutdown());
     let record = (await readProjectRecord(ownerDirectory))!;
     assert.equal(record.endpoint, undefined); assert.equal(record.dataDirectory, dataDirectory);
     assert.deepEqual((await offlinePreviews(record)).map(p => p.name), ['app']);
-    const second = JSON.parse((await execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` }, timeout: 30_000 })).stdout);
-    assert.equal(await (await fetch(second.url)).text(), '1');
-    await client.shutdown(); await rm(project, { recursive: true });
+    const second = JSON.parse((await traceStep('offline.second-start', () => execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` }, timeout: 30_000 }))).stdout);
+    await traceStep('offline.second-query', async () => { assert.equal(await (await fetch(second.url)).text(), '1'); });
+    await traceStep('offline.second-shutdown', () => client.shutdown()); await rm(project, { recursive: true });
     record = (await readProjectRecord(ownerDirectory))!;
     const data = (await offlinePreviews(record))[0].data!;
-    await assert.rejects(removeOfflineProject(ownerDirectory), { code: 'BUSY' });
-    await assert.rejects(reviewStaleProject(ownerDirectory), { code: 'CLEANUP_INCOMPLETE' });
-    await assert.rejects(client.deleteData('app'), { code: 'EXECUTION_DENIED' });
-    await assert.rejects(deleteOfflineData(ownerDirectory, 'app', { expected: { attemptId: null, resources: [{ name: 'other', type: 'postgres' }] } }), { code: 'STALE_ATTEMPT' });
-    const lock = await lockProject(ownerDirectory);
-    try { await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}), { code: 'BUSY' }); }
-    finally { await lock.close(); }
-    const canceled = new AbortController(); canceled.abort();
-    await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}, canceled.signal), { code: 'CLOSED' });
-    await fixture.control('lock');
-    await assert.rejects(authorized.deleteData('app', { expected: { attemptId: null, resources: data.resources } }), { code: 'SECRET_STORE_UNAVAILABLE' });
-    assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined, 'A locked store must block deletion before Docker changes.');
+    await traceStep('offline.deletion-denials', async () => {
+      await assert.rejects(removeOfflineProject(ownerDirectory), { code: 'BUSY' });
+      await assert.rejects(reviewStaleProject(ownerDirectory), { code: 'CLEANUP_INCOMPLETE' });
+      await assert.rejects(client.deleteData('app'), { code: 'EXECUTION_DENIED' });
+      await assert.rejects(deleteOfflineData(ownerDirectory, 'app', { expected: { attemptId: null, resources: [{ name: 'other', type: 'postgres' }] } }), { code: 'STALE_ATTEMPT' });
+      const lock = await lockProject(ownerDirectory);
+      try { await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}), { code: 'BUSY' }); }
+      finally { await lock.close(); }
+      const canceled = new AbortController(); canceled.abort();
+      await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}, canceled.signal), { code: 'CLOSED' });
+      await fixture.control('lock');
+      await assert.rejects(authorized.deleteData('app', { expected: { attemptId: null, resources: data.resources } }), { code: 'SECRET_STORE_UNAVAILABLE' });
+      assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined, 'A locked store must block deletion before Docker changes.');
+    });
     const id = createHash('sha256').update(project).digest('hex');
     let launch = '';
     const dashboard = await startDashboard({
@@ -204,23 +207,25 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
         return response.json();
       };
       const deletion = { action: 'deleteData', owner: id, name: 'app', expected: { attemptId: null, resources: data.resources } };
-      assert.equal((await post(deletion, 400)).error.code, 'SECRET_STORE_UNAVAILABLE');
+      await traceStep('offline.dashboard-locked-denial', async () => { assert.equal((await post(deletion, 400)).error.code, 'SECRET_STORE_UNAVAILABLE'); });
       assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined);
-      assert.equal((await post({ action: 'unlockKeystore', password: 'FAKE_fixture_password' })).result.state, 'unlocked');
-      assert.equal((await post(deletion)).error, undefined);
-    } finally { await dashboard.close(); }
-    await fixture.control('unlock');
+      await traceStep('offline.dashboard-unlock', async () => { assert.equal((await post({ action: 'unlockKeystore', password: 'FAKE_fixture_password' })).result.state, 'unlocked'); });
+      await traceStep('offline.dashboard-delete', async () => { assert.equal((await post(deletion)).error, undefined); });
+    } finally { await traceStep('offline.dashboard-close', () => dashboard.close()); }
+    await traceStep('offline.fixture-unlock', () => fixture.control('unlock'));
     assert.deepEqual(await client.list(), []);
     assert.equal(await fixture.store.has('user', 'disposable/shared/api'), true);
     await client.remove();
     assert.equal(await readProjectRecord(ownerDirectory), undefined);
   } finally {
-    await fixture.control('unlock');
-    await client.shutdown().catch(() => {});
-    const record = await readProjectRecord(ownerDirectory).catch(() => undefined);
-    if (record && !record.endpoint) for (const p of await offlinePreviews(record)) await deleteOfflineData(ownerDirectory, p.name, {});
-    await client.close(); await authorized.close();
-    await rm(ownerDirectory, { recursive: true, force: true }); await rm(project, { recursive: true, force: true });
+    await traceStep('offline.cleanup', async () => {
+      await fixture.control('unlock');
+      await client.shutdown().catch(() => {});
+      const record = await readProjectRecord(ownerDirectory).catch(() => undefined);
+      if (record && !record.endpoint) for (const p of await offlinePreviews(record)) await deleteOfflineData(ownerDirectory, p.name, {});
+      await client.close(); await authorized.close();
+      await rm(ownerDirectory, { recursive: true, force: true }); await rm(project, { recursive: true, force: true });
+    });
   }
 });
 

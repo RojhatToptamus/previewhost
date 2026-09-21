@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { connectProject, projectOwnerDirectory } from './project.js';
 import type { AttemptResult, PreviewStatus } from './contracts.js';
+import { traceStep } from './testSupport/diagnosis.js';
 
 for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global project approval and isolation over real stdio (${version})`, { skip: process.platform !== 'darwin', timeout: 60_000 }, async t => {
   const projects = await Promise.all([1, 2, 3].map(async () => realpath(await mkdtemp(join(tmpdir(), 'previewhost-access-')))));
@@ -26,8 +27,13 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
   let decision: 'accept' | 'decline' | 'cancel' = 'accept';
   let confirmations = 0;
   async function adapter(execute = true) {
+    let elicitationCount = 0;
     const c = new Client({ name: 'access-test', version: '1' }, { capabilities: { elicitation: { form: {} } }, ...(version === '2026-07-28' ? { versionNegotiation: { mode: { pin: version } } } : {}) });
-    c.setRequestHandler('elicitation/create', async () => { confirmations++; return decision === 'accept' ? { action: decision, content: { allow: true } } : { action: decision }; });
+    c.setRequestHandler('elicitation/create', async () => {
+      confirmations++;
+      if (!execute) process.stderr.write(`DIAG ${JSON.stringify({ label: 'mcp.static-only.elicitation', version, at: Date.now(), count: ++elicitationCount })}\n`);
+      return decision === 'accept' ? { action: decision, content: { allow: true } } : { action: decision };
+    });
     await c.connect(new StdioClientTransport({ command: process.execPath, args: [resolve('dist/cli.js'), 'mcp', ...(execute ? ['--allow-exec'] : [])], stderr: 'pipe' }));
     adapters.push(c); return c;
   }
@@ -85,8 +91,8 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
   assert.equal(confirmations, beforeRecovery);
   assert.ok((await call('preview_inspect', front, { spec })).result);
   // Approval grants sources, never command execution when --allow-exec is absent.
-  const staticOnly = await adapter(false);
-  const staticAccess = await call('preview_access', backend, {}, staticOnly);
+  const staticOnly = await traceStep(`mcp.${version}.static-only.connect`, () => adapter(false));
+  const staticAccess = await traceStep(`mcp.${version}.static-only.approval`, () => call('preview_access', backend, {}, staticOnly));
   assert.equal(staticAccess.error, undefined, 'project approval without command execution failed');
   assert.ok(staticAccess.result);
   const staticStart = (await call('preview_start', backend, { spec: { name: 'static-only', type: 'static', directory: backend } }, staticOnly)).result;

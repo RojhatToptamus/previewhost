@@ -1,0 +1,64 @@
+name: Targeted CI diagnosis
+
+on:
+  push:
+    branches: [codex/ci-diagnosis]
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    name: Trace three database scenarios
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: brew install colima docker
+      - name: Start fresh Docker engine
+        run: |
+          colima start --runtime docker --vm-type vz --cpus 4 --memory 4
+          docker info
+          echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+      - name: Pull database images
+        run: |
+          docker pull postgres:17-alpine
+          docker pull redis:7-alpine
+      - run: npm run test:build
+      - name: Run complete selected scenarios once
+        run: |
+          node --test --test-reporter=tap --test-concurrency=1 \
+            --test-name-pattern='^(dashboard reset enforces authorization|failed and canceled seeds retain|offline projects keep real PostgreSQL)' \
+            .local/test-build/data-reset.integration.test.js \
+            .local/test-build/jobs-database.integration.test.js \
+            .local/test-build/project-lifecycle.test.js
+      - name: Stop Docker
+        if: always()
+        run: colima stop
+
+  mcp:
+    name: Trace MCP approval without Docker
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run test:build
+      - name: Run both complete protocol scenarios once
+        run: |
+          node --test --test-reporter=tap --test-concurrency=1 \
+            --test-name-pattern='^global project approval' \
+            .local/test-build/mcp-access.integration.test.js
