@@ -5,13 +5,37 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
-import { Keychain } from './keychain.js';
+import { keychain, Keychain } from './keychain.js';
+import { Keystore } from './keystore.js';
 import { testKeychain } from './testSupport/keychain.js';
 import { failure } from './errors.js';
 
 const enabled = { skip: process.platform !== 'darwin', timeout: 60_000 };
 const invoke = Keychain.prototype.invoke;
 const execute = promisify(execFile);
+
+// Keep real Keychain fixtures in this file: creation temporarily changes the user's search list.
+test('macOS remembers one unlock key; forgetting affects new sessions, not active owners', { skip: process.platform !== 'darwin' }, async t => {
+  const native = await testKeychain(t);
+  const directory = join(native.directory, 'vault');
+  const stores: Keystore[] = [];
+  const session = () => { const store = new Keystore(directory); stores.push(store); return store; };
+  t.mock.method(keychain, 'get', (...args: Parameters<Keychain['get']>) => Keychain.prototype.get.call(native.store, ...args));
+  try {
+    const store = session();
+    const password = 'FAKE_correct_password';
+    await store.unlock({ password, create: true, confirmation: password });
+    await store.remember();
+    const second = session(); assert.equal((await second.status()).state, 'unlocked');
+    await native.control('lock');
+    assert.equal((await session().status()).state, 'locked');
+    await store.set('user','still-open','FAKE_value');
+    await native.control('unlock');
+    await store.forget();
+    assert.equal((await session().status()).state, 'locked');
+    assert.equal(await second.get('user','still-open'),'FAKE_value');
+  } finally { stores.forEach(store => store.close()); }
+});
 
 test('Keychain remembers only unlock keys, preserves no-UI failures and updates in place', enabled, async t => {
   const fixture = await testKeychain(t), store = fixture.store;
