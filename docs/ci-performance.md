@@ -439,10 +439,43 @@ The temporary profiling job and both probe scripts have been removed after measu
 The implementation now uses two independent database engines and one native/package job.
 Each group keeps serial file execution and the existing test deadlines.
 The complete serial command remains available for controls.
-The image lookup candidate filters the image list by reference, then retains exact tag and immutable-ID checks.
-A temporary hosted pilot compares both queries before qualification.
+The image lookup candidate was rejected after the hosted pilot showed no consistent benefit.
+Production image lookup remains unchanged. The temporary comparison step was removed before qualification.
 Caching and setup overlap remain deferred.
 
 Local checks and hosted qualification results are recorded below as they become available.
 Implementation does not establish that the runtime targets passed.
 The separate Linux/Windows implementation is untouched by this investigation.
+
+## Implementation pilot, 21 September
+
+Run [35602763344](https://github.com/RojhatToptamus/previewhost/actions/runs/35602763344) failed and is excluded from the qualification cohort.
+It included a temporary image-query comparison that changed the workload and warmed the image store.
+The native group passed all 138 tests. The project database group passed all 19 tests.
+The runtime group passed five cases, failed database authentication once, and canceled three cases at their existing 120-second deadlines.
+Its complete TAP summary reported nine tests, one failure, three cancellations, and zero skips.
+The aggregate release gate rejected the run. No package was published.
+
+The query comparison used the production Docker transport, six alternating pairs, and both required database images.
+All twelve lookups returned the same immutable image identities between variants.
+The filtered query returned one image instead of two, but timings did not show a consistent improvement.
+The production query change and its changeset were removed. Qualification therefore measures scheduling against unchanged production code.
+
+Local validation passed all 166 tests with zero skips: native 80.9s, runtime 66.8s, and project 58.2s.
+A title comparison retained all 163 original cases and added three coverage/release-gate checks.
+Type checks, build, installed PR tarball, and the exact release-plan packing command passed locally.
+Local Apple Silicon timings do not establish hosted Intel performance.
+
+Colima startup explains a large part of the variability. Earlier runs took 148.7s, 274.4s, and 409.5s from start to done.
+The latter two runs each booted twice. Their boot/readiness waits accounted for approximately 121s of the 135s difference.
+Colima restarts after an ordinary-user Docker access check fails, following successful root-level readiness.
+Its source identifies Docker-group activation as the intended recovery. The suppressed error prevents proving the exact cause in these runs.
+No supported setting was found that safely removes only this recovery.
+See [Colima startup](https://github.com/abiosoft/colima/blob/v0.10.3/environment/container/docker/docker.go#L82-L104),
+[group provisioning](https://github.com/abiosoft/colima/blob/v0.10.3/environment/vm/lima/yaml.go#L103-L109),
+and [Lima readiness checks](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/hostagent/requirements.go#L238-L251).
+
+The historical MCP approval failure remains unexplained. Its old assertion discarded the public error response.
+The failed approval starts a fresh project owner; that startup does not contact Docker or open the shared keystore.
+No deterministic shared-state or cleanup race was found. The new assertions preserve the error for diagnosis without changing behavior or deadlines.
+Both MCP protocol cases passed in this pilot. That is evidence of a passing run, not a root-cause fix.
