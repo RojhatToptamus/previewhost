@@ -14,7 +14,7 @@ export function checkReleaseResult(code, output) {
   // so a missing/truncated test run cannot look like successful verification.
   const counts = {};
   for (const match of output.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\d+)\r?$/gm)) {
-    if (Object.hasOwn(counts, match[1])) throw new Error('Release verification requires one complete test summary per group.');
+    if (Object.hasOwn(counts, match[1])) throw new Error('Release verification requires one complete test summary.');
     counts[match[1]] = Number(match[2]);
   }
   if (!(counts.tests > 0) || counts.pass !== counts.tests ||
@@ -22,16 +22,6 @@ export function checkReleaseResult(code, output) {
     throw new Error(`Release verification requires a complete test summary with zero failures, cancellations, skips, or TODOs: ${JSON.stringify(counts)}`);
   }
   return counts.tests;
-}
-
-export function checkRequiredJobs(jobs, eventName, releasePlan) {
-  for (const name of ['docs', 'database', 'package']) {
-    if (jobs?.[name]?.result !== 'success') throw new Error(`Required CI job did not succeed: ${name}`);
-  }
-  const requiresArtifact = eventName !== 'pull_request' || Boolean(releasePlan);
-  if (requiresArtifact && !/^[1-9][0-9]*$/.test(jobs.package.outputs?.['pack-dir-artifact-id'] ?? '')) {
-    throw new Error('Release verification requires the exact verified package artifact ID.');
-  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

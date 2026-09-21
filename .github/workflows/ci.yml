@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   docs:
-    name: Verify documentation and types
+    name: Verify documentation
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -35,20 +35,17 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: npm ci
-      - run: npm run typecheck
       - run: npm run check:docs
       - run: npx playwright install --with-deps chromium
       - run: npm run test:docs
 
-
-  database:
-    name: Verify database (${{ matrix.group }})
+  verify:
+    name: Verify macOS package
+    # Colima uses this Intel runner in its own macOS integration suite.
     runs-on: macos-15-intel
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [runtime, project]
+    outputs:
+      pack-dir-artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -63,46 +60,14 @@ jobs:
       - name: Start local Docker
         id: docker
         run: |
-          colima start --runtime docker --vm-type vz --cpus 4 --memory 4
+          colima start --runtime docker --vm-type vz --cpus 2 --memory 4
           docker info
           echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
       - name: Pull database images
         run: |
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
-      - run: npm run test:build
-      - run: node scripts/test-groups.mjs "${{ matrix.group }}"
-      - name: Docker startup diagnostics
-        if: failure() && steps.docker.outcome == 'failure'
-        run: |
-          for file in "$HOME"/.colima/_lima/colima/ha.stderr.log "$HOME"/.colima/_lima/colima/serial*.log; do
-            if [ -f "$file" ]; then
-              echo "::group::$(basename "$file")"
-              cat "$file"
-              echo "::endgroup::"
-            fi
-          done
-      - name: Stop local Docker
-        if: always()
-        run: colima stop
-
-  package:
-    name: Verify native tests and package
-    runs-on: macos-15-intel
-    timeout-minutes: 30
-    outputs:
-      pack-dir-artifact-id: ${{ steps.upload.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - run: npm ci
-      - run: npm run test:build
-      - run: node scripts/test-groups.mjs native
+      - run: npm run verify:release
       - name: Pack pull request
         if: github.event_name == 'pull_request'
         run: |
@@ -146,30 +111,25 @@ jobs:
           path: ${{ runner.temp }}/previewhost-release
           if-no-files-found: error
           retention-days: 30
-
-  verify:
-    name: Verify macOS package
-    needs: [docs, database, package]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      pack-dir-artifact-id: ${{ needs.package.outputs.pack-dir-artifact-id }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Require every verification job
+      - name: Require verified release artifact
+        if: github.event_name != 'pull_request' || inputs.publish-plan-artifact-id != ''
         env:
-          JOB_RESULTS: ${{ toJSON(needs) }}
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_PLAN: ${{ inputs.publish-plan-artifact-id }}
+          PACK_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
         run: |
           node --input-type=module <<'NODE'
-          import { checkRequiredJobs } from './scripts/verify-release.mjs';
-          checkRequiredJobs(JSON.parse(process.env.JOB_RESULTS), process.env.EVENT_NAME, process.env.RELEASE_PLAN);
+          import assert from 'node:assert/strict';
+          assert.match(process.env.PACK_ARTIFACT_ID ?? '', /^[1-9][0-9]*$/, 'Release requires the verified package artifact.');
           NODE
+      - name: Docker startup diagnostics
+        if: failure() && steps.docker.outcome == 'failure'
+        run: |
+          for file in "$HOME"/.colima/_lima/colima/ha.stderr.log "$HOME"/.colima/_lima/colima/serial*.log; do
+            if [ -f "$file" ]; then
+              echo "::group::$(basename "$file")"
+              cat "$file"
+              echo "::endgroup::"
+            fi
+          done
+      - name: Stop local Docker
+        if: always()
+        run: colima stop

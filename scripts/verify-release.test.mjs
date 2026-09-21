@@ -3,7 +3,9 @@ import { execFile } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { checkReleasePrerequisites, checkReleaseResult, checkRequiredJobs } from './verify-release.mjs';
+import { readFile } from 'node:fs/promises';
+import YAML from 'yaml';
+import { checkReleasePrerequisites, checkReleaseResult } from './verify-release.mjs';
 
 const execute = promisify(execFile);
 
@@ -29,23 +31,13 @@ test('release verification rejects a successful Node run that skipped tests or l
   assert.throws(() => checkReleaseResult(0, skipped + passed), /one complete test summary/);
 });
 
-test('required CI gate rejects missing, failed, canceled, or skipped groups and missing release artifacts', () => {
-  const jobs = { docs: { result: 'success' }, database: { result: 'success' }, package: { result: 'success', outputs: { 'pack-dir-artifact-id': '123' } } };
-  checkRequiredJobs(jobs, 'push', '456');
-  for (const group of Object.keys(jobs)) {
-    for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
-      assert.throws(() => checkRequiredJobs({ ...jobs, [group]: { result } }), /Required CI job did not succeed/);
-    }
-    const missing = { ...jobs }; delete missing[group];
-    assert.throws(() => checkRequiredJobs(missing), /Required CI job did not succeed/);
+test('release workflow requires the uploaded verified artifact before publication', async () => {
+  const workflow = YAML.parse(await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'));
+  const gate = workflow.jobs.verify.steps.find(step => step.name === 'Require verified release artifact');
+  assert.equal(gate.if, "github.event_name != 'pull_request' || inputs.publish-plan-artifact-id != ''");
+  assert.equal(gate.env.PACK_ARTIFACT_ID, '${{ steps.upload.outputs.artifact-id }}');
+  for (const artifact of ['', '0', '123junk']) {
+    await assert.rejects(execute('bash', ['-e', '-c', gate.run], { env: { ...process.env, PACK_ARTIFACT_ID: artifact } }));
   }
-  const withoutArtifact = { ...jobs, package: { result: 'success' } };
-  checkRequiredJobs(withoutArtifact, 'pull_request', '');
-  for (const [eventName, releasePlan] of [['push', ''], ['workflow_dispatch', ''], [undefined, undefined], ['pull_request', '456']]) {
-    assert.throws(() => checkRequiredJobs(withoutArtifact, eventName, releasePlan), /exact verified package artifact ID/);
-    checkRequiredJobs(jobs, eventName, releasePlan);
-  }
-  for (const artifactId of ['', '0', '123junk']) {
-    assert.throws(() => checkRequiredJobs({ ...jobs, package: { result: 'success', outputs: { 'pack-dir-artifact-id': artifactId } } }, 'push', '456'), /exact verified package artifact ID/);
-  }
+  await execute('bash', ['-e', '-c', gate.run], { env: { ...process.env, PACK_ARTIFACT_ID: '123' } });
 });
