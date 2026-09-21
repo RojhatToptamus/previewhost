@@ -3,6 +3,8 @@ import { execFile } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
+import YAML from 'yaml';
 import { checkReleasePrerequisites, checkReleaseResult } from './verify-release.mjs';
 
 const execute = promisify(execFile);
@@ -26,4 +28,16 @@ test('release verification rejects a successful Node run that skipped tests or l
   assert.throws(() => checkReleaseResult(0, todo), /zero failures, cancellations, skips/);
   assert.throws(() => checkReleaseResult(0, passed.replace(/^# skipped.*\n/m, '')), /complete test summary/);
   assert.throws(() => checkReleaseResult(1, passed), /exit 1/);
+  assert.throws(() => checkReleaseResult(0, skipped + passed), /one complete test summary/);
+});
+
+test('release workflow requires the uploaded verified artifact before publication', async () => {
+  const workflow = YAML.parse(await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'));
+  const gate = workflow.jobs.verify.steps.find(step => step.name === 'Require verified release artifact');
+  assert.equal(gate.if, "github.event_name != 'pull_request' || inputs.publish-plan-artifact-id != ''");
+  assert.equal(gate.env.PACK_ARTIFACT_ID, '${{ steps.upload.outputs.artifact-id }}');
+  for (const artifact of ['', '0', '123junk']) {
+    await assert.rejects(execute('bash', ['-e', '-c', gate.run], { env: { ...process.env, PACK_ARTIFACT_ID: artifact } }));
+  }
+  await execute('bash', ['-e', '-c', gate.run], { env: { ...process.env, PACK_ARTIFACT_ID: '123' } });
 });

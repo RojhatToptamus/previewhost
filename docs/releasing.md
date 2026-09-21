@@ -29,8 +29,10 @@ During prerelease mode, consumed changesets stay under `.changeset/pre/` until p
 `.github/workflows/ci.yml` runs for PRs targeting `main`. Release also calls it
 before publication. It installs dependencies, starts local Docker through Colima,
 pulls the two database fixture images, and runs `npm run verify:release`.
-That existing gate requires macOS, an explicit local Unix socket, and zero skipped,
-failed, canceled, or TODO tests. It does not accept a partial test run.
+That gate requires macOS, an explicit local Unix socket, and zero skipped,
+failed, canceled, or TODO tests. It rejects incomplete or duplicate TAP summaries.
+Release calls must return the uploaded, verified package artifact ID before publication.
+PR updates cancel superseded CI runs. Release runs retain their existing serialization.
 
 The runner is `macos-15-intel`, which Colima uses in its own integration workflow.
 Colima uses the native macOS VZ backend with two virtual CPUs. Docker tool installation,
