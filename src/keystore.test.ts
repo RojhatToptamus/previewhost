@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { Keystore, validateSecretValue } from './keystore.js';
-import { keychain } from './keychain.js';
+import { keychain, Keychain } from './keychain.js';
+import { testKeychain } from './testSupport/keychain.js';
 import { createPreviewRuntime } from './runtime.js';
 import { startDaemon } from './daemon.js';
 import { SecretSetup } from './secrets-setup.js';
@@ -129,6 +130,21 @@ test('unavailable automatic storage leaves password unlock usable and reports re
   assert.equal(result.state, 'unlocked'); assert.ok(result.warning);
   await next.set('user','usable','FAKE_value');
   assert.equal(await store.get('user','usable'),'FAKE_value');
+});
+
+test('macOS remembers one unlock key; forgetting affects new sessions, not active owners', { skip: process.platform !== 'darwin' }, async t => {
+  const { store, session } = await fixture(t);
+  const native = await testKeychain(t);
+  t.mock.method(keychain, 'get', (...args: Parameters<Keychain['get']>) => Keychain.prototype.get.call(native.store, ...args));
+  await store.remember();
+  const second = session(); assert.equal((await second.status()).state, 'unlocked');
+  await native.control('lock');
+  assert.equal((await session().status()).state, 'locked');
+  await store.set('user','still-open','FAKE_value');
+  await native.control('unlock');
+  await store.forget();
+  assert.equal((await session().status()).state, 'locked');
+  assert.equal(await second.get('user','still-open'),'FAKE_value');
 });
 
 test('private approval, password unlock, owner isolation and cancellation remain separate', async t => {

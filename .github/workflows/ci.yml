@@ -60,7 +60,7 @@ jobs:
       - name: Start local Docker
         id: docker
         run: |
-          colima start --runtime docker --vm-type vz --cpus 2 --memory 4
+          colima start --runtime docker --vm-type vz --cpus 4 --memory 4
           docker info
           echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
       - name: Pull database images
