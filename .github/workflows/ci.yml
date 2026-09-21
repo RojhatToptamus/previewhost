@@ -51,10 +51,10 @@ jobs:
       - name: Linux regression suite
         if: runner.os == 'Linux'
         run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/*.test.js
-      - name: Windows kernel ownership, native commands, ACLs, and named-pipe transport
+      - name: Windows ownership, native jobs, private access, and named-pipe transport
         if: runner.os == 'Windows'
         # Linux-container database tests require a separate Windows Docker Desktop host.
-        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js .local/test-build/jobs.integration.test.js .local/test-build/project.integration.test.js .local/test-build/mcp-access.integration.test.js
       - name: Installed package
         shell: bash
         run: |

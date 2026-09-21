@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const tarball = process.argv[2];
@@ -10,7 +10,8 @@ if (!tarball || process.argv.length !== 3) throw new Error('Usage: npm run check
 const candidate = await realpath(tarball);
 const repository = await realpath(fileURLToPath(new URL('..', import.meta.url)));
 const directory = await realpath(await mkdtemp(join(tmpdir(), 'previewhost package ')));
-assert(relative(repository, directory).startsWith('..'), 'The consumer must be outside the source repository.');
+const fromRepository = relative(repository, directory);
+assert(isAbsolute(fromRepository) || fromRepository === '..' || fromRepository.startsWith('..' + sep), 'The consumer must be outside the source repository.');
 console.log(`Checking ${candidate} in ${directory}`);
 function run(command, args) {
   if (command === 'npm' && process.platform === 'win32') {
