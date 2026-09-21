@@ -55,6 +55,9 @@ import {
   SelectItem,
 } from "./components/ui/select";
 import { SecretManager } from "./secrets";
+import brandSvg from "../../assets/previewhost.svg?raw";
+
+const brandMark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
 
 type Selection = { owner: string; name?: string } | "secrets" | undefined;
 
@@ -170,14 +173,19 @@ export function App() {
       <SidebarProvider className="app-shell">
         <header className="app-header">
           <div className="header-brand">
-            <SidebarTrigger size="icon" />
             <Button
               variant="ghost"
               className="brand"
               onClick={() => select(undefined)}
             >
+              <span
+                className="brand-icon"
+                aria-hidden="true"
+                dangerouslySetInnerHTML={{ __html: brandMark }}
+              />
               previewhost
             </Button>
+            <SidebarTrigger size="icon" />
           </div>
           <div className="header-controls">
             <Toggle
@@ -421,7 +429,7 @@ function Navigation({
             ))}
           </SidebarMenu>
           {!list.length && (
-            <p className="px-2 py-4 text-xs text-muted-foreground">
+            <p className="sidebar-empty">
               No matching previews
             </p>
           )}
