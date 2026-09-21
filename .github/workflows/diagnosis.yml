@@ -15,11 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025]
+        os: [windows-2025, windows-11-arm]
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 5c57e577ee17460cdee31f570bc687b44283eaf6
+          ref: 97c9ad3152e71d6341197f1a3873304e283f8a9c
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -32,7 +32,7 @@ jobs:
       - run: npx tsc -p tsconfig.test.json
       - name: Windows ownership, processes, transport, and password storage
         if: runner.os == 'Windows'
-        run: node --test --test-reporter=tap --test-name-pattern="Windows rejects non-inheritable" .local/test-build/platform.test.js
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js .local/test-build/jobs.integration.test.js .local/test-build/project.integration.test.js .local/test-build/mcp-access.integration.test.js
       - name: Verify installed package
         shell: bash
         run: |
