@@ -436,6 +436,13 @@ Neither this CI research nor another project's Windows matrix establishes Previe
 The research supports independent engines, measured semantic groups, complete per-group results, and one release gate.
 It does not support deleting tests, replacing lifecycle scenarios with a shared database, increasing timeouts, or copying a monorepo CI framework.
 The temporary profiling job and both probe scripts have been removed after measurement. Their source remains available in commit `5a283d0`.
-The only retained workflow changes so far are four Docker CPUs and cancellation of obsolete PR runs.
-The image lookup change, scalable partition, caching, and setup overlap remain proposed until this plan is reviewed and benchmarked.
+The implementation now uses two independent database engines and one native/package job.
+Each group keeps serial file execution and the existing test deadlines.
+The complete serial command remains available for controls.
+The image lookup candidate filters the image list by reference, then retains exact tag and immutable-ID checks.
+A temporary hosted pilot compares both queries before qualification.
+Caching and setup overlap remain deferred.
+
+Local checks and hosted qualification results are recorded below as they become available.
+Implementation does not establish that the runtime targets passed.
 The separate Linux/Windows implementation is untouched by this investigation.

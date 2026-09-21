@@ -275,10 +275,13 @@ test('concurrent new names cannot exceed the retained-data limit', mac, async ()
 });
 
 test('failed intent publication and missing cached images dispatch no Docker mutation', mac, async () => {
-  for (const blocked of ['publication', 'image'] as const) {
+  for (const blocked of ['publication', 'image', 'malformed-image', 'wrong-tag', 'changed-image'] as const) {
     const fixture = await faultEngine('volume-lost-absent');
     const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
-    if (blocked === 'image') fixture.imagesMissing = true;
+    if (blocked === 'image') fixture.images = [];
+    else if (blocked === 'malformed-image') fixture.images = [{ Id: 'invalid', RepoTags: ['postgres:17-alpine'] }];
+    else if (blocked === 'wrong-tag') fixture.images = [{ Id: `sha256:${'a'.repeat(64)}`, RepoTags: ['postgres:18-alpine'] }];
+    else if (blocked === 'changed-image') fixture.inspectedImage = { Id: `sha256:${'b'.repeat(64)}` };
     else fixture.onInfo = async () => {
       if ((await readdir(fixture.data)).includes('sample.json')) await chmod(fixture.data, 0o500);
     };
@@ -303,7 +306,8 @@ async function faultEngine(mode: FaultMode) {
   let volumeIntent: Record<string, any> | undefined;
   let lostRemoval = false;
   const fixture = { directory, data, socket, volumes, containers, deletions: [] as string[], engineId: 'fixture-engine', sawPublishedIntent: false,
-    onInfo: async () => {}, imagesMissing: false, mutationRequests: 0,
+    onInfo: async () => {}, images: [{ Id: imageId, RepoTags: ['postgres:17-alpine', 'redis:7-alpine'] }],
+    inspectedImage: { Id: imageId }, mutationRequests: 0,
     afterContainerCreate: () => {}, loseVolumeRemoval: false,
     completeVolume(foreign = false) {
       if (!volumeIntent) return;
@@ -322,8 +326,8 @@ async function faultEngine(mode: FaultMode) {
       const path = url.pathname.replace('/v1.40', '');
       const send = (status: number, value?: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(value === undefined ? undefined : JSON.stringify(value)); };
       if (path === '/info') { await fixture.onInfo(); send(200, { ID: fixture.engineId }); return; }
-      if (path === '/images/json') { send(200, fixture.imagesMissing ? [] : [{ Id: imageId, RepoTags: ['postgres:17-alpine', 'redis:7-alpine'] }]); return; }
-      if (path === `/images/${imageId}/json`) { send(200, { Id: imageId }); return; }
+      if (path === '/images/json') { send(200, fixture.images); return; }
+      if (path === `/images/${imageId}/json`) { send(200, fixture.inspectedImage); return; }
       if (req.method === 'POST' && path === '/volumes/create') {
         fixture.mutationRequests++;
         const record = JSON.parse(await readFile(join(data, 'sample.json'), 'utf8'));

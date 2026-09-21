@@ -50,7 +50,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && vite build && node scripts/prepare-bin.mjs && node scripts/build-native.mjs",
     "typecheck": "tsc -p tsconfig.test.json --noEmit && tsc -p dashboard/tsconfig.json",
-    "test": "npm run build && tsc -p tsconfig.test.json && node scripts/build-native.mjs --test && node --test --test-reporter=tap --test-concurrency=1 .local/test-build/*.test.js examples/multi-repo/*.test.mjs scripts/*.test.mjs",
+    "test:build": "npm run build && tsc -p tsconfig.test.json && node scripts/build-native.mjs --test",
+    "test": "npm run test:build && node --test --test-reporter=tap --test-concurrency=1 .local/test-build/*.test.js examples/multi-repo/*.test.mjs scripts/*.test.mjs",
     "prepack": "npm run build",
     "verify": "npm run typecheck && npm test",
     "verify:release": "node scripts/verify-release.mjs",
