@@ -1,7 +1,6 @@
 # Releases
 
 previewhost uses Changesets 3 and GitHub Actions. Regular releases publish to `latest`.
-The `0.1.0` release exits the initial alpha channel.
 If prerelease mode is enabled again, `.changeset/pre.json` selects its channel; leaving it requires explicit maintainer approval.
 
 ## Make a release
@@ -17,6 +16,7 @@ If prerelease mode is enabled again, `.changeset/pre.json` selects its channel; 
    verified tarball to npm, and creates a GitHub release with changelog notes. Alpha versions are marked as prereleases.
 
 Use patch for fixes, minor for features, and major for breaking changes.
+During `0.x` development, use minor for breaking changes and include the required upgrade steps in the release notes.
 Prerelease numbering follows Changesets. Review the generated version in the release PR.
 Regular releases use `npm install previewhost`. Alpha releases use `npm install previewhost@alpha`.
 Do not change the package version or npm tag by hand for normal releases.
