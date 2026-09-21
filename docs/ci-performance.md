@@ -20,18 +20,19 @@ These are execution times, not approval or queue delays. Run 35551077245 also wa
 Documentation jobs already run independently and finish in 44–49 seconds. They do not determine the critical path.
 Dependency installation took 14–24 seconds on the sampled macOS jobs.
 
-The latest sampled run spent 1,073.05 seconds in its 163 tests, or 96.6% of release verification.
+Run 35551077245 spent 1,073.05 seconds in its 163 tests, or 96.6% of release verification.
 Type checking took about 13.7 seconds. Build, test compilation, and native fixture preparation took about 23.1 seconds.
 The largest test-file totals were jobs (364.1s), worktree example (165.0s), data (151.2s), project (74.4s), and project database (72.8s).
 Database diagnostics measured 33.3 seconds for initial startup, 20.4 seconds for reopening, and 3.0 seconds for stopping.
 
-Colima startup included two VM boots and provisioning. Downloading its disk image took about four seconds; decompression took about 40 seconds.
+In run 35551077245, Colima startup included two VM boots and provisioning. Downloading its disk image took about four seconds; decompression took about 40 seconds.
 A successful [historical QEMU run](https://github.com/RojhatToptamus/previewhost/actions/runs/35528170825) still took about 26.7 minutes.
 It used 458 seconds for combined Docker setup and 1,063 seconds for verification.
 Different source revisions prevent a causal comparison; these measurements do not justify reverting to QEMU.
 
 The current-main [release attempt](https://github.com/RojhatToptamus/previewhost/actions/runs/35579987616/job/106270458643) hit the 30-minute job limit.
-It completed 160 tests without a final summary, so publication was skipped. GitHub's job annotation confirms the timeout.
+It reported 160 test results without a final summary, so publication was skipped. GitHub's job annotation confirms the timeout.
+The second attempt also hit the 30-minute limit, after 121 test results. Neither attempt qualifies as a passing baseline.
 
 Colima's [Docker startup code](https://github.com/abiosoft/colima/blob/v0.10.3/environment/container/docker/docker.go#L82-L104) explains the second boot.
 It restarts when root can access Docker but the ordinary user's session cannot, to activate Docker-group membership.
@@ -79,6 +80,10 @@ Record test counts, failures, skips, TAP duration, verification duration, setup 
 Local macOS arm64 measurements are useful regression checks, but cannot establish a hosted Intel CI improvement.
 Hosted candidate results and local measurements are recorded after execution.
 
+The baseline and both hosted trials used Node 24.19.0, runner image 20260824.0482.1, Colima 0.10.3, and Docker Engine 29.5.2.
+The PostgreSQL multi-platform index changed, but registry inspection confirmed identical amd64 manifests, configuration, and all ten layers.
+Only riscv64 entries changed. The Redis image digest also matched. This image change does not affect the Intel comparison.
+
 Local checks used macOS 26.6.2 arm64, Node.js 22.23.1, and Docker Desktop 29.6.1 with four CPUs and 3.83 GiB of memory.
 All four runs passed the same 163 test titles, with zero failures, cancellations, skips, or TODOs.
 
@@ -108,8 +113,41 @@ The worktree example increased from 164.2s to 282.6s. All Keychain tests passed;
 Both agent reviews found evidence consistent with Docker resource contention, without evidence of cross-owner resource collisions.
 The logs cannot distinguish CPU, memory, and disk pressure.
 
-Restore the original serial suite and test locations. The next controlled trial changes only Colima's CPU allocation from two to four.
-[GitHub documents four CPUs and 14 GiB of memory](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) for the existing Intel runner.
-Keep the VM memory at 4 GiB, every test deadline, and all package checks unchanged.
-This trial tests a resource-allocation hypothesis. It does not establish an improvement until hosted verification passes.
+The follow-up restored the original serial suite and test locations. It changed only Colima's CPU allocation from two to four.
+[GitHub documents four CPUs and 14 GB of memory](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) for the existing Intel runner.
+VM memory stayed at 4 GiB. Every test deadline and all package checks stayed unchanged.
 Standard Apple Silicon runners do not support nested virtualization, so they are not a supported replacement for this Colima job.
+
+## Hosted serial trial: retained with qualification
+
+[Run 35585447986](https://github.com/RojhatToptamus/previewhost/actions/runs/35585447986) passed all 163 tests with four Docker CPUs and serial test files.
+It had zero failures, cancellations, skips, or TODOs. Installed-package verification and the documentation job also passed.
+The actual test-title inventory matched the baseline. All package-script and test-source changes from the concurrent experiment were reverted.
+Main commit `36ed345` has the same source tree as baseline commit `4d4f980`, verified with Git.
+
+| Measurement | Baseline 35551077245 | Four CPUs 35585447986 | Observed reduction |
+| --- | ---: | ---: | ---: |
+| Complete macOS job | 26m00s | 22m26s | 3m34s (13.7%) |
+| Docker startup | 4m30s | 2m30s | 2m00s |
+| Database image pulls | 1m43s | 1m28s | 15s |
+| Release verification | 18m31s | 17m24s | 1m07s (6.0%) |
+| Test runner | 1,073.053s | 995.216s | 77.837s (7.3%) |
+| Installed-package check | 26s | 24s | 2s |
+
+Database diagnostics improved: initial startup took 21.1s instead of 33.3s; reopening took 12.0s instead of 20.4s.
+The worktree example took 126.7s instead of 164.2s. Some other tests were slower.
+
+This is one passing hosted measurement, not proof of a stable CPU-driven improvement.
+Previous successful 163-test runs varied by approximately 108 seconds, more than the observed 78-second test reduction.
+The new run needed one VM boot; the baseline needed two. The failed two-CPU concurrent trial also needed only one boot.
+Image decompression was faster before the VM started, which also shows host variability.
+Do not attribute the complete 3m34s difference to CPU allocation.
+
+Both agent reviews recommend retaining the small four-CPU allocation while keeping the suite serial.
+The final implementation changes only that allocation and cancellation of superseded PR runs.
+Release serialization, test coverage, deadlines, memory allocation, and verified-tarball publication remain unchanged.
+Cancellation avoids obsolete PR work; its aggregate savings have not been measured.
+
+Assess subsequent hosted runs before claiming sustained gains. If further parallelism is needed, test independent Docker engines on separate runners.
+Node's built-in test sharding can avoid a custom scheduler, but adds setup cost and requires release gating across every shard.
+That larger change, caching, and dependency-copy changes remain deferred. No runtime or Windows qualification result is implied by this CI experiment.
