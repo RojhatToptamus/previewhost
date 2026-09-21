@@ -15,38 +15,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025]
+        os: [windows-2025, windows-11-arm]
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: f07e375b9ce886b3eb1f2efaaff32c563037232b
+          ref: 41e193462752c1aa641782503dde59e7a4fb7dd2
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.0
           package-manager-cache: false
+      - run: node -p "process.platform + ' ' + process.arch"
       - run: npm ci --ignore-scripts
-      - name: Trace shutdown file inspection failures
-        shell: bash
-        run: |
-          node --input-type=module <<'JS'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          let s = readFileSync('src/windows.ts', 'utf8');
-          s = s.replace('  if (attributes === 0xffffffff || (attributes & 0x400))', "  if (attributes === 0xffffffff) console.error('WINDOWS_ATTRIBUTES_FAILURE', win().error());\n  if (attributes === 0xffffffff || (attributes & 0x400))");
-          s = s.replace('  if (result !== 0) throw new PreviewError', "  if (result !== 0) console.error('WINDOWS_SECURITY_FAILURE', result);\n  if (result !== 0) throw new PreviewError");
-          writeFileSync('src/windows.ts', s);
-          s = readFileSync('src/project.ts', 'utf8');
-          s = s.replace("    throw new PreviewError('UNAUTHORIZED', 'The project connection file or its directory is unsafe or invalid.');", "    console.error('RECORD_READ_FAILURE', error);\n    throw new PreviewError('UNAUTHORIZED', 'The project connection file or its directory is unsafe or invalid.');");
-          writeFileSync('src/project.ts', s);
-          JS
       - run: npm run typecheck
       - run: npm run build
       - run: npx tsc -p tsconfig.test.json
-      - name: Windows shutdown diagnosis
+      - name: Windows ownership, processes, transport, and password storage
         if: runner.os == 'Windows'
-        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/project.integration.test.js .local/test-build/mcp-access.integration.test.js
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js .local/test-build/jobs.integration.test.js .local/test-build/project.integration.test.js .local/test-build/mcp-access.integration.test.js
       - name: Verify installed package
-        if: always()
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/platform-package"
