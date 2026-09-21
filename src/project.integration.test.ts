@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -359,10 +360,10 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   assert.equal((await first<AttemptResult>('preview_wait', { name: 'notes', attemptId: restarted.candidate!.id })).state, 'ready');
 });
 
-for (const customData of [false, true]) test(`automatic storage keeps explicit options and static previews usable without Docker (custom data: ${customData})`, { ...enabled, skip: process.platform === 'win32' }, async t => {
+for (const customData of [false, true]) test(`automatic storage keeps explicit options and static previews usable without Docker (custom data: ${customData})`, enabled, async t => {
   const { directory, client } = await fixture(t);
   const dataDirectory = customData ? join(projectOwnerDirectory(directory), 'custom-data') : undefined;
-  const dockerSocket = join(directory, 'absent.sock');
+  const dockerSocket = process.platform === 'win32' ? `\\\\.\\pipe\\previewhost-absent-${randomUUID()}` : join(directory, 'absent.sock');
   const owner = connectProject({ projectDirectory: directory, allowExec: true, dataDirectory, dockerSocket });
   t.after(() => owner.close());
   const site: PreviewSpec = { name: 'site', type: 'environment', primary: 'web', services: { web: { type: 'static', directory } } };
@@ -373,7 +374,7 @@ for (const customData of [false, true]) test(`automatic storage keeps explicit o
   assert.equal(info.dataDirectory, dataDirectory ?? join(projectOwnerDirectory(directory), 'data'));
   assert.equal(info.dockerSocket, dockerSocket);
   assert.equal((await client.info())?.pid, info.pid, 'omitted launch options must reuse the existing owner');
-  for (const override of [{ dataDirectory: join(directory, 'different') }, { dockerSocket: join(directory, 'other.sock') }]) {
+  for (const override of [{ dataDirectory: join(directory, 'different') }, { dockerSocket: `${dockerSocket}-other` }]) {
     const mismatch = connectProject({ projectDirectory: directory, ...override });
     try { await assert.rejects(mismatch.start(site), { code: 'INVALID_INPUT' }); }
     finally { await mismatch.close(); }
@@ -381,8 +382,8 @@ for (const customData of [false, true]) test(`automatic storage keeps explicit o
   const update = await owner.replace('site', { name: 'site', type: 'environment', primary: 'web',
     services: { web: { type: 'static', directory }, db: { type: 'postgres' } } });
   const failed = await owner.wait('site', update.candidate!.id);
-  assert.equal(failed.error?.code, 'START_FAILED');
-  assert.match(failed.error!.message, /Docker socket is unavailable/);
+  assert.equal(failed.error?.code, process.platform === 'win32' ? 'UNSUPPORTED_PLATFORM' : 'START_FAILED');
+  assert.match(failed.error!.message, process.platform === 'win32' ? /Docker pipe server identity/ : /Docker socket is unavailable/);
   assert.equal(await (await fetch(ready.url!)).text(), 'project preview');
   assert.deepEqual(await owner.info(), info, 'failed updates and conflicting options must not reconfigure or restart the owner');
   assert.equal((await client.get('site')).active?.id, ready.id);
