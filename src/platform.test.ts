@@ -98,32 +98,23 @@ if (process.platform === 'win32') test('Windows connection reads tolerate clean 
 
 if (process.platform === 'win32') test('Windows rejects non-inheritable private directories before writing a token and permits split inheritance', async t => {
   const { execFileSync } = await import('node:child_process');
-  const { mkdir, lstat } = await import('node:fs/promises');
+  const { lstat } = await import('node:fs/promises');
   const { readToken } = await import('./client.js');
   const { startDaemon } = await import('./daemon.js');
   const { createPreviewRuntime } = await import('./runtime.js');
   const root = await mkdtemp(join(tmpdir(), 'previewhost-inheritance-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  async function directory(name: string, inherited: boolean) {
+  const sid = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', timeout: 10_000 }).match(/S-1-[0-9-]+/)?.[0];
+  assert.ok(sid);
+  function directory(name: string, inherited: boolean) {
     const path = join(root, name);
-    await mkdir(path);
-    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
-      $ErrorActionPreference = 'Stop'
-      $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-      $acl = [System.Security.AccessControl.DirectorySecurity]::new()
-      $acl.SetOwner($sid)
-      $acl.SetAccessRuleProtection($true, $false)
-      if ($env:PREVIEWHOST_ACL_INHERITANCE -eq 'yes') {
-        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'Modify', 'ObjectInherit', 'InheritOnly', 'Allow'))
-        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'Modify', 'ContainerInherit', 'None', 'Allow'))
-      } else {
-        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'None', 'None', 'Allow'))
-      }
-      [System.IO.Directory]::SetAccessControl($env:PREVIEWHOST_ACL_DIRECTORY, $acl)
-    `], { env: { ...process.env, PREVIEWHOST_ACL_DIRECTORY: path, PREVIEWHOST_ACL_INHERITANCE: inherited ? 'yes' : 'no' }, timeout: 10_000 });
+    makePrivateDirectory(path);
+    execFileSync('icacls.exe', [path, '/grant:r', `*${sid}:${inherited ? '(CI)(M)' : '(F)'}`], { timeout: 10_000 });
+    if (inherited) execFileSync('icacls.exe', [path, '/grant', `*${sid}:(OI)(IO)(M)`], { timeout: 10_000 });
+    execFileSync('icacls.exe', [path, '/remove:g', '*S-1-5-18', '*S-1-5-32-544'], { timeout: 10_000 });
     return path;
   }
-  const unsafe = await directory('non-inheritable', false);
+  const unsafe = directory('non-inheritable', false);
   const token = join(unsafe, 'token');
   assert.throws(() => makePrivateDirectory(unsafe), { code: 'UNAUTHORIZED' });
   await assert.rejects(readToken(token), { code: 'UNAUTHORIZED' });
@@ -133,7 +124,7 @@ if (process.platform === 'win32') test('Windows rejects non-inheritable private 
   t.after(async () => { await daemon?.close(); });
   await assert.rejects(async () => { daemon = await startDaemon({ runtime, tokenFile: token, port: 0 }); }, { code: 'UNAUTHORIZED' });
   await assert.rejects(lstat(token), { code: 'ENOENT' });
-  const safe = await directory('split-inheritance', true);
+  const safe = directory('split-inheritance', true);
   assert.doesNotThrow(() => makePrivateDirectory(safe));
   await writeFile(join(safe, 'token'), 'a'.repeat(64));
   assert.equal(await readToken(join(safe, 'token')), 'a'.repeat(64));
