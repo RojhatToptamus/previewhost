@@ -292,8 +292,8 @@ test('browser launch passes only the private URL and normal OS environment, with
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory] });
   const setup = new SecretSetup(runtime, 'http://127.0.0.1:9999');
   const spawn = childProcess.spawn;
-  const old = process.env.PREVIEWD_UNSELECTED_TEST;
-  process.env.PREVIEWD_UNSELECTED_TEST = 'FAKE_do_not_inherit';
+  const old = process.env.PREVIEWHOST_UNSELECTED_TEST;
+  process.env.PREVIEWHOST_UNSELECTED_TEST = 'FAKE_do_not_inherit';
   const intercepted = t.mock.method(childProcess, 'spawn', ((command: string, args: string[], options: childProcess.SpawnOptions) => {
     assert.equal(command, '/usr/bin/open');
     assert.deepEqual(args, ['http://127.0.0.1:9999/secrets#FAKE_private_capability']);
@@ -305,7 +305,7 @@ test('browser launch passes only the private URL and normal OS environment, with
   try { await setup.openBrowser('http://127.0.0.1:9999/secrets#FAKE_private_capability', new AbortController().signal); }
   finally {
     intercepted.mock.restore(); syncBuiltinESMExports();
-    if (old === undefined) delete process.env.PREVIEWD_UNSELECTED_TEST; else process.env.PREVIEWD_UNSELECTED_TEST = old;
+    if (old === undefined) delete process.env.PREVIEWHOST_UNSELECTED_TEST; else process.env.PREVIEWHOST_UNSELECTED_TEST = old;
     await setup.close(); await runtime.close();
   }
 });

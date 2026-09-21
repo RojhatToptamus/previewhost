@@ -49,8 +49,8 @@ async function handle(request, response) {
       json(response, 200, { ready: true, service: 'reporting', revision, apiRevision: api.revision });
     } else if (request.method === 'GET' && request.url === '/summary') {
       const [notes, latest, api] = await Promise.all([
-        pool.query('SELECT count(*)::int AS total FROM previewd_demo_notes'),
-        redis().get('previewd:demo:latest-note'), apiReady(),
+        pool.query('SELECT count(*)::int AS total FROM previewhost_demo_notes'),
+        redis().get('previewhost:demo:latest-note'), apiReady(),
       ]);
       json(response, 200, { service: 'reporting', revision, apiRevision: api.revision, totalNotes: notes.rows[0].total, cachedNote: latest ? JSON.parse(latest) : null });
     } else json(response, 404, { error: 'Use /summary or /ready.' });

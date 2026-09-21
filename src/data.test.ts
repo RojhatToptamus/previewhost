@@ -308,7 +308,7 @@ async function faultEngine(mode: FaultMode) {
     completeVolume(foreign = false) {
       if (!volumeIntent) return;
       const value = structuredClone(volumeIntent);
-      if (foreign) value.Labels['io.previewd.resource'] = 'foreign';
+      if (foreign) value.Labels['io.previewhost.resource'] = 'foreign';
       volumes.set(value.Name, value);
     },
     async close() { for (const socket of sockets) socket.destroy(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); },

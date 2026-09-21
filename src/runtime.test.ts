@@ -294,14 +294,14 @@ test('saving selects an exact retained declaration and concurrent creators prese
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
   const rejected = results.find(result => result.status === 'rejected');
   assert.ok(rejected?.status === 'rejected' && code('ALREADY_EXISTS')(rejected.reason));
-  const saved = await loadPreviewSpec(path.join(directory, 'preview.yml'));
+  const saved = await loadPreviewSpec(path.join(directory, 'preview.yaml'));
   assert.equal(saved.type, 'static');
   if (saved.type !== 'static') throw new Error();
   assert.equal(await fs.realpath(saved.directory), await fs.realpath(path.join(directory, 'one')));
-  const original = await fs.readFile(path.join(directory, 'preview.yml'), 'utf8');
+  const original = await fs.readFile(path.join(directory, 'preview.yaml'), 'utf8');
   assert.match(original, /directory: one/);
   await assert.rejects(runtime.saveConfiguration('page', failed.id, directory), code('ALREADY_EXISTS'));
-  assert.equal(await fs.readFile(path.join(directory, 'preview.yml'), 'utf8'), original);
+  assert.equal(await fs.readFile(path.join(directory, 'preview.yaml'), 'utf8'), original);
   assert.equal((await runtime.get('page')).active?.id, serving.id);
   assert.equal(await (await fetch(serving.url!)).text(), '<h1>one</h1>');
   await assert.rejects(runtime.saveConfiguration('page', 'unknown-attempt', directory), code('ATTEMPT_EXPIRED'));
@@ -328,7 +328,7 @@ test('saving preserves unselected symbolic inputs without resolving values and e
   await assert.rejects(runtime.saveConfiguration('outside', failed.id, directory), code('SOURCE_DENIED'));
   const controller = new AbortController(); controller.abort();
   await assert.rejects(runtime.saveConfiguration('declaration', attempt.id, other, controller.signal), code('CLOSED'));
-  await assert.rejects(fs.stat(path.join(other, 'preview.yml')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(other, 'preview.yaml')), { code: 'ENOENT' });
 });
 
 test('additional source approval preserves roots on denial and cancellation', async t => {

@@ -33,10 +33,9 @@ docker pull redis:7-alpine
 Select your local Docker Unix socket. The command below uses the Docker Desktop default:
 
 ```sh
-PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify
+PREVIEWHOST_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify
 ```
 
-`PREVIEWD_TEST_DOCKER_SOCKET` retains its existing name for development scripts.
 Without that variable, the real database suites skip. The remaining data tests
 use isolated Unix sockets to exercise interrupted database operations and ownership checks.
 Each real test creates its own containers and volumes, then removes only those
@@ -108,7 +107,7 @@ npm install /absolute/path/to/previewhost/previewhost-VERSION.tgz
 ```
 
 Installation from the tarball does not compile native code.
-Continue with the [README quick starts](README.md#use-the-cli).
+Continue with [First preview with the CLI](docs/first-preview.md).
 Use `./node_modules/.bin/previewhost` for this local CLI installation.
 
 ## Verify a macOS release
@@ -121,7 +120,7 @@ Replace the tarball placeholder with its actual path.
 From the repository directory, run:
 
 ```sh
-PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
+PREVIEWHOST_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
 npm pack --ignore-scripts
 npm run check:package -- /absolute/path/to/previewhost-VERSION.tgz
 ```

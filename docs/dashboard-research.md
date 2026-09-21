@@ -26,7 +26,7 @@ Material changes from the proposal:
 
 - Data deletion stays in the CLI. Existing public names/types cannot guard a stale
   delete-and-recreate confirmation. No speculative resource identity API was added.
-- **Save as preview.yml** creates a file from the exact selected attempt in its owner's
+- **Save as preview.yaml** creates a file from the exact selected attempt in its owner's
   project root. It reuses the existing saver without overwriting files or changing the
   running application. Live Restart and configuration editing remain deferred.
 - **Retry start** reuses the normal startup path after a failure is repaired. It targets
@@ -106,11 +106,11 @@ The first usable release should include:
 - Active application, startup/update outcome, service readiness, cleanup problems, and retained-data summary.
 - A detail panel with source paths, a bounded log tail, and errors with the supported next action.
 - Open/copy URL, Stop, exact startup/update cancellation, normal cleanup retry, **Start again** for a stopped preview, and explicit **Retry start** after repairing a startup failure.
-- Explicit **Save as preview.yml** from an exact attempt's configuration, without overwrite or changes to the running application.
+- Explicit **Save as preview.yaml** from an exact attempt's configuration, without overwrite or changes to the running application.
 - Retained-data visibility and a clear explanation that explicit deletion remains in the CLI.
 - Pending private setup, including requests that exist before any preview starts, and an explicit handoff to the existing private form.
 
-Start again, read-only configuration details, and explicit saving use the retained declaration described below. Start again reruns it against current source; it does not reload YAML. Save creates root `preview.yml` without applying changes to the running preview. New-environment creation, live restart, and configuration editing remain subsequent work. If the declaration is unavailable, show an explicit agent/CLI handoff with the exact project and preview name. Never reconstruct input from status.
+Start again, read-only configuration details, and explicit saving use the retained declaration described below. Start again reruns it against current source; it does not reload YAML. Save creates root `preview.yaml` without applying changes to the running preview. New-environment creation, live restart, and configuration editing remain subsequent work. If the declaration is unavailable, show an explicit agent/CLI handoff with the exact project and preview name. Never reconstruct input from status.
 
 Prefer a compact list with an expandable detail panel. A full-width detail view serves small screens without becoming a separate application section. Deep links are deferred.
 
@@ -197,7 +197,7 @@ The implementation retains **one normalized, unexpanded declaration with each re
 
 The retained declaration also enables a later restart, but its target must be explicit: the serving attempt or a selected stopped attempt, **not the latest attempt**, which may be a failed update. For the first release, Stop followed by Start again is sufficient. A later one-click Restart stops then starts and may change the public listener URL; refresh displayed URLs and explain downtime. Applying via replacement preserves routes but overlaps processes. Do not substitute one for the other silently. Missing secret approval returns to the existing private flow. File-based startup must validate the file before stopping a working application.
 
-**Save as preview.yml** calls `saveConfiguration(name, attemptId)`. The automatic owner fixes the project destination; the browser supplies neither a filesystem path nor a spec. Saving validates source scope, makes local sources relative, and reports external absolute paths. It reads no Keychain values, changes no application state, and never overwrites an existing file or symlink. The saved file lets CLI/MCP recover the recipe after owner exit. Literal values supplied in the original declaration remain; the saver cannot certify arbitrary strings are secret-free.
+**Save as preview.yaml** calls `saveConfiguration(name, attemptId)`. The automatic owner fixes the project destination; the browser supplies neither a filesystem path nor a spec. Saving validates source scope, makes local sources relative, and reports external absolute paths. It reads no Keychain values, changes no application state, and never overwrites an existing file or symlink. The saved file lets CLI/MCP recover the recipe after owner exit. Literal values supplied in the original declaration remain; the saver cannot certify arbitrary strings are secret-free.
 
 This small addition closes the gap between a successful in-memory preview and a reusable recipe. Full editing still needs overwrite/conflict handling that create-only saving does not provide. A general editor and file/runtime transactions remain deferred. No hashes, revisions, or configuration database are needed. [Config loader/saver:11–119](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/config.ts#L11-L119)
 
@@ -219,7 +219,7 @@ Do not add a general secret manager or rotation screen initially. Updating a sha
 4. **Canceled or delayed entry.** Pending, expired, browser-launch failure, and canceled remain distinct. Delayed entry keeps the request pending until its existing expiry. Cancel invalidates the request capability; no polling loop reopens it. The agent should stop the flow and await explicit user intent. This last behavior is model guidance, not an indefinite server prohibition on new requests.
 5. **Failed update.** A backend candidate fails readiness while the old application serves. The user keeps Open, examines that candidate's logs, and asks the agent to fix the problem. Retry is not offered without identified valid input. Incomplete cleanup shows the existing recovery action rather than a generic “try again.”
 6. **Human and agent act together.** A user looking at attempt A presses Stop after an agent has replaced it with B. The owner rejects the stale action; the page refreshes and explains that the preview changed. It does not automatically repeat the action against B. After a successful Stop, a later authorized Start is still possible: Stop means stop now, not permanently pause all agents.
-7. **Keep a working recipe.** The agent starts a direct spec without YAML. The user opens that attempt's Configuration and selects **Save as preview.yml**. Saving preserves symbolic bindings and reports any external source paths. The running preview stays unchanged. After owner exit, the agent or CLI loads the saved file and requests any required access again. Saving does not make the dashboard an owner launcher.
+7. **Keep a working recipe.** The agent starts a direct spec without YAML. The user opens that attempt's Configuration and selects **Save as preview.yaml**. Saving preserves symbolic bindings and reports any external source paths. The running preview stays unchanged. After owner exit, the agent or CLI loads the saved file and requests any required access again. Saving does not make the dashboard an owner launcher.
 
 Exact candidate cancellation already has an attempt-ID guard. At the research baseline, Stop and replacement targeted the current preview by name. Dashboard Stop now uses a small owner-side expected-target check using existing attempt identities, checked before mutation. A browser refresh alone cannot close the race. Data deletion remains in the CLI because public status only contains resource names/types, which cannot distinguish delete-and-recreate. No additional resource identity contract was added for a deferred feature. [Runtime:204–255](https://github.com/RojhatToptamus/previewhost/blob/cf5326a/src/runtime.ts#L204-L255)
 
@@ -261,7 +261,7 @@ Logs are trusted-local diagnostics with existing best-effort redaction, not guar
 | Private setup attention | Existing request entries/status and native opener | Bounded public request listing with project/recipient context, including pre-preview requests; explicit pending-form reopen |
 | Read-only requested configuration | Existing normalization and redacted description | Retain unexpanded declaration per relevant attempt; bounded description operation |
 | Start again / Retry start | Existing start, source validation, authorization | Exact current stopped/failed declaration; no active/candidate/busy/cleanup; canceled attempts excluded |
-| Save as preview.yml | Existing validated create-only saver | Exact retained attempt; fixed automatic-owner project root; no runtime mutation |
+| Save as preview.yaml | Existing validated create-only saver | Exact retained attempt; fixed automatic-owner project root; no runtime mutation |
 | Later live restart | Existing start/stop/replace and authorization | Targeted operation and explicit input semantics remain deferred |
 | Edit existing YAML | Current loader and user's editor | Dashboard overwrite/editor deferred; create-only save is not edit support |
 
@@ -321,7 +321,7 @@ No product decision blocks this research plan. Two scope choices need confirmati
 ## Initial implementation verification — 14 September 2026
 
 - Focused dashboard/runtime/private-setup tests passed first (23 tests). The final
-  `PREVIEWD_TEST_DOCKER_SOCKET=/Users/rojhat/.docker/run/docker.sock npm run verify`
+  `PREVIEWHOST_TEST_DOCKER_SOCKET=/Users/rojhat/.docker/run/docker.sock npm run verify`
   passed **118 tests, zero failures and zero skips**, using Node 22.23.1 and local Docker.
   An earlier run failed one multi-repo test because this worktree lacked its own
   `node_modules`; installing the locked dependencies fixed it. The focused rerun passed.
@@ -484,7 +484,7 @@ in local storage. It stores no runtime state or authority there.
   split uses actual attempt IDs. Open app targets the serving application; source
   files remain live. No branch, originating client, progress percentage or build
   metadata is invented.
-- Save as preview.yml already ships, so it remains a working secondary action without
+- Save as preview.yaml already ships, so it remains a working secondary action without
   a Proposed label. It creates a file for the selected attempt and refuses overwrite.
 - Start preview uses the existing Start again operation. Retry start, Cancel update,
   Cancel startup and Retry cleanup preserve their existing guards. No new restart,

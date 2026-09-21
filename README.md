@@ -8,454 +8,92 @@
       <img src="https://img.shields.io/npm/v/previewhost.svg?style=flat-square" alt="NPM version" />
     </a>
   </p>
-previewhost runs local preview environments for applications with multiple services.
-An environment can connect frontends, backends, and PostgreSQL or Redis databases across repositories and Git worktrees.
-
-Use previewhost when several coding agents or worktrees need separate running copies of the same application.
-Each task gets its own service ports and connections, without manual port assignments or changes to service URLs.
-
-Define services, commands, and connections in optional root `preview.yml`, or supply a spec directly through MCP or JSON stdin.
-previewhost runs setup jobs, then starts dependent services and waits for readiness.
-Use explicit [migration and seed jobs](docs/jobs.md) instead of embedding setup in server commands.
+Previewhost runs local previews of applications and their services.
+Use it to try changes in separate worktrees or connect a frontend, APIs, and local databases across repositories.
+It assigns ports, supplies service URLs, and runs setup jobs before dependent services start.
 
 When you replace a preview, its local URL stays the same.
-New requests switch to the replacement services only after they pass readiness checks.
+New requests switch only after the replacement services pass readiness checks.
+Stop ends owned processes and retains managed database data.
 
 ![Previewhost dashboard showing a frontend, API, PostgreSQL, Redis, and completed migration and seed jobs](./assets/dashboard.png)
 
-Control environments through the CLI, MCP tools, or an embedded Node.js library:
-
-- [CLI](#use-the-cli): control previews from a terminal or script.
-- [MCP](#use-mcp): give an agent tools to control previews.
-- [Library](#embed-the-library): manage previews inside your Node.js application.
-- [Dashboard](#manage-local-previews): review worktrees, open apps, inspect failures, and stop or restart previews.
-- [Optional agent skill](#use-the-agent-skill): give an agent instructions and recipe references for the CLI or MCP.
-
-## Install
+## Get started
 
 Previewhost supports macOS and requires Node.js 22.23 or later.
-Development servers require the macOS `ps` and `lsof` tools.
-The encrypted keystore works on macOS, Windows, and Linux.
-Automatic unlock and managed databases currently require macOS 13 or later.
-Native commands, automatic project owners, and managed databases still require macOS.
-Password-only keystore tests also run on Linux. Windows remains unverified.
+Native commands, automatic project owners, and managed databases require macOS.
+The encrypted keystore supports password access across platforms. Password-only tests also run on Linux; Windows remains unverified.
+Automatic unlock requires macOS 13 or later.
 
-For CLI and MCP use, install the package globally:
+For an existing installation, read the [reset instructions](#reset-required-for-earlier-installations) before updating.
 
-```sh
-npm install -g previewhost
-```
+Choose the interface you need:
 
-The npm package requires no native build tools.
-
-The npm package includes the maintained agent skill and its referenced guides under `dist/skills/previewhost`.
-The public npm package does not require GitHub access.
-
-## Create a frontend and backend
-
-Create a directory for the two Node.js servers:
-
-```sh
-mkdir previewhost-demo
-cd previewhost-demo
-```
-
-<details>
-<summary>Create the two server files</summary>
-
-Save this code as `backend.mjs`:
-
-```js
-import { createServer } from 'node:http';
-
-createServer((request, response) => {
-  if (request.url !== '/message') { response.writeHead(404).end(); return; }
-  response.writeHead(200, { 'content-type': 'application/json' });
-  response.end(JSON.stringify({ message: 'Hello from the backend.' }));
-}).listen(Number(process.env.PORT), process.env.HOST);
-```
-
-Save this code as `frontend.mjs`:
-
-```js
-import { createServer } from 'node:http';
-
-const page = `<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>previewhost demo</title>
-<h1>Frontend + backend</h1>
-<p id="message" role="status">Connecting…</p>
-<script type="module">
-  const message = document.querySelector('#message');
-  try {
-    const response = await fetch('/message');
-    if (!response.ok) throw new Error('Backend unavailable');
-    message.textContent = (await response.json()).message;
-  } catch {
-    message.textContent = 'Backend request failed.';
-  }
-</script>`;
-
-createServer(async (request, response) => {
-  if (request.url === '/message') {
-    try {
-      const reply = await fetch(new URL('/message', process.env.BACKEND_URL), {
-        signal: AbortSignal.timeout(2000),
-      });
-      response.writeHead(reply.status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      response.end(await reply.text());
-    } catch {
-      response.writeHead(503).end('Backend unavailable');
-    }
-  } else if (request.url === '/') {
-    response.writeHead(200, { 'content-type': 'text/html' });
-    response.end(page);
-  } else response.writeHead(404).end();
-}).listen(Number(process.env.PORT), process.env.HOST);
-```
-
-</details>
-
-Save this recipe as `preview.yml` beside those files:
-
-```yaml
-name: hello
-type: environment
-primary: frontend
-services:
-  backend:
-    type: command
-    cwd: .
-    command: [node, backend.mjs]
-    readyPath: /message
-  frontend:
-    type: command
-    cwd: .
-    command: [node, frontend.mjs]
-    readyPath: /message
-    env:
-      BACKEND_URL: {service: backend}
-```
-
-`primary` selects the service at the environment URL.
-`BACKEND_URL` receives the backend URL through the `service` binding.
-previewhost starts the frontend after the backend is ready.
-Both servers use the `PORT` and `HOST` values from previewhost.
-Paths resolve relative to the recipe file.
-
-### Install locally
-
-For library imports or a project-specific CLI, install the package in `previewhost-demo`:
-
-```sh
-npm install previewhost
-```
-
-For a local CLI installation, use `./node_modules/.bin/previewhost` in place of `previewhost` in the commands below.
-
-### Project owners
-
-CLI automatically selects the current Git worktree root. MCP tools select the project supplied with each call.
-Both interfaces find or start the same persistent project owner.
-Outside Git, the current directory is the project. Use `--project /absolute/project` to choose it explicitly.
-An owner survives client disconnection and ordinary inactivity. Explicit shutdown stops all its previews.
-
-`--allow-exec` permits trusted commands, managed database operations, private secret setup, and explicit data deletion/recovery.
-It runs code with your user permissions and provides no sandbox. It selects no secrets by itself.
-Supply it in the current CLI invocation or MCP registration when cold startup needs that authority.
-A living owner's permissions are reused; incompatible explicit launch options produce an error.
-
-Manual `previewhost serve` remains available. To use it, pass `--endpoint` or `--token-file` explicitly to clients.
-That mode connects only and never starts or reconfigures an owner.
-See [connection configuration](docs/api.md#cli).
-
-## Manage local previews
-
-After you start a preview through the CLI or MCP, open another terminal and run:
-
-```sh
-previewhost dashboard
-```
-
-The command opens the dashboard in your default browser. No account or separate server setup is required.
-Keep this terminal open. Closing the page or stopping the dashboard does not stop your applications.
-Use the theme button in the navbar to switch between light and dark mode.
-Private secret forms use the same design and theme control. Browser preferences are saved separately for each local address.
-
-Each worktree has its own preview, service connections, and managed database data.
-The sidebar puts active previews first. Search by name or path, or filter by status.
-Each row’s menu lets you stop, start, or clear an entry without opening its details.
-Open a preview to switch between **Activity**, **Logs**, and **Configuration** at the top.
-Activity shows services, setup jobs, and recovery actions. Logs and Configuration have their own scrollable views.
-In **Logs**, choose an attempt and source, then search its captured output. Search ignores letter case; **Clear** or Escape restores all captured lines.
-
-![Three Storefront worktrees with separate previews and an update that needs attention](./assets/dashboard-worktrees.png)
-
-| What you need | Dashboard control |
+| Interface | Guide |
 | --- | --- |
-| Open the right worktree | Check its source path, then select **Open app**. |
-| Diagnose a failed update | Compare **Serving** with **Latest update**, then open the failed job's **Logs** or select an attempt in **Logs**. |
-| Cancel an unfinished update | Select **Cancel update**. The previous application keeps running. |
-| Stop work without losing database data | Select **Stop**. Use **Start preview** to run the same configuration again. |
-| Test with fresh managed data | From the preview’s menu, select **Reset data**. Confirm the databases; setup runs again. |
-| Delete data without restarting | Stop the preview, then select **Delete data** from its menu. Deletion cannot be undone. |
-| Recheck an unavailable preview | Select **Recheck status** from its menu. **Remove entry** checks whether removal is safe and explains any blockers. |
-| Clear an old entry | Select **Remove entry** after stopping it and deleting any retained data. Source files and saved secrets remain. |
-| Reuse an agent's configuration | Open **Configuration**, then **Save as preview.yml**. Existing files are never overwritten. |
-| Change a stored secret | Open **Secret Manager**, find its reference, then select **Edit**. Enter the replacement in the dialog and save. |
-| Supply a missing secret | Select **Open private form** to approve access and enter values outside the chat. |
+| Coding agent | [MCP setup](docs/mcp.md): register a client and ask it to preview your application. |
+| Terminal | [First preview with the CLI](docs/first-preview.md): run a frontend and backend, replace them, and stop them. |
+| Node.js program | [Node.js library](docs/library.md): start a runtime, request a page, and close it. |
 
-A failed replacement leaves the previous application available. **Open app** still points to that serving attempt.
+Each guide includes its installation steps. The [introduction](docs/introduction.md) explains how previews, environments, and project owners work.
 
-<details>
-<summary>Inspect a failed update and its logs</summary>
+Default lookup uses root `preview.yaml`, then `preview.yml`. If both exist, select one with `--file` or keep one default.
+New configurations save as `preview.yaml` only when neither file exists.
 
-![Failed update beside the serving attempt, with the frontend, API, PostgreSQL and Redis still ready](./assets/dashboard-update.png)
-
-Select a job's **Logs** to open its output.
-
-![Migration output with a missing-column error, log search, attempt selection, and source filtering](./assets/dashboard-logs.png)
-
-</details>
-
-**Start preview** uses the retained configuration and current source. It does not reload `preview.yml`, and its URL can change.
-After you fix an initial startup failure, **Retry start** reruns that attempt.
-Saving a recipe does not change the running preview. Stored secret values are not included in the dashboard's configuration view.
-If your agent ends its turn before private setup finishes, send it a short continuation message after saving.
-Canceled private requests stay canceled.
-
-Secret Manager lists reference names, never values. Updating a shared reference affects future starts in every project that uses it. Running apps and access approvals stay unchanged.
-
-The dashboard lists automatic project owners and data retained after clean owner shutdown.
-Deleted worktrees remain manageable. Unreachable owners require cleanup verification before removal.
-Standalone `serve` instances and embedded library runtimes are not automatically listed.
-It does not start owners or grant execution permissions. Removing the last entry closes an empty owner and ends its private approvals.
-Use your editor or the CLI/MCP to edit configuration or shut down an owner.
-See [dashboard operations](docs/api.md#local-dashboard-operations) for lifecycle and permission details.
-
-## Use the CLI
-
-From the demo directory, start the example:
+For a project with a configuration file and the global CLI installed:
 
 ```sh
+previewhost inspect
 previewhost start --allow-exec
-```
-
-The command loads root `preview.yml`, starts its owner, and waits for readiness. It returns `state: "ready"` and a `url`, or `starting` if the wait budget expires. Continue waiting for that attempt when needed.
-Open that URL in a browser. The page shows **Frontend + backend**, then **Hello from the backend.**
-The frontend forwards the browser's `/message` request to the backend.
-
-Read the current status:
-
-```sh
-previewhost get hello
-```
-
-Stop the preview after use:
-
-```sh
-previewhost stop hello
-```
-
-When you finish, stop the daemon:
-
-```sh
-previewhost shutdown
-```
-
-## Use MCP
-
-Register Previewhost once so your agent can run and manage local applications across projects and worktrees.
-
-[Install Previewhost globally](#install), then choose your client. No repository paths or root lists are needed.
-
-### Codex
-
-Run in your terminal:
-
-```sh
-codex mcp add previewhost -- previewhost mcp --allow-exec
-```
-
-### Cursor
-
-Add Previewhost to `~/.cursor/mcp.json` without removing other servers:
-
-```json
-{
-  "mcpServers": {
-    "previewhost": {
-      "command": "previewhost",
-      "args": ["mcp", "--allow-exec"]
-    }
-  }
-}
-```
-
-Enable Previewhost in Cursor’s MCP settings.
-
-### Claude Code
-
-Run in your terminal:
-
-```sh
-claude mcp add --scope user previewhost -- previewhost mcp --allow-exec
-```
-
-### Preview your application
-
-Ask the agent in your project chat:
-
-```text
-Change this button and preview the application with Previewhost.
-```
-
-- **Execution:** `--allow-exec` permits trusted application commands, managed database operations, and private secret setup as your local user.
-- **Databases:** Managed PostgreSQL or Redis requires a running local Docker Engine and database images. Docker Desktop uses its default socket. [Other Engines need a socket override](docs/api.md#managed-databases-with-mcp).
-- **Approvals:** Approve project and backend access in your client. Approve secret names and enter missing values only in the private browser form. Your client can also require individual tool approvals. MCP reconnection requires project approval again; existing previews keep running.
-
-`preview.yml` is optional. The agent reuses it when present and reports invalid YAML. Configuration is saved only when you ask.
-
-Open the dashboard to compare previews, inspect configuration and errors, or stop and restart an environment:
-
-```sh
 previewhost dashboard
 ```
 
-See [advanced configuration](docs/api.md#http-and-mcp), [troubleshooting](docs/troubleshooting.md), and [tested clients and limitations](docs/integrations.md#september-15-global-onboarding-check).
-The [agent skill](#use-the-agent-skill) is optional and installed separately from MCP registration.
+`--allow-exec` permits trusted commands and managed database operations with your user permissions, without a sandbox.
+The dashboard opens in your browser and needs its terminal to remain open. Closing it does not stop previews.
 
-## Embed the library
+## Documentation
 
-The library runs previews within your Node.js application and requires no separate daemon.
-Use the [example files](#create-a-frontend-and-backend) and [local package installation](#install-locally).
+| Task | Guide |
+| --- | --- |
+| Install or update Previewhost | [Installation](docs/installation.md) |
+| Run a complete example | [First preview with the CLI](docs/first-preview.md) |
+| Connect a coding agent | [MCP setup](docs/mcp.md) |
+| Describe your application | [Write preview.yaml](docs/recipes.md) |
+| Run services, migrations, and seeds | [Services and jobs](docs/jobs.md) |
+| Connect or manage local data | [Databases](docs/databases.md) |
+| Supply private credentials | [Secrets](docs/secrets.md) |
+| Preview existing task checkouts | [Worktrees](docs/worktrees.md) |
+| Inspect previews in the browser | [Dashboard](docs/dashboard.md) |
+| Diagnose errors | [Troubleshooting](docs/troubleshooting.md) |
+| Embed the runtime | [Node.js library](docs/library.md) |
+| Look up fields and commands | [API and CLI reference](docs/api.md) |
+| Check supported clients and frameworks | [Integrations](docs/integrations.md) |
+| Understand permissions and recovery | [Security](docs/security.md) |
 
-Save this code as `preview.mjs` in `previewhost-demo`:
+The [optional agent skill](https://github.com/RojhatToptamus/previewhost/blob/main/skills/previewhost/SKILL.md) ships in the npm package under
+`dist/skills/previewhost`. Install it through your client's skill mechanism.
+MCP registration and skill installation are separate operations.
 
-```js
-import { createPreviewRuntime, loadPreviewSpec } from 'previewhost';
+## Reset required for earlier installations
 
-const spec = await loadPreviewSpec('preview.yml');
-const runtime = await createPreviewRuntime({
-  allowedRoots: [process.cwd()],
-  authorize: ({ operation }) => operation === 'start',
-});
-try {
-  const started = await runtime.start(spec);
-  const result = await runtime.wait(spec.name, started.candidate.id);
-  if (result.state !== 'ready') throw new Error(result.error?.message ?? result.state);
-  console.log(result.url);
-  console.log(await (await fetch(new URL('/message', result.url))).json());
-} finally {
-  await runtime.close();
-}
-```
+This release uses `~/.local/share/previewhost` for runtime storage and Previewhost names for managed Docker resources.
+It does not discover or migrate earlier runtime namespaces, Keychain secrets, or retained-data records. Existing files and resources are left intact.
 
-Run the example:
-
-```sh
-node preview.mjs
-```
-
-The script prints the URL and backend response, then stops both servers and closes the runtime.
-For a persistent preview, keep the runtime open until your application shuts down.
-See the [library reference](docs/api.md#runtime-and-client) for configuration and lifecycle methods.
-
-## Use the agent skill
-
-The optional skill provides instructions and recipe references for agents that use the CLI or MCP.
-The installed package contains `dist/skills/previewhost/SKILL.md` and its references. An agent can read them directly.
-Skill discovery installation is optional; no install hook changes client configuration.
-Use the skill with an installed [CLI](#install) or a configured [MCP client](#use-mcp).
-
-With repository access, run this command from your application directory:
-
-```sh
-npx skills add RojhatToptamus/previewhost --skill previewhost --agent codex --yes
-```
-
-This command installs from the default branch, `main`, into `.agents/skills/previewhost` in the current project.
-Repeat the command to update the skill and its references.
-
-Start a Codex session in the intended project. The skill uses the installed CLI or configured MCP connection.
-Ask:
-
-```text
-$previewhost Start the preview in preview.yml. Verify the backend message in the page, then stop the preview.
-```
-
-If the application has no recipe, the agent can supply a spec directly. Ask explicitly to save `preview.yml` when you want reusable configuration.
-See [agent support](docs/integrations.md#agent-skill) for discovery and tested workflows.
-
-## Preview an application
-
-Install the application's dependencies before startup.
-Use each application's existing start command in its recipe.
-See [framework configuration](docs/integrations.md#framework-configuration) for Vite, Next.js, and Python examples.
-
-For a frontend, two backends, PostgreSQL, and Redis, use the [full-stack walkthrough](examples/multi-repo/README.md).
-It covers setup, service connections, browser verification, replacement, retained data, cleanup, and adaptation to multiple repositories.
-For applications in Git worktrees, see the [worktree guide](docs/worktrees.md).
-The [security guide](docs/security.md) covers execution, stored secrets, and data ownership.
-The [troubleshooting guide](docs/troubleshooting.md) covers connection and cleanup errors.
-
-## Handle secrets
-
-Recipes can bind selected environment inputs and stored secret references.
-`API_TOKEN` is an application variable. In `API_TOKEN: {secret: shop/dev/api}`, `shop/dev/api` is the stored reference.
-The exact reference shares one value across projects and worktrees that approve it.
-A different reference has a different value. Slashes do not create access scopes.
-
-Private setup first approves exact references, then creates or unlocks the keystore, then collects missing values.
-Unlocking does not approve additional references or authorize execution.
-Each owner and dashboard keeps its own unlocked session until shutdown.
-Edits affect future starts and replacements. Running applications keep their existing values.
-
-```sh
-previewhost secrets init              # hidden password and confirmation
-previewhost secrets set shop/dev/api  # hidden password, then secret value
-previewhost secrets list
-previewhost secrets remember          # optional automatic unlock on macOS
-previewhost secrets forget            # remove automatic unlock
-```
-
-The dashboard also supports creation, password unlock, remember/forget, and editing.
-“Forget” affects future sessions. It does not lock owners that are already unlocked.
-On Windows and Linux, use your password. Unattended previews can use explicitly selected `--env NAME` inputs with `{fromEnv: NAME}`.
-Previewhost does not automatically load `.env` files. Applications can load them.
-Keep passwords and secret values out of recipes, command arguments, and agent chat.
-
-The keystore lives at `~/.local/share/previewhost/keystore/secrets.sqlite` on all platforms.
-It contains one AES-256-GCM encrypted payload with an scrypt-derived key.
-Node's built-in SQLite provides transactions across processes and recovery after interrupted writes. No extra dependency is required.
-Node 22 can print an experimental SQLite warning on first access.
-The optional macOS Keychain item contains only an unlock key. The password remains necessary for recovery and other platforms.
-
-### Reset required for earlier installations
-
-This release does not read or migrate earlier Keychain secrets or retained-data records.
-It does not delete them. There is no automatic conversion or destructive reset.
-
-1. Stop earlier Previewhost owners before using this release.
-2. Create the new keystore and enter required user secrets through private input.
+1. Before updating, stop earlier Previewhost owners with the installed version.
+2. If no encrypted keystore exists, run `previewhost secrets init`. Enter required secrets through [private input](docs/secrets.md#change-a-stored-value).
 3. For new managed databases, choose a fresh `--data-dir`.
 4. Keep old data directories, Docker volumes, and Keychain items until you decide how to retain them.
 
 For valuable old database data, use the earlier release to access and export it first.
-Delete old data only through an explicit, authorized cleanup with the earlier release.
-Removing a record or generating a new password does not recover its retained database.
+Use that release for any explicit cleanup of old data.
+Removing a record or generating a new password does not recover its database.
+See [keystore recovery](docs/troubleshooting.md#stored-secrets-are-missing-or-inaccessible) for backups and lost passwords.
 
-For credential recovery, stop owners, dashboard sessions, and secret commands, then copy the complete keystore directory and retained-data directories.
-Back up database contents separately; these directories do not contain Docker volume data.
-Keep the keystore password separately. Restore complete backups while Previewhost is stopped.
-Without the password, a usable remembered key, or a backup with a known password, Previewhost cannot recover the secrets.
-See the [secrets guide](docs/api.md#stored-secrets) for setup and [recovery instructions](docs/troubleshooting.md).
+## Development
 
-## Build from source
+See [CONTRIBUTING.md](CONTRIBUTING.md) for source builds and verification.
+The [documentation website](https://github.com/RojhatToptamus/previewhost/blob/main/website/README.md) renders the same Markdown guides with
+search, page outlines, and light and dark themes. Run `npm run dev:docs` after installing
+repository dependencies. Website code and build output are excluded from the npm package. The bundled agent skill includes its referenced guides and product screenshots.
 
-See [Build and install a tarball](CONTRIBUTING.md#build-and-install-a-tarball) for build requirements and source installation.
-
-## License
-
-previewhost uses the MIT license. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+See [NOTICE](NOTICE) for attribution and [LICENSE](LICENSE) for the MIT license.

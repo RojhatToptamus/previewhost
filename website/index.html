@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-site-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Local application previews with Previewhost." />
+    <meta name="theme-color" content="#ffffff" />
+    <script>
+      // Apply the saved theme before the first paint of the static article.
+      try {
+        const preference = localStorage.getItem('previewhost.docs.theme');
+        const dark = preference === 'dark' || (preference === null && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.siteTheme = dark ? 'dark' : 'light';
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#ffffff';
+      } catch {
+        document.documentElement.dataset.siteTheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+    </script>
+    <title>Previewhost documentation</title>
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%previewhost.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript><style>html{scroll-behavior:auto!important}.docs-search-trigger,.docs-code-copy,.docs-outline-actions,.docs-mobile-copy,.site-theme-toggle{display:none!important}@media(max-width:900px){.docs-sidebar{position:static!important;transform:none!important;width:100%!important;visibility:visible!important;max-height:none!important;height:auto!important;overflow:visible!important}.docs-shell{display:block!important}.docs-mobile-menu-button,.docs-sidebar-mobile-heading{display:none!important}}</style></noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

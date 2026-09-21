@@ -1,0 +1,91 @@
+.site-theme-toggle {
+  --site-theme-toggle-size: 38px;
+  position: relative;
+  display: inline-grid;
+  width: var(--site-theme-toggle-size);
+  height: var(--site-theme-toggle-size);
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--site-theme-toggle-border, transparent);
+  border-radius: 10px;
+  background: var(
+    --site-theme-toggle-bg,
+    var(--control-bg, var(--surface-strong, var(--surface2)))
+  );
+  color: var(
+    --site-theme-toggle-color,
+    var(--paper-soft, var(--muted))
+  );
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.site-theme-toggle:hover {
+  border-color: var(
+    --site-theme-toggle-border-hover,
+    var(--button-border-hover, var(--border-hover))
+  );
+  background: var(
+    --site-theme-toggle-bg-hover,
+    var(--button-bg-hover, var(--surface2))
+  );
+  color: var(--site-theme-toggle-color-hover, var(--paper-strong, var(--text)));
+}
+
+.site-theme-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.site-theme-toggle--compact {
+  --site-theme-toggle-size: 30px;
+  border-radius: 8px;
+}
+
+.site-theme-toggle__icons {
+  position: relative;
+  width: 17px;
+  height: 17px;
+}
+
+.site-theme-toggle__icons svg {
+  position: absolute;
+  inset: 0;
+  width: 17px;
+  height: 17px;
+  opacity: 0;
+  transform: scale(0.72) rotate(-20deg);
+  transition:
+    opacity 180ms ease,
+    transform 220ms cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+.site-theme-toggle__icons svg[data-visible] {
+  opacity: 1;
+  transform: scale(1) rotate(0);
+}
+
+.site-theme-toggle__moon {
+  transform: scale(0.72) rotate(20deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-theme-toggle,
+  .site-theme-toggle__icons svg {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .site-theme-toggle {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+    forced-color-adjust: auto;
+  }
+}

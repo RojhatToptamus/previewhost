@@ -77,7 +77,7 @@ export function state(entry: Entry) {
     return {
       label: "Configuration error",
       tone: "error",
-      note: "Fix preview.yml before startup",
+      note: "Fix the configuration before startup",
     };
   if (!p)
     return {
@@ -92,7 +92,7 @@ export function state(entry: Entry) {
       label: "Ready",
       tone: "ready",
       note: entry.owner.configuration?.error
-        ? "preview.yml needs attention · app serving"
+        ? "Configuration needs attention · app serving"
         : p.latest?.state === "canceled"
           ? "Update canceled · app serving"
           : "",

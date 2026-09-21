@@ -50,7 +50,7 @@ try {
   const inventory = (await readdir(root, { recursive: true, withFileTypes: true }))
     .filter((entry) => !entry.isDirectory())
     .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1));
-  const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|dist\/dashboard\/(?:index\.html|dashboard\.(?:js|css)|LICENSES\.md)|dist\/ui-tokens\.css|dist\/fonts\/(?:geist(?:-mono)?\.woff2|LICENSE\.txt)|dist\/skills\/previewhost\/(?:SKILL\.md|references\/.+)|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
+  const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|dist\/dashboard\/(?:index\.html|dashboard\.(?:js|css)|LICENSES\.md)|dist\/ui-tokens\.css|dist\/previewhost\.svg|dist\/fonts\/(?:geist(?:-mono)?\.woff2|LICENSE\.txt)|dist\/skills\/previewhost\/(?:SKILL\.md|references\/.+)|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
   for (const file of inventory) {
     assert(allowed.test(file) && !file.includes('.test.'), `Unexpected packaged file: ${file}`);
   }
@@ -58,13 +58,14 @@ try {
   assert((await stat(keychain)).mode & 0o111, 'The packaged Keychain helper must be executable.');
   assert.deepEqual(execFileSync('/usr/bin/lipo', ['-archs', keychain], { encoding: 'utf8' }).trim().split(/\s+/).sort(), ['arm64', 'x86_64']);
   execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--all-architectures', keychain]);
-  for (const file of ['dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/supervisor.js', 'examples/static.json', 'examples/command.json', 'examples/server.mjs', 'examples/site/index.html', 'LICENSE', 'NOTICE']) assert(inventory.includes(file), `Missing packaged file: ${file}`);
+  for (const file of ['dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/supervisor.js', 'dist/previewhost.svg', 'examples/static.json', 'examples/command.json', 'examples/server.mjs', 'examples/site/index.html', 'LICENSE', 'NOTICE']) assert(inventory.includes(file), `Missing packaged file: ${file}`);
   assert.match(await readFile(join(root, 'dist/fonts/LICENSE.txt'), 'utf8'), /SIL OPEN FONT LICENSE Version 1.1/);
   const { startDashboard } = await import(pathToFileURL(join(root, 'dist/dashboard.js')).href);
   const dashboard = await startDashboard({ discover: async () => [] });
   try {
     const html = await (await fetch(dashboard.endpoint)).text();
     assert.match(html, /type="module"/);
+    assert.match(html, /rel="icon"[^>]+href="data:image\/svg\+xml/);
     for (const file of ['dashboard.js', 'dashboard.css']) {
       assert(html.includes('/' + file));
       const response = await fetch(`${dashboard.endpoint}/${file}`);
@@ -190,7 +191,7 @@ try {
   await gone(cliNative.url);
   assert.throws(() => process.kill(cliApplication.pid, 0), { code: 'ESRCH' });
   assert.equal(await readFile(tokenFile, 'utf8'), existingToken);
-  record('daemon-shutdown-resource-cleanup', { existingPreviewdTokenReused: true });
+  record('daemon-shutdown-resource-cleanup', { existingTokenReused: true });
 
   automaticProject = site;
   const automatic = await cli(['start', '--project', site, '--allow-exec', '--file', join(directory, 'native.json')]);

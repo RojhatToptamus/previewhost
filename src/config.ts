@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { link, open, realpath, unlink } from 'node:fs/promises';
+import { link, lstat, open, realpath, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
@@ -7,6 +7,28 @@ import { isDeepStrictEqual } from 'node:util';
 import { limits, previewSpecSchema, type PreviewSpec } from './contracts.js';
 import { PreviewError } from './errors.js';
 import { canonicalDirectory, isWithin, normalizeSources, parseSpec } from './spec.js';
+
+async function existingPreviewFiles(project: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const name of ['preview.yaml', 'preview.yml']) {
+    const file = join(project, name);
+    try { await lstat(file); files.push(file); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new PreviewError('INVALID_INPUT', `${file}: Cannot check the preview configuration file.`);
+      }
+    }
+  }
+  return files;
+}
+
+export async function resolvePreviewFile(project: string): Promise<string> {
+  const files = await existingPreviewFiles(project);
+  if (files.length > 1) {
+    throw new PreviewError('INVALID_INPUT', `${project}: Both preview.yaml and preview.yml exist. Keep one default configuration or select a file explicitly.`);
+  }
+  return files[0] ?? join(project, 'preview.yaml');
+}
 
 /** Loads one JSON/YAML file. Source paths resolve relative to that file. */
 export async function loadPreviewSpec(file: string, options: { allowedRoots?: string[]; signal?: AbortSignal } = {}): Promise<PreviewSpec> {
@@ -33,7 +55,7 @@ export async function loadPreviewSpec(file: string, options: { allowedRoots?: st
 
 /** Shared with CLI stdin, which deliberately accepts JSON only. */
 export async function readPreviewSpec(input: Readable, options: {
-  baseDirectory: string; format: 'json' | 'yaml'; signal?: AbortSignal; fallbackFile?: string;
+  baseDirectory: string; format: 'json' | 'yaml'; signal?: AbortSignal; fallbackProject?: string;
 }): Promise<PreviewSpec> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -50,7 +72,7 @@ export async function readPreviewSpec(input: Readable, options: {
   } finally { options.signal?.removeEventListener('abort', abort); }
 
   const text = Buffer.concat(chunks).toString('utf8');
-  if (!text.trim() && options.fallbackFile) return loadPreviewSpec(options.fallbackFile, { signal: options.signal });
+  if (!text.trim() && options.fallbackProject) return loadPreviewSpec(await resolvePreviewFile(options.fallbackProject), { signal: options.signal });
   let value: unknown;
   if (options.format === 'yaml') value = await parseYaml(text);
   else {
@@ -72,7 +94,7 @@ export async function readPreviewSpec(input: Readable, options: {
   return spec;
 }
 
-/** Creates project-root preview.yml from declarative input. Never overwrites or resolves secrets/inputs. */
+/** Creates project-root preview.yaml from declarative input. Never overwrites or resolves secrets/inputs. */
 export async function savePreviewSpec(input: PreviewSpec, options: {
   projectDirectory: string; allowedRoots?: string[]; signal?: AbortSignal;
 }): Promise<{ file: string; externalSources: string[] }> {
@@ -99,7 +121,7 @@ export async function savePreviewSpec(input: PreviewSpec, options: {
     const text = stringify(portable, { aliasDuplicateObjects: false });
     const restored = await readPreviewSpec(Readable.from([text]), { baseDirectory: project, format: 'yaml', signal: options.signal });
     if (!isDeepStrictEqual(parseSpec(restored), spec)) throw new PreviewError('INVALID_INPUT', 'The configuration cannot be saved without changing its meaning.');
-    const file = join(project, 'preview.yml');
+    const file = join(project, 'preview.yaml');
     checkCanceled();
     const candidate = join(project, `.preview-${randomUUID()}.tmp`);
     const handle = await open(candidate, 'wx', 0o600);
@@ -107,13 +129,15 @@ export async function savePreviewSpec(input: PreviewSpec, options: {
     try { await handle.writeFile(text); await handle.sync(); }
     finally { await handle.close(); }
     checkCanceled();
+    const existing = await existingPreviewFiles(project);
+    if (existing.length) throw new PreviewError('ALREADY_EXISTS', `A default configuration already exists (${existing.map(file => relative(project, file)).join(', ')}). Edit the existing configuration instead.`);
     // Exclusive publication: readers see a complete file, and existing files/symlinks always win.
     await link(temporary, file);
     return { file, externalSources: [...externalSources].sort() };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new PreviewError('ALREADY_EXISTS', 'preview.yml already exists. Use your normal editor for explicitly requested updates, then validate the file.');
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new PreviewError('ALREADY_EXISTS', 'preview.yaml already exists. Use your normal editor for explicitly requested updates, then validate the file.');
     if (error instanceof PreviewError) throw error;
-    throw new PreviewError('INVALID_INPUT', 'Cannot save preview.yml. Check source paths and project write access; inspect the destination before retrying.');
+    throw new PreviewError('INVALID_INPUT', 'Cannot save preview.yaml. Check source paths and project write access; inspect the destination before retrying.');
   } finally {
     if (temporary) await unlink(temporary).catch(() => {});
   }

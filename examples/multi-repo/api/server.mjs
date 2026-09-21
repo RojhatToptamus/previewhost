@@ -42,10 +42,10 @@ async function handle(request, response) {
   }
   try {
     if (request.method === 'GET' && request.url === '/ready') {
-      await Promise.all([pool.query('SELECT id FROM previewd_demo_notes LIMIT 0'), redis().ping()]);
+      await Promise.all([pool.query('SELECT id FROM previewhost_demo_notes LIMIT 0'), redis().ping()]);
       json(response, 200, { ready: true, service: 'api', revision });
     } else if (request.method === 'GET' && request.url === '/notes') {
-      const notes = await pool.query('SELECT id, text, revision, created_at AS "createdAt" FROM previewd_demo_notes ORDER BY created_at DESC, id DESC LIMIT 20');
+      const notes = await pool.query('SELECT id, text, revision, created_at AS "createdAt" FROM previewhost_demo_notes ORDER BY created_at DESC, id DESC LIMIT 20');
       json(response, 200, { service: 'api', revision, notes: notes.rows });
     } else if (request.method === 'POST' && request.url === '/notes') {
       const chunks = [];
@@ -59,10 +59,10 @@ async function handle(request, response) {
       try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { json(response, 400, { error: 'Send one JSON note.' }); return; }
       const text = typeof input?.text === 'string' ? input.text.trim() : '';
       if (!text || text.length > 160) { json(response, 400, { error: 'Write a note with 1 to 160 characters.' }); return; }
-      const saved = await pool.query('INSERT INTO previewd_demo_notes (id, text, revision) VALUES ($1, $2, $3) RETURNING id, text, revision, created_at AS "createdAt"', [randomUUID(), text, revision]);
+      const saved = await pool.query('INSERT INTO previewhost_demo_notes (id, text, revision) VALUES ($1, $2, $3) RETURNING id, text, revision, created_at AS "createdAt"', [randomUUID(), text, revision]);
       const note = saved.rows[0];
       // PostgreSQL owns the note. A cache failure does not undo an accepted write.
-      const cacheUpdated = await redis().set('previewd:demo:latest-note', JSON.stringify(note)).then(() => true, () => false);
+      const cacheUpdated = await redis().set('previewhost:demo:latest-note', JSON.stringify(note)).then(() => true, () => false);
       json(response, 201, { note, cacheUpdated, revision });
     } else json(response, 404, { error: 'Use /notes or /ready.' });
   } catch {

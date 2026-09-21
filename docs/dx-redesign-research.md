@@ -10,17 +10,17 @@ This report now describes the implemented design and its verified limits. The Se
 ## User workflow
 
 1. Supply the current worktree as `project` on each MCP call. CLI defaults to its canonical Git root, or cwd outside Git.
-2. Prefer root `preview.yml` when it exists. Invalid or unreadable content is an error. An explicit file or direct spec overrides this default.
+2. Read root `preview.yaml`, then `preview.yml` if absent. Both files present, invalid content, or unreadable content is an error. An explicit file or direct spec overrides this default.
 3. Inspect the spec and prepare the application through its existing project commands. Inspection works without starting an owner.
 4. Start with authority from the current CLI invocation or MCP registration. The adapter finds or starts one persistent project owner.
 5. For credential bindings, request exact `{secret: ID}` references. The user approves unselected names in the private browser form, then enters only missing values there.
 6. Wait on public secret status. On completion, re-read file-based input, check current preview state, and use ordinary start/replace and wait operations.
-7. Save root `preview.yml` only when the user asks. Saving validates declarative input but does not start code or certify application health.
+7. Save root `preview.yaml` only when the user asks. Saving validates declarative input but does not start code or certify application health.
 8. Stop individual previews when needed. Explicit owner shutdown stops every preview on that owner and ends its access approvals.
 
 A paused agent does not need an idle-shutdown exception or a new background job. The owner remains alive across ordinary inactivity and MCP disconnection. If the agent turn ends during private entry, the page tells the user to send “Secrets saved—continue”. Saving cannot independently create a new agent turn.
 
-Global MCP registration now uses client-native project approval (see [current setup](../README.md#use-mcp)):
+Global MCP registration now uses client-native project approval (see [current setup](mcp.md)):
 
 ```sh
 codex mcp add previewhost -- previewhost mcp --allow-exec
@@ -50,7 +50,7 @@ JSON
 | Shared values | An exact ID uses the existing `dev.previewhost.user` Keychain entry across projects/worktrees that approve it. A distinct ID expresses a different value. |
 | Status continuation | Immediate reads or waits up to 25,000 ms use the existing bounded request map. Canceling a wait leaves setup open. |
 | Automatic owners | CLI and MCP share a persistent owner per canonical project. MCP routes each call independently, even over a shared connection. A lifetime kernel lock serializes startup. Explicit connection mode remains supported. |
-| Configuration input | CLI supports file or JSON stdin. MCP inspect/start/replace/setup supports exclusive `file` or `spec`, with root `preview.yml` as the default. |
+| Configuration input | CLI supports file or JSON stdin. MCP inspect/start/replace/setup supports exclusive `file` or `spec`, with root `preview.yaml` as the default. |
 | Configuration saving | `preview_save_config({project, spec})` and the library helper create root YAML from validated declarative input, without overwriting existing content. |
 | Discoverability | The first 512 MCP instruction characters cover the normal workflow. The catalog has 14 operational tools plus `preview_access` in global mode. |
 | CLI guidance | The package includes the maintained skill and materialized references. `--help` describes project mode; `--version` reports the installed version. |
@@ -77,7 +77,7 @@ The credential workflow keeps values out of YAML, MCP arguments/results and agen
 
 The automatic owner is the existing runtime and daemon in a detached process. Its lifetime is independent of stdio. CLI and MCP use the existing authenticated HTTP client.
 
-A private directory under `~/.local/share/previewd/projects` contains a token, permanent lock and connection record. A SHA-256 digest of the canonical project path supplies a fixed-length filesystem address for arbitrary path lengths. This digest is neither a configuration signature nor an authority check.
+A private directory under `~/.local/share/previewhost/projects` contains a token, permanent lock and connection record. A SHA-256 digest of the canonical project path supplies a fixed-length filesystem address for arbitrary path lengths. This digest is neither a configuration signature nor an authority check.
 
 The lifetime lock uses Darwin `O_EXLOCK`, the same mechanism already used by the data owner. It prevents competing first callers from owning the project. The connection record is published after listener readiness and contains endpoint, PID, project path, data directory, and any explicit Docker socket. Clients authenticate, then compare the responding project and explicitly requested launch settings. They never reconstruct authority from the record.
 

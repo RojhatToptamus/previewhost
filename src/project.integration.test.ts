@@ -49,9 +49,13 @@ async function fixture(t: TestContext) {
 
 test('CLI and real stdio MCP share an automatically started owner, optional root file, direct spec and explicit saving', enabled, async t => {
   const { directory, client } = await fixture(t);
+  const keystore = await testKeystore(t);
+  const hook = join(keystore.directory, 'preload.mjs');
+  await writeFile(hook, keystore.installSource.replaceAll('/.local/test-build/', '/dist/'));
   await assert.rejects(client.list(), { code: 'DAEMON_UNAVAILABLE' });
   const mcp = new Client({ name: 'project-workflow', version: '1' });
-  const transport = new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', '--project', directory, '--allow-exec'], stderr: 'pipe' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', '--project', directory, '--allow-exec'], stderr: 'pipe',
+    env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } });
   let stderr = ''; transport.stderr?.on('data', data => { stderr += data; });
   t.after(() => mcp.close());
   await mcp.connect(transport);
@@ -75,25 +79,51 @@ test('CLI and real stdio MCP share an automatically started owner, optional root
   assert.equal(ready.result.state, 'ready');
   assert.deepEqual(ready.result.sources, [directory]);
   assert.equal(await (await fetch(ready.result.url!)).text(), 'project preview');
-  await assert.rejects(readFile(join(directory, 'preview.yml')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(directory, 'preview.yaml')), { code: 'ENOENT' });
   const info = await client.info(); assert.equal(info?.allowExec, true); assert.equal(info?.projectDirectory, directory);
   assert.equal(info?.dataDirectory, join(projectOwnerDirectory(directory), 'data'));
   assert.equal((await stat(info!.dataDirectory!)).mode & 0o777, 0o700);
   const listed = JSON.parse((await execute(process.execPath, [cli, 'list', '--project', directory])).stdout);
   assert.equal(listed[0].active.id, ready.result.id);
   const saved = (await mcp.callTool({ name: 'preview_save_config', arguments: { spec } })).structuredContent as { result: { file: string } };
-  assert.equal(saved.result.file, join(directory, 'preview.yml'));
-  assert.equal((await mcp.callTool({ name: 'preview_inspect', arguments: { file: 'preview.yml' } })).isError, undefined);
+  assert.equal(saved.result.file, join(directory, 'preview.yaml'));
+  assert.equal((await mcp.callTool({ name: 'preview_inspect', arguments: { file: 'preview.yaml' } })).isError, undefined);
   const duplicate = await mcp.callTool({ name: 'preview_save_config', arguments: { spec } });
   assert.equal((duplicate.structuredContent as { error: { code: string } }).error.code, 'ALREADY_EXISTS');
-  assert.equal((await mcp.callTool({ name: 'preview_inspect', arguments: { file: 'preview.yml', spec } })).isError, true);
+  assert.equal((await mcp.callTool({ name: 'preview_inspect', arguments: { file: 'preview.yaml', spec } })).isError, true);
+  const contents = await readFile(saved.result.file, 'utf8');
+  await rm(saved.result.file);
+  await writeFile(join(directory, 'preview.yml'), contents);
+  assert.equal((await mcp.callTool({ name: 'preview_inspect', arguments: {} })).isError, undefined);
+  assert.equal((await mcp.callTool({ name: 'preview_secrets_setup', arguments: {} })).isError, undefined);
+  const fallback = (await mcp.callTool({ name: 'preview_replace', arguments: { name: 'site' } })).structuredContent as { result: PreviewStatus };
+  assert.equal((await client.wait('site', fallback.result.candidate!.id)).state, 'ready');
+  const existingYml = await mcp.callTool({ name: 'preview_save_config', arguments: { spec } });
+  assert.equal((existingYml.structuredContent as { error: { code: string } }).error.code, 'ALREADY_EXISTS');
+  await assert.rejects(readFile(saved.result.file), { code: 'ENOENT' });
+  await writeFile(saved.result.file, contents);
+  const active = (await client.get('site')).active!.id;
+  for (const name of ['preview_inspect', 'preview_start', 'preview_replace', 'preview_secrets_setup']) {
+    const result = await mcp.callTool({ name, arguments: name === 'preview_replace' ? { name: 'site' } : {} });
+    const error = (result.structuredContent as { error: { code: string; message: string } }).error;
+    assert.equal(error.code, 'INVALID_INPUT');
+    assert.match(error.message, /Both preview.yaml and preview.yml exist/);
+  }
+  assert.equal((await client.get('site')).active!.id, active);
+  assert.equal((await mcp.callTool({ name: 'preview_inspect', arguments: { spec } })).isError, undefined);
+  for (const file of ['preview.yaml', 'preview.yml']) {
+    assert.equal((await mcp.callTool({ name: 'preview_inspect', arguments: { file } })).isError, undefined);
+    const replacement = (await mcp.callTool({ name: 'preview_replace', arguments: { name: 'site', file } })).structuredContent as { result: PreviewStatus };
+    assert.equal((await client.wait('site', replacement.result.candidate!.id)).state, 'ready');
+  }
+  await rm(join(directory, 'preview.yml'));
   await mcp.close();
   assert.equal(await (await fetch(ready.result.url!)).text(), 'project preview');
   await client.stop('site');
   const fromFile = JSON.parse((await execute(process.execPath, [cli, 'start', '--project', directory])).stdout);
   assert.equal(fromFile.state, 'ready');
   assert.equal((await client.info())?.pid, info!.pid);
-  await writeFile(join(directory, 'preview.yml'), 'invalid: yaml\n');
+  await writeFile(join(directory, 'preview.yaml'), 'invalid: yaml\n');
   const invalid = await execute(process.execPath, [cli, 'replace', '--project', directory]).catch(error => error);
   assert.equal(JSON.parse(invalid.stderr).error.code, 'INVALID_INPUT');
   assert.equal((await client.get('site')).active!.id, fromFile.id);
@@ -125,16 +155,16 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
   await keystore.store.add('user', shared, 'FAKE_SHARED');
   const yaml = (id: string) => `name: tree\ntype: command\ncwd: .\ncommand: [${JSON.stringify(process.execPath)}, app.mjs]\nenv:\n  TOKEN: {secret: ${id}}\n`;
   await writeFile(join(directory, 'app.mjs'), `import http from 'node:http'; http.createServer((req,res) => res.end(process.env.TOKEN)).listen(Number(process.env.PORT), process.env.HOST);`);
-  await writeFile(join(directory, 'preview.yml'), yaml(shared));
+  await writeFile(join(directory, 'preview.yaml'), yaml(shared));
   await execute('git', ['init', directory]);
-  await execute('git', ['-C', directory, 'add', 'app.mjs', 'preview.yml']);
+  await execute('git', ['-C', directory, 'add', 'app.mjs', 'preview.yaml']);
   await execute('git', ['-C', directory, '-c', 'user.name=Previewhost Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'disposable fixture']);
   const worktree = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-linked-tree-')));
   const unrelated = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-unrelated-')));
   projects.push(worktree, unrelated);
   await execute('git', ['-C', directory, 'worktree', 'add', '--detach', worktree]);
   await copyFile(join(directory, 'app.mjs'), join(unrelated, 'app.mjs'));
-  await writeFile(join(unrelated, 'preview.yml'), yaml(shared));
+  await writeFile(join(unrelated, 'preview.yaml'), yaml(shared));
   const adapters: Client[] = [];
   const wire: string[] = [];
   async function adapter(root: string) {
@@ -161,11 +191,11 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
     const calls = [];
     for (const root of projects) {
       const call = await adapter(root); calls.push(call);
-      const setup = await call<SecretSetupStatus>('preview_secrets_setup', { file: 'preview.yml' });
+      const setup = await call<SecretSetupStatus>('preview_secrets_setup', { file: 'preview.yaml' });
       assert.equal(setup.requirements[0].selected, false);
       const approved = await privateCall('approve');
       assert.equal(approved.state, 'complete'); assert.deepEqual(approved.alreadyPresent, [shared]);
-      const started = await call<PreviewStatus>('preview_start', { file: 'preview.yml' });
+      const started = await call<PreviewStatus>('preview_start', { file: 'preview.yaml' });
       const ready = await call<AttemptResult>('preview_wait', { name: 'tree', attemptId: started.candidate!.id });
       assert.equal(ready.state, 'ready'); assert.equal(await (await fetch(ready.url!)).text(), 'FAKE_SHARED');
       if (root === directory) {
@@ -173,23 +203,23 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
         try { assert.equal((await owner.info())?.dataDirectory, dataDirectory); }
         finally { await owner.close(); }
         const conflict = await execute(process.execPath, [cli, 'start', '--project', worktree, '--allow-exec', '--data-dir', dataDirectory,
-          '--file', join(worktree, 'preview.yml')], { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } }).catch(error => error);
+          '--file', join(worktree, 'preview.yaml')], { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } }).catch(error => error);
         assert.equal(JSON.parse(conflict.stderr).error.code, 'BUSY');
       }
     }
     const call = calls[1];
     await delay(1001); // Existing browser-opening cooldown.
-    await writeFile(join(worktree, 'preview.yml'), yaml(distinct));
-    const variant = await call<SecretSetupStatus>('preview_secrets_setup', { file: 'preview.yml' });
+    await writeFile(join(worktree, 'preview.yaml'), yaml(distinct));
+    const variant = await call<SecretSetupStatus>('preview_secrets_setup', { file: 'preview.yaml' });
     assert.equal(variant.state, 'pending');
     assert.deepEqual((await privateCall('approve')).remaining, [distinct]);
     assert.equal((await privateCall('save', { values: { [distinct]: 'FAKE_VARIANT' } })).state, 'complete');
-    const replaced = await call<PreviewStatus>('preview_replace', { name: 'tree', file: 'preview.yml' });
+    const replaced = await call<PreviewStatus>('preview_replace', { name: 'tree', file: 'preview.yaml' });
     const ready = await call<AttemptResult>('preview_wait', { name: 'tree', attemptId: replaced.candidate!.id });
     assert.equal(await (await fetch(ready.url!)).text(), 'FAKE_VARIANT');
     assert.equal(await keystore.store.get('user', shared), 'FAKE_SHARED');
-    await writeFile(join(worktree, 'preview.yml'), yaml(`${shared}/edited`));
-    const edited = await call<PreviewStatus>('preview_replace', { name: 'tree', file: 'preview.yml' });
+    await writeFile(join(worktree, 'preview.yaml'), yaml(`${shared}/edited`));
+    const edited = await call<PreviewStatus>('preview_replace', { name: 'tree', file: 'preview.yaml' });
     const denied = await call<AttemptResult>('preview_wait', { name: 'tree', attemptId: edited.candidate!.id });
     assert.equal(denied.error?.code, 'SECRET_DENIED');
     assert.equal(await (await fetch(ready.url!)).text(), 'FAKE_VARIANT');
@@ -197,7 +227,7 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
     const resumed = await adapter(worktree);
     assert.equal((await resumed<SecretSetupStatus>('preview_secrets_status', { id: variant.id })).state, 'complete');
     await calls[0]('preview_shutdown');
-    const restarted = await calls[0]<SecretSetupStatus>('preview_secrets_setup', { file: 'preview.yml' });
+    const restarted = await calls[0]<SecretSetupStatus>('preview_secrets_setup', { file: 'preview.yaml' });
     assert.equal(restarted.requirements[0].selected, false);
     assert.deepEqual((await privateCall('approve')).alreadyPresent, [shared]);
     assert.ok(!wire.join('\n').includes('FAKE_'));
@@ -215,7 +245,7 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
 
 test('concurrent first CLI callers have one owner; launch mismatches preserve it; crashes block blind restart', enabled, async t => {
   const { directory, client } = await fixture(t);
-  const file = join(directory, 'preview.yml'); await writeFile(file, 'name: site\ntype: static\ndirectory: .\n');
+  const file = join(directory, 'preview.yaml'); await writeFile(file, 'name: site\ntype: static\ndirectory: .\n');
   const callers = await Promise.all(Array.from({ length: 6 }, async (_, i) => {
     const file = join(directory, `site-${i}.json`);
     await writeFile(file, JSON.stringify({ name: `site-${i}`, type: 'static', directory }));
@@ -248,7 +278,7 @@ test('Git worktree roots are distinct and command wait timeout preserves continu
   const other = connectProject({ projectDirectory: worktree });
   projects.push(worktree);
   t.after(() => other.close());
-  await writeFile(join(worktree, 'preview.yml'), 'name: tree\ntype: static\ndirectory: .\n');
+  await writeFile(join(worktree, 'preview.yaml'), 'name: tree\ntype: static\ndirectory: .\n');
   const fromNested = JSON.parse((await execute(process.execPath, [cli, 'start'], { cwd: nested })).stdout);
   assert.equal(fromNested.state, 'ready');
   assert.equal((await other.info())?.projectDirectory, worktree);
@@ -263,13 +293,13 @@ test('Git worktree roots are distinct and command wait timeout preserves continu
 });
 
 test('one shared MCP connection routes Git worktrees to separate owners and managed data', {
-  ...enabled, skip: process.platform !== 'darwin' || !process.env.PREVIEWD_TEST_DOCKER_SOCKET,
+  ...enabled, skip: process.platform !== 'darwin' || !process.env.PREVIEWHOST_TEST_DOCKER_SOCKET,
 }, async t => {
   const { directory, projects } = await fixture(t);
   const keystore = await testKeystore(t);
   const hook = join(keystore.directory, 'preload.mjs');
   await writeFile(hook, keystore.installSource.replaceAll('/.local/test-build/', '/dist/'));
-  await writeFile(join(directory, 'preview.yml'), 'name: notes\ntype: environment\nprimary: web\nservices:\n  web: {type: static, directory: .}\n  db: {type: postgres}\n');
+  await writeFile(join(directory, 'preview.yaml'), 'name: notes\ntype: environment\nprimary: web\nservices:\n  web: {type: static, directory: .}\n  db: {type: postgres}\n');
   await execute('git', ['init', directory]);
   await execute('git', ['-C', directory, 'add', '.']);
   await execute('git', ['-C', directory, '-c', 'user.name=Previewhost Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture']);
@@ -283,7 +313,7 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   const client = new Client({ name: 'worktree-launch', version: '1' });
   t.after(() => client.close());
   await client.connect(new StdioClientTransport({ command: process.execPath,
-    args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWD_TEST_DOCKER_SOCKET!],
+    args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWHOST_TEST_DOCKER_SOCKET!],
     env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } as Record<string, string>, stderr: 'pipe' }));
   const tools = (await client.listTools()).tools;
   assert.ok(tools.every(tool => tool.inputSchema.required?.includes('project')));

@@ -16,6 +16,25 @@ permissions:
   contents: read
 
 jobs:
+  docs:
+    name: Verify documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DOCS_URL: https://docs.example.test/
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check:docs
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:docs
+
   verify:
     name: Verify macOS package
     # Colima uses this Intel runner in its own macOS integration suite.
@@ -39,7 +58,7 @@ jobs:
         run: |
           colima start --runtime docker --vm-type vz --cpus 2 --memory 4
           docker info
-          echo "PREVIEWD_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+          echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
       - name: Pull database images
         run: |
           docker pull postgres:17-alpine

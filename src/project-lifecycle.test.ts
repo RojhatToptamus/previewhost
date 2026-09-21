@@ -136,7 +136,7 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
   } finally { await dashboard?.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
+const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 test('offline projects keep real PostgreSQL data discoverable and delete only explicitly confirmed resources', {
   skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000,
 }, async t => {

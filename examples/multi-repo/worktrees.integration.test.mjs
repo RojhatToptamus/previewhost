@@ -18,7 +18,7 @@ const example = fileURLToPath(new URL('.', import.meta.url));
 const project = resolve(example, '../..');
 const recipe = join(example, 'worktrees.mjs');
 const cli = join(project, 'dist/cli.js');
-const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
+const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 
 async function request(url, pathname, body) {
   const origin = new URL(url);

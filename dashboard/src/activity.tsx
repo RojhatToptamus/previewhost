@@ -119,7 +119,7 @@ export function Activity(props: Props) {
         </>
       )}
       {owner.configuration?.error && (
-        <Notice title="preview.yml needs attention" error>
+        <Notice title="Configuration needs attention" error>
           {owner.configuration.error.message}
           {p?.active ? " The running app is unchanged." : ""}
         </Notice>

@@ -267,7 +267,7 @@ export function Diagnostics({
               )
             }
           >
-            Save as preview.yml
+            Save as preview.yaml
           </Button>
         </div>
       )}
@@ -377,7 +377,8 @@ function Configuration({
       </Section>
       {entry.owner.configuration && (
         <p className="text-muted-foreground">
-          preview.yml exists. This view shows the selected runtime attempt.
+          {entry.owner.configuration.file.split("/").at(-1)} exists. This view
+          shows the selected runtime attempt.
         </p>
       )}
       <Section title="Service definitions">

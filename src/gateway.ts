@@ -16,8 +16,7 @@ export interface Gateway {
   close(): Promise<void>;
 }
 
-// Keep loop detection compatible with gateways from before the product rename.
-const hopHeader = 'x-previewd-hops';
+const hopHeader = 'x-previewhost-hops';
 const maxHops = 8;
 const hopByHop = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',

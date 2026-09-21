@@ -74,7 +74,7 @@ export async function selectMcpProject(requested: string | undefined, options: P
 
 export function projectOwnerDirectory(project: string): string {
   // Fixed-length filesystem address for an arbitrary absolute path, not a permission/configuration hash.
-  return join(homedir(), '.local', 'share', 'previewd', 'projects', createHash('sha256').update(project).digest('hex'));
+  return join(homedir(), '.local', 'share', 'previewhost', 'projects', createHash('sha256').update(project).digest('hex'));
 }
 
 export const projectRecordSchema = z.strictObject({
@@ -125,7 +125,7 @@ export async function writeProjectRecord(directory: string, record: ProjectRecor
 }
 
 /** Discover records only; reading them never launches an owner or grants authority. */
-export async function discoverProjectOwners(directory = join(homedir(), '.local', 'share', 'previewd', 'projects')) {
+export async function discoverProjectOwners(directory = join(homedir(), '.local', 'share', 'previewhost', 'projects')) {
   const owners: Array<{ id: string; connection?: NonNullable<Awaited<ReturnType<typeof readConnection>>>; retained?: ProjectRecord; tokenFile: string; error?: Failure }> = [];
   const stat = await lstat(directory).catch(error => { if (error.code !== 'ENOENT') throw error; return undefined; });
   if (!stat) return owners;

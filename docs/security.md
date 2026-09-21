@@ -1,11 +1,13 @@
 # Ownership, security, and recovery
 
+Application commands run with your user permissions, without a sandbox. Stopping a preview ends its processes but keeps managed database data.
+
 ## Ownership
 
 The runtime owns its gateways, static file servers, native process groups,
 supervisors, and configured database containers.
 An embedded application owns the runtime lifetime.
-The foreground daemon owns previews for its CLI and MCP clients.
+A daemon, including an automatic project owner, owns previews for its CLI and MCP clients.
 
 A client disconnect leaves daemon previews active.
 Stop and normal shutdown close owned applications and containers.
@@ -65,6 +67,7 @@ PostgreSQL probes ignore ambient PG credentials and `.pgpass`.
 
 `RuntimeOptions.secretIds` and repeated `--secret ID` select exact user keystore
 entries. Any execution-authorized client can bind a selected ID to its supplied code.
+
 Private setup can add names only after the owner approves them through its browser capability.
 Approval revalidates source scope and preserves the 128-name bound. It lasts until owner shutdown.
 The exact name identifies one shared keystore value across owners; no worktree prefix is added.
@@ -81,24 +84,26 @@ Global MCP registration requires client confirmation of each canonical project a
 An agent-supplied path is a request, never authorization. Your home directory and its parents are rejected.
 Confirmation is bound to the exact server-held request, expires after five minutes, and cannot be replayed after completion.
 Denial, cancellation, malformed confirmation, or disconnect grants no connection access.
-A new connection needs approval again; already running owners and their private-secret approvals remain active.
+
+A new connection needs approval again. Already running owners and their private-secret approvals remain active.
 
 Approved source extensions use the authenticated owner control API and its existing authorization callback.
-The runtime owns the current source-root set; extensions do not restart it or alter its secret grants.
+The runtime owns the current set of source roots. Extensions do not restart it or alter its secret grants.
 Fixed daemons cannot extend their configured roots through this API.
-Startup and private setup restore the approved connection’s source grants after a clean owner restart; secret access still needs reapproval.
+Startup and private setup restore the approved connection’s source grants after a clean owner restart. Secret access still needs reapproval.
 
 Registrations with explicit `--root` or `--project` retain the existing root and registered-Git-worktree restrictions.
-All automatic calls select a project independently; a shared connection has no trusted chat identity.
+
+All automatic calls select a project independently. A shared connection has no trusted chat identity.
 Approval allows that connection to manage the selected project's previews, not only one chat's calls.
 Source checks do not sandbox authorized native commands or create new execution or secret authority.
-MCP configuration files and submitted sources must resolve within approved roots; symlink escapes are rejected.
+
+MCP configuration files and submitted sources must resolve within approved roots. Symlink escapes are rejected.
 Direct CLI/library file input retains the caller's filesystem authority.
 
 ## Automatic project owners
 
-Automatic owners use the existing runtime, bearer-token client and daemon.
-The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewd/projects`.
+The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewhost/projects`.
 A SHA-256 digest of that path gives it a fixed-length filesystem address. It is not a configuration signature or permission grant.
 A permanent Darwin kernel lock prevents concurrent owners for one project. It is held through runtime cleanup.
 The private connection file contains endpoint, PID, project path, data directory, and any explicit Docker socket. It is published after listener readiness.
@@ -106,7 +111,7 @@ Clients authenticate with the existing private token, then verify the responding
 The file cannot authorize a new owner or restore browser-added name grants.
 
 Cold startup uses current CLI arguments or MCP registration options. `--allow-exec` retains its broad trusted-owner authority.
-Omitted options can reuse a living owner; incompatible explicit options are rejected without changing it.
+Omitted options can reuse a living owner. Incompatible explicit options are rejected without changing it.
 Explicit endpoint/token mode never automatically starts or adopts an owner.
 An idle owner remains alive so approvals and applications survive agent pauses and adapter disconnection.
 
@@ -128,17 +133,15 @@ not prove orphaned native-process cleanup. Unknown data locations block removal.
 No process is stopped, data deleted, secret accessed, or authorization restored by removal.
 Never kill a process based only on the recorded PID; it can have been reused. See [recovery](troubleshooting.md#the-client-cannot-find-the-daemon).
 
-## Retained storage identifiers
+## Runtime storage and resource names
 
-The following storage identifiers are unchanged:
+The default token is `~/.local/share/previewhost/token`. Automatic project records use `~/.local/share/previewhost/projects`.
+`--data-dir` and `dataDirectory` select the exact directory supplied by the owner.
+Docker object names use `previewhost-`, and ownership labels use `io.previewhost.*`.
+Managed PostgreSQL uses `previewhost` for its user and database.
+The gateway uses `x-previewhost-hops` to detect forwarding loops.
 
-- The default token remains at `~/.local/share/previewd/token`.
-- `--data-dir` and `dataDirectory` still select the exact directory supplied by the owner.
-- Docker names retain `previewd-`. Ownership labels retain `io.previewd.*`.
-- Managed PostgreSQL retains its `previewd` user and database.
-
-The [Keystore access rules](#stored-secrets-and-private-entry) still apply to package updates.
-The internal `x-previewd-hops` header also remains unchanged so old and new gateways detect loops together.
+Earlier runtime namespaces are not discovered or migrated. Follow the [reset instructions](../README.md#reset-required-for-earlier-installations) before updating an existing installation.
 
 ## Native processes
 
@@ -176,8 +179,9 @@ See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
 
 ## Database ownership and recovery
 
-Managed PostgreSQL/Redis require macOS, an unlocked keystore, local Docker Engine, cached
-`postgres:17-alpine`/`redis:7-alpine` images, and an explicit private data directory.
+Managed PostgreSQL and Redis require macOS and an unlocked keystore, a local Docker Engine, downloaded database images, and private data storage.
+Automatic project owners create their own storage directories. Manual daemons and embedded runtimes require an explicit data directory.
+See [database prerequisites](databases.md#prepare-docker).
 previewhost does not pull images, create networks, use remote Engines, or change Docker contexts.
 
 The data directory uses mode 0700 and records use mode 0600.
@@ -256,7 +260,7 @@ A short log tail can remain buffered until another chunk or stream completion.
 Environment inspection shows binding names without resolved values.
 Redaction includes database connection URLs and credential components for each consumer.
 Attempt logs capture source identity separately from output and retain one bounded tail.
-Filtering cannot relabel output; application text that imitates a prefix stays with its actual source.
+Filtering cannot relabel output. Application text that imitates a prefix stays with its actual source.
 
 Redaction cannot detect every secret. Application files, transformed values,
 arguments, third-party output, and HTTP responses can expose values.
@@ -294,6 +298,7 @@ in daemon memory. Owner authorization fixes the mode, requested names, sources, 
 For unselected names, a private approval step adds access to the existing owner selection.
 Unselected entries receive no keystore presence check before approval. Canceling later does not undo an earlier grant.
 Missing-value setup only adds absent entries. Edit updates one existing entry.
+
 Neither operation authorizes execution or starts an application.
 
 The daemon sends the private URL directly to the system browser launcher.
@@ -306,9 +311,11 @@ The launcher receives no ambient credential values.
 The form uses no cookies, external assets, or telemetry. It uses the dashboard’s shared
 styles and bundled fonts. Only the theme preference uses `localStorage` (`previewhost.theme`),
 separately for each local address. Secret values and private grants never enter browser storage.
+
 Host/Origin checks, JSON input, restrictive CSP, and scoped single-use grants
 protect writes. Labels render as text.
 Save validates all fields and consumes the grant before writes.
+
 Partial results retain completed writes without rollback.
 After save, the client must check status and retry startup.
 
@@ -317,35 +324,38 @@ Agents that can inspect that browser, execute same-user code, or modify the
 receiving application remain outside this privacy boundary.
 Masked fields reduce incidental display. They do not isolate hostile agents.
 
-
 ## Local dashboard
 
 The optional dashboard serves fixed assets on numeric loopback. Geist fonts are bundled
-locally and restricted by `font-src 'self'`; no font CDN is contacted.
+locally and restricted by `font-src 'self'`. No font CDN is contacted.
 Only the theme preference uses `localStorage` (`previewhost.theme`).
+
 The browser receives a separate capability through the native launcher and removes it
 from the URL immediately. The dashboard keeps it in per-tab `sessionStorage` to support reload.
-Browser session restore may preserve this storage; tab closure is not a guaranteed
+Browser session restore can preserve this storage. Tab closure is not a guaranteed
 revocation boundary. Stopping the dashboard process ends the capability's authority.
 If browser storage is unavailable, the fresh launch works only in page memory.
+
 The React dashboard loads only bundled scripts and fonts. Its CSP permits the inline
 presentation styles used by Radix and Sonner, but does not permit inline scripts,
 external connections, framing, or form navigation.
 
 Owner bearer tokens stay in the local dashboard process and never reach browser JavaScript.
-The dashboard requires exact Host/Origin headers and authenticated JSON POST actions;
-the existing owner control listener still rejects browser Origin headers.
+The dashboard requires exact Host/Origin headers and authenticated JSON POST actions. The existing owner control listener still rejects browser Origin headers.
 
 Discovery validates private connection records and authenticates each owner identity.
 It does not scan ports, launch owners, grant roots, or infer cleanup from an unreachable
 endpoint. One unresponsive owner has a bounded read deadline and does not hide others.
 
 Dashboard reset requires a confirmation of the environment and its managed databases.
-It calls existing Stop, authorized data deletion, and Start again operations. Attempt IDs
+It stops the preview, deletes its managed data after authorization, and starts the retained configuration again.
+Attempt IDs
 and the managed resource list are checked for changes before deletion. Deletion must
 succeed before startup is requested. Failed startup never retries deletion. These steps
-are not a transaction: deleted data and job writes cannot be rolled back. External data
-and user-secret entries are excluded from deletion; jobs retain their normal permissions.
+are not a transaction: deleted data and job writes cannot be rolled back.
+
+External data
+and user-secret entries are excluded from deletion. Jobs retain their normal permissions.
 
 The dashboard can reopen an owner’s pending private form. Secret Manager also lists
 user-reference names and edits an existing entry in a dashboard dialog, without
@@ -359,22 +369,23 @@ change bindings, or extend approvals. Agent setup still uses separate, expiring
 private-form capabilities; no MCP or owner-control value-write operation is added.
 
 Explicit configuration saving selects an exact retained attempt and writes only the
-automatic owner's root `preview.yml`. It reuses source validation and exclusive file
-creation; an existing file or symlink is never overwritten. Secret/input references
+automatic owner's root `preview.yaml`. It checks source access and refuses to save if `preview.yaml` or `preview.yml` exists, including a directory or symlink. Secret/input references
 remain unexpanded. No resolved environment or raw declaration is returned to the browser,
 and saving changes no running application. Literal strings originally supplied in a
-spec remain literal strings; the saver is not a secret scanner.
+spec remain literal strings. The saver is not a secret scanner.
 
 Retry start reuses normal source, execution, and secret-access checks for the exact
 current failed attempt. It neither retries canceled attempts nor opens private setup.
 
-Logs retain existing best-effort redaction limits and are shown on request, never treated as HTML.
+Logs use best-effort redaction and appear as text, never as HTML.
 
 ## Setup jobs
 
 Jobs use the same source authorization, secret bindings, redacted logs, supervisor, and process-group cleanup as command services.
 Once-only job intent and success are stored in the existing private owned-data record.
-Failure or owner interruption cannot silently retry that job; an explicit rerun or data deletion is required.
+Failure or owner interruption cannot silently retry that job. An explicit rerun or data deletion is required.
+
 Reruns require a stopped environment, its latest attempt ID, and normal start authorization.
 The authorization callback receives `rerunJob` on that start request.
+
 No process cleanup rolls back database writes. See [job lifecycle and recovery](jobs.md).

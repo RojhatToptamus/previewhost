@@ -14,6 +14,51 @@ import { createPreviewRuntime } from './runtime.js';
 const execute = promisify(execFile);
 const cli = resolve('dist/cli.js');
 
+test('CLI default files, explicit selections, and stdin preserve the running preview on a configuration conflict', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost cli defaults '));
+  await writeFile(join(directory, 'index.html'), 'default preview');
+  const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => true });
+  const tokenFile = join(directory, 'private', 'token');
+  const daemon = await startDaemon({ runtime, port: 0, tokenFile });
+  t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  const run = async (args: string[], input = '') => {
+    const result = execute(process.execPath, [cli, ...args, '--endpoint', daemon.endpoint, '--token-file', tokenFile], { cwd: directory });
+    result.child.stdin!.end(input);
+    return result;
+  };
+  const yaml = join(directory, 'preview.yaml'); const yml = join(directory, 'preview.yml');
+  const contents = 'name: app\ntype: static\ndirectory: .\n';
+  await writeFile(yaml, contents);
+  assert.equal(JSON.parse((await run(['inspect'])).stdout).spec.name, 'app');
+  const started = JSON.parse((await run(['start'])).stdout);
+  assert.equal(started.state, 'ready');
+  await rm(yaml); await writeFile(yml, contents);
+  assert.equal(JSON.parse((await run(['inspect'])).stdout).spec.name, 'app');
+  const replaced = JSON.parse((await run(['replace'])).stdout);
+  assert.equal(replaced.state, 'ready'); assert.equal(replaced.url, started.url);
+  await writeFile(yaml, contents);
+  for (const args of [['inspect'], ['start'], ['replace'], ['secrets', 'setup']]) {
+    const error = await run(args).catch(error => error);
+    assert.equal(JSON.parse(error.stderr).error.code, 'INVALID_INPUT');
+    assert.match(JSON.parse(error.stderr).error.message, /Both preview.yaml and preview.yml exist/);
+  }
+  assert.equal((await runtime.get('app')).active!.id, replaced.id);
+  assert.equal(await (await fetch(started.url)).text(), 'default preview');
+  for (const file of [yaml, yml]) {
+    assert.equal(JSON.parse((await run(['inspect', '--file', file])).stdout).spec.name, 'app');
+    assert.equal(JSON.parse((await run(['replace', '--file', file])).stdout).state, 'ready');
+  }
+  for (const args of [['inspect'], ['inspect', '--file', '-']]) {
+    const result = await run(args, JSON.stringify({ name: 'inline', type: 'static', directory: '.' }));
+    assert.equal(JSON.parse(result.stdout).spec.name, 'inline');
+  }
+  await rm(yml); await writeFile(yaml, 'services: [\n');
+  const invalid = await run(['inspect']).catch(error => error);
+  assert.equal(JSON.parse(invalid.stderr).error.code, 'INVALID_INPUT');
+  assert.match(JSON.parse(invalid.stderr).error.message, /preview.yaml.*line/);
+  await run(['stop', 'app']);
+});
+
 test('CLI file and stdin workflows share the daemon, resolve paths once, and return useful failures', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost cli '));
   await mkdir(join(directory, 'site'));
@@ -74,8 +119,8 @@ test('the foreground CLI owns its daemon and explicit shutdown ends it without a
   const directory = await mkdtemp(join(tmpdir(), 'previewhost serve '));
   const tokenFile = join(directory, 'private', 'token');
   const secret = 'selected-owner-input-must-stay-private';
-  const owner = spawn(process.execPath, [cli, 'serve', '--root', directory, '--env', 'PREVIEWD_SELECTED_INPUT', '--token-file', tokenFile, '--port', '0'], {
-    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PREVIEWD_SELECTED_INPUT: secret, PREVIEWD_UNSELECTED_INPUT: 'not-selected' },
+  const owner = spawn(process.execPath, [cli, 'serve', '--root', directory, '--env', 'PREVIEWHOST_SELECTED_INPUT', '--token-file', tokenFile, '--port', '0'], {
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PREVIEWHOST_SELECTED_INPUT: secret, PREVIEWHOST_UNSELECTED_INPUT: 'not-selected' },
   });
   const exit = once(owner, 'exit');
   let stderr = '';
@@ -89,18 +134,18 @@ test('the foreground CLI owns its daemon and explicit shutdown ends it without a
   lines.close();
   const info = JSON.parse(line);
   assert.equal(info.execution, 'disabled');
-  assert.deepEqual(info.inputKeys, ['PREVIEWD_SELECTED_INPUT']);
+  assert.deepEqual(info.inputKeys, ['PREVIEWHOST_SELECTED_INPUT']);
   assert.ok(!line.includes(secret));
   const client = connectPreviewDaemon({ endpoint: info.endpoint, tokenFile });
   t.after(() => client.close());
   assert.deepEqual(await client.list(), []);
   const environment = { name: 'inputs', type: 'environment' as const, primary: 'api', services: {
     api: { type: 'command' as const, cwd: directory, command: [process.execPath, '-e', 'process.exit(99)'],
-      env: { TOKEN: { fromEnv: 'PREVIEWD_SELECTED_INPUT' } } },
+      env: { TOKEN: { fromEnv: 'PREVIEWHOST_SELECTED_INPUT' } } },
   } };
   const description = await client.inspect(environment);
   assert.ok(!JSON.stringify(description).includes(secret));
-  environment.services.api.env.TOKEN.fromEnv = 'PREVIEWD_UNSELECTED_INPUT';
+  environment.services.api.env.TOKEN.fromEnv = 'PREVIEWHOST_UNSELECTED_INPUT';
   await assert.rejects(client.inspect(environment), { code: 'INVALID_INPUT' });
   await client.shutdown();
   assert.equal((await exit)[0], 0, stderr);

@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
-import { loadPreviewSpec } from './config.js';
+import { loadPreviewSpec, resolvePreviewFile } from './config.js';
 import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
 import { connectPreviewDaemon } from './client.js';
@@ -91,9 +91,10 @@ export async function startDashboard(options: {
     try {
       if (owner.error) return { ...identity, error: owner.error };
       return await withOwner(owner, async (client, info) => {
-        const file = join(info.projectDirectory, 'preview.yml');
+        let file = join(info.projectDirectory, 'preview.yaml');
         let configuration: { file: string; error?: ReturnType<typeof failure> } | undefined;
         try {
+          file = await resolvePreviewFile(info.projectDirectory);
           await lstat(file);
           configuration = { file };
           await normalizeSources(parseSpec(await loadPreviewSpec(file, { allowedRoots: info.allowedRoots, signal: controller.signal })), info.allowedRoots);
