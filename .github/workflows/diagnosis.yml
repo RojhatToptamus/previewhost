@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 045512abb46755fe370400c178e21e9f1e580759
+          ref: c7711837f8d0fd00c2ac4e0c3e17be5bc62dc0ec
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -32,6 +32,23 @@ jobs:
       - run: npx tsc -p tsconfig.test.json
       - name: Connected pipe authentication and private-storage regressions
         run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/docker.test.js .local/test-build/platform.test.js
+      - uses: actions/checkout@v7
+        with:
+          ref: codex/ci-diagnosis
+          path: diagnosis
+          persist-credentials: false
+      - name: Two ordinary accounts and foreign pipe ownership
+        run: ./diagnosis/scripts/windows-accounts-probe.ps1 -ProductRoot $PWD
+      - name: Disposable account experiment diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem $env:TEMP -Directory -Filter 'previewhost-accounts-*' | ForEach-Object {
+            Get-ChildItem $_.FullName -File | Where-Object Name -Match 'result.json$|stderr$|stdout$' | ForEach-Object {
+              Write-Output $_.Name
+              Get-Content -LiteralPath $_.FullName
+            }
+          }
       - name: Installed package
         shell: bash
         run: |
