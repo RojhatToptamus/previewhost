@@ -26,10 +26,11 @@ test('kernel lock excludes independent handles and processes, allows owner reads
   await writeFile(script, `import { openOwnerLock } from ${JSON.stringify(new URL('./private-files.js', import.meta.url).href)};
 const lock = await openOwnerLock(process.argv[2]); process.send('locked'); setInterval(() => {}, 1000);`);
   const child = fork(script, [path], { execArgv: [], silent: true });
-  t.after(() => { child.kill(); });
-  await once(child, 'message');
-  await assert.rejects(openOwnerLock(path), { code: 'EAGAIN' });
-  const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
+  const exited = once(child, 'exit');
+  try {
+    await once(child, 'message');
+    await assert.rejects(openOwnerLock(path), { code: 'EAGAIN' });
+  } finally { child.kill('SIGKILL'); await exited; }
   const reacquired = await openOwnerLock(path);
   try { assert.equal(await reacquired.readFile('utf8'), 'owner-identity\n'); }
   finally { await reacquired.close(); }
@@ -119,10 +120,11 @@ for (let sequence = 0; ; sequence++) {
   if (sequence === 0) process.send('published');
 }`);
   const child = fork(script, [record], { execArgv: [], silent: true });
-  t.after(() => { child.kill(); });
-  await once(child, 'message');
-  await new Promise(resolve => setTimeout(resolve, 20));
-  const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
+  const exited = once(child, 'exit');
+  try {
+    await once(child, 'message');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  } finally { child.kill('SIGKILL'); await exited; }
   const value = JSON.parse(await readFile(record, 'utf8'));
   assert.ok(Number.isInteger(value.sequence) && value.sequence >= 0);
   assert.equal(value.payload, 'complete'.repeat(8192));

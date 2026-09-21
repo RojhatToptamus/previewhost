@@ -102,9 +102,9 @@ test('killed transaction rolls back, releases its lock and permits recovery', { 
   const child = spawn(process.execPath, ['--input-type=module','-e', `import {DatabaseSync} from 'node:sqlite';
     const db=new DatabaseSync(process.argv[1]); db.exec('BEGIN IMMEDIATE; UPDATE vault SET ciphertext=zeroblob(100)');
     console.log('uncommitted');setInterval(()=>{},1000);`, join(directory,'secrets.sqlite')], { stdio: ['ignore','pipe','pipe'] });
-  t.after(() => { child.kill('SIGKILL'); });
-  await once(child.stdout!, 'data');
-  const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
+  const exited = once(child, 'exit');
+  try { await once(child.stdout!, 'data'); }
+  finally { child.kill('SIGKILL'); await exited; }
   store.close();
   const recovered = session(); await recovered.unlock({ password });
   assert.equal(await recovered.get('user','kept'), 'FAKE_committed');
@@ -157,20 +157,23 @@ test('private approval, password unlock, owner isolation and cancellation remain
   const urls: string[] = [];
   t.mock.method(SecretSetup.prototype,'openBrowser',async (url: string) => { urls.push(url); });
   const daemon = await startDaemon({runtime:runtimes[0],tokenFile:join(directory,'owner/token'),port:0});
-  t.after(async()=>{await daemon.close();await runtimes[1].close();});
   const setup = new SecretSetup(runtimes[0],daemon.endpoint);
-  const spec = {name:'private',type:'command' as const,cwd:directory,command:[process.execPath,'app.mjs'],env:{APP_TOKEN:{secret:'approved/ref'}}};
-  const request = await setup.setup(spec,new AbortController().signal);
-  assert.equal(request.state,'pending');
-  const capability='Bearer '+new URL(urls.pop()!).hash.slice(1);
-  await assert.rejects(setup.unlock(capability,{password}),{code:'SECRET_DENIED'});
-  const approved=await setup.approve(capability);assert.equal(approved.state,'pending');
-  assert.equal((await runtimes[0].keystore.status()).state,'locked');
-  await assert.rejects(setup.unlock(capability,{password:'FAKE_wrong'}));
-  assert.equal(setup.status(request.id).state,'pending');
-  assert.equal((await setup.unlock(capability,{password})).state,'complete');
-  assert.equal((await runtimes[1].keystore.status()).state,'locked');
-  assert.equal((await runtimes[1].inspect(spec)).secrets![0].selected,false);
-  assert.deepEqual(await runtimes[0].list(),[]);
-  await setup.close();
+  try {
+    const spec = {name:'private',type:'command' as const,cwd:directory,command:[process.execPath,'app.mjs'],env:{APP_TOKEN:{secret:'approved/ref'}}};
+    const request = await setup.setup(spec,new AbortController().signal);
+    assert.equal(request.state,'pending');
+    const capability='Bearer '+new URL(urls.pop()!).hash.slice(1);
+    await assert.rejects(setup.unlock(capability,{password}),{code:'SECRET_DENIED'});
+    const approved=await setup.approve(capability);assert.equal(approved.state,'pending');
+    assert.equal((await runtimes[0].keystore.status()).state,'locked');
+    await assert.rejects(setup.unlock(capability,{password:'FAKE_wrong'}));
+    assert.equal(setup.status(request.id).state,'pending');
+    assert.equal((await setup.unlock(capability,{password})).state,'complete');
+    assert.equal((await runtimes[1].keystore.status()).state,'locked');
+    assert.equal((await runtimes[1].inspect(spec)).secrets![0].selected,false);
+    assert.deepEqual(await runtimes[0].list(),[]);
+  } finally {
+    await setup.close();
+    await Promise.all([daemon.close(), runtimes[1].close()]);
+  }
 });
