@@ -621,3 +621,169 @@ The historical MCP approval failure remains unexplained. Its old assertion disca
 The failed approval starts a fresh project owner; that startup does not contact Docker or open the shared keystore.
 No deterministic shared-state or cleanup race was found. The new assertions preserve the error for diagnosis without changing behavior or deadlines.
 Both MCP protocol cases passed in this pilot. That is evidence of a passing run, not a root-cause fix.
+
+
+## Targeted diagnosis after qualification
+
+PR #25 remains a draft. The failed qualification results remain unchanged.
+No additional full qualification run started during this diagnosis.
+
+The first diagnostic used the original three database scenarios and both MCP protocol scenarios.
+It added operation timing markers without changing assertions, order, or deadlines.
+The diagnostics remain on a separate branch and are not part of the package.
+
+[Diagnostic D1](https://github.com/RojhatToptamus/previewhost/actions/runs/35648516905)
+used commit `de699e227b519e5ab5f411f21fb8689c179067aa`.
+It took 14m16s from creation to completion and used 16m59s of raw runner time.
+Four cases passed. The reset case exceeded its existing 120-second deadline.
+The selected cases do not replace full coverage.
+
+| D1 operation | Duration | Result |
+| --- | ---: | --- |
+| Reset: initial environment startup | 31.711s | Completed |
+| Reset: second environment startup | 25.115s | Completed |
+| Reset: restart after denied deletion | 21.725s | Completed |
+| Reset: final startup | 34.134s | Crossed the test deadline |
+| Seed recovery scenario, including cleanup | 92.3s | Passed |
+| Offline scenario: first CLI startup | 19.787s | Completed |
+| Offline scenario: second CLI startup | 14.043s | Completed |
+| Offline scenario: confirmed deletion | 0.812s | Completed |
+| Offline scenario, including cleanup | 40.8s | Passed |
+
+The reset deadline expired during the final startup observation.
+Its four startup phases consumed 112.685s. Fixture setup took 0.189s, including 0.125s for the keystore.
+This identifies cumulative startup cost in the reproduced timeout. D2 below measures the individual operations.
+The original final-run seed and offline timeouts did not recur in D1. Their interrupted operations remain unknown.
+
+D1 also exposed a test helper defect.
+At 120.003s, fixture cleanup started while the startup observer remained pending.
+At 120.506s, the observer returned and the test body issued more HTTP requests during cleanup.
+The helper now forwards the required test signal to the existing `runtime.wait` operation.
+Aborted observation rejects with `CLOSED`. Fixture cleanup retains responsibility for the pending startup.
+All 31 existing callers pass `t.signal`. Production startup and deletion behavior remain unchanged.
+
+A focused regression failed with the old helper and passed with the correction.
+All 12 affected tests passed locally with real Docker, zero skips, and 68.603s total test time.
+Type checks passed. The correction does not remove the underlying startup delay or increase any deadline.
+
+The two MCP scenarios passed in D1 with one elicitation each.
+Static-only connection took 3.232s and 4.709s. Approval took 2.304s and 4.400s.
+The historical 29.653s measurement covers the whole case, not the failed approval operation.
+Its discarded public error cannot be reconstructed from the retained logs.
+The current assertions retain that error on a future failure. Passing later cases does not establish a root-cause fix.
+
+
+### Operation-level comparison and runner decision
+
+[D2](https://github.com/RojhatToptamus/previewhost/actions/runs/35650285402)
+used `8ac551b6daebf1c1b368420ecc8a0ca349f62dc3` on separate fresh Intel macOS runners.
+It compared one and four guest CPUs with the same memory, scenarios, assertions, and deadlines.
+Both used the original observer, before the cancellation correction.
+Elapsed time was 17m00s; execution was 16m57s; raw runner usage was 29m50s.
+
+| D2 measurement | Four CPUs | One CPU |
+| --- | ---: | ---: |
+| Complete cases | 3 passed | 0 passed, 2 failed, 1 canceled |
+| Runner wall time | 12m54s | 16m56s |
+| Colima setup | 336s | 391s |
+| Image pulls | 84s | 231s |
+| Selected suite | 234.649s | 293.644s, incomplete coverage |
+| Image-list median | 1.962s | 9.748s |
+| Image-inspect median | 1.401s | 4.935s |
+| Guest system CPU average | 30.78% | 73.71% |
+| Guest idle average | 62.58% | 8.55% |
+
+The four-CPU case times were reset 105.186s, seed 90.153s, and offline 36.627s.
+Docker calls consumed 113.436s. PostgreSQL readiness intervals consumed 80.849s, including polling gaps.
+Together, their timestamp intervals occupied approximately 83% of suite time.
+Container-wait subscriptions represent container lifetime and are excluded from API latency totals.
+Connection-attempt durations are inside readiness intervals and must not be added again.
+The 610 pre-readiness connection errors have no captured error codes; their individual causes remain unknown.
+All observed non-wait Docker calls completed without request errors.
+
+The one-CPU failures now have operation boundaries:
+
+- Reset's second environment exhausted its 60-second startup budget. PostgreSQL became ready only after 56.937s.
+- Seed recovery consumed 115.601s across three starts. Its 120-second test deadline expired during the following stop.
+- Offline's first CLI start failed after 30.031s, before PostgreSQL readiness. CLI observation and process execution both have 30-second limits.
+
+The offline trace cannot distinguish which limit fired first. The original final-run failures also remain separate observations.
+The failed one-CPU scenarios did not execute their remaining assertions. Their shorter coverage is not a performance improvement.
+Reject one CPU for this workload. Do not launch further qualification with it.
+
+The seed trace also shows cleanup overlapping a pending stop.
+The observer correction only prevents continuation from `outcome()`; it does not cancel every asynchronous test operation.
+No evidence shows a production ownership or retention failure. The timing evidence does not exclude other application defects.
+
+Both guests used HPET. Linux documents slow HPET reads and contention in its
+[matching kernel implementation](https://github.com/torvalds/linux/blob/v6.8/arch/x86/kernel/hpet.c#L762).
+This is a profiling lead, not a confirmed cause. One CPU remained slow without inter-CPU interrupts.
+The four-CPU guest was not globally saturated and neither guest swapped.
+Do not force TSC or change deadline accounting. Boot diagnostics and kernel profiles would be needed to test this hypothesis.
+
+### Bounded alternative and remaining decision
+
+[D3](https://github.com/RojhatToptamus/previewhost/actions/runs/35652515010) used `45c46a2`.
+Its nine Docker GET requests and cancellation regression passed, but a missing quote in the diagnostic shell assertion failed the job.
+This investigation error is retained: 42s elapsed, 39s runner usage. It is not an application failure.
+
+[D4](https://github.com/RojhatToptamus/previewhost/actions/runs/35652705555) corrected that quote in `e3e73c8` after a shell syntax check.
+It passed in 49s elapsed, with 44s runner usage: nine successful GET requests and one regression, zero skips.
+Both runs verified stable engine and image identities across three rounds. No automated retries were introduced.
+The two fresh Linux jobs consumed 83 runner-seconds in total.
+
+| Existing API call | D3 median | D4 median | D2 four-CPU median |
+| --- | ---: | ---: | ---: |
+| Engine info | 4.921ms | 4.746ms | 102ms |
+| Image list | 1.923ms | 1.764ms | 1,962ms |
+| Image inspection | 1.099ms | 1.018ms | 1,401ms |
+
+Linux used Docker 28.0.4, overlay2, eight images, four CPUs, approximately 16GB memory, and TSC.
+The macOS guest used Docker 29.5.2, overlayfs, four CPUs, approximately 4GB memory, and HPET.
+It started with zero images and pulled the PostgreSQL and Redis images before testing.
+The Linux control inspects PostgreSQL only; Redis is present to make the workload inventory less different.
+These small samples are descriptive. D2 measures calls within full scenarios, not an identical control loop.
+
+Across D1–D4, diagnosis consumed 48m12s of raw runner time.
+Together with the eight qualification runs and final-branch check, recorded usage is 5h55m56s, excluding earlier pilots and research.
+D3's printed TAP count appeared twice because its shell check echoed a matched line; one case ran, not two.
+
+The control measures an alternative environment; it does not qualify project locking, subprocess ownership, database retention, or full Linux support.
+Docker versions, storage drivers, and host resources differ, so the comparison cannot isolate virtualization as the sole cause.
+
+Do not resume full qualification yet. The current runner has not demonstrated the required stability or runtime headroom.
+Keep all coverage and the existing 13-minute median, 16-minute maximum, and runner-usage targets.
+Do not publish a package or merge this PR from these diagnostic results.
+
+Standard hosted runner execution is free for this public repository, including Linux and macOS.
+Raw runner usage still measures consumed capacity. Artifact storage has separate billing rules.
+See [GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+
+A larger Intel Mac costs $0.077 per runner-minute, with each job rounded up.
+Two 16-minute database jobs would cost $2.464, excluding other jobs and subscription costs.
+This is a budget example, not a runtime prediction. No larger-runner measurements exist here.
+Larger runners require an eligible organization or enterprise; this repository currently belongs to a personal account.
+They are paid even for public repositories. See [runner pricing](https://docs.github.com/en/billing/reference/actions-runner-pricing).
+Do not purchase or adopt one without evidence that it addresses this workload.
+
+A dedicated Mac could avoid hosted nested-VM variability, but it adds hardware, maintenance, isolation, and cleanup responsibilities.
+The local passing tests are not a hosted-runner benchmark or a reliability guarantee. No cost quote or fleet change is proposed.
+
+The preferred next direction is to finish and verify the separate Linux support before measuring complete database scenarios there.
+Keep macOS-specific coverage on macOS. Moving these tests now would skip guarded scenarios and falsely suggest success.
+Windows preview validation remains pending. This investigation changes no platform guards.
+
+
+### Reviewable correction and verification boundary
+
+Commit `06e2653` contains the observer correction and its regression.
+Local validation passed all 12 affected cases with real Docker and all type checks.
+The regression also passed on both hosted Linux diagnostic heads with identical test/helper files.
+The complete suite now contains the 163 original cases, three existing CI checks, and this regression: 167 cases.
+That inventory is not a claim that all 167 passed on the latest head.
+
+The documentation head uses `[skip ci]` to defer another expensive full PR run while diagnosis remains blocked.
+No workflow, deadline, coverage requirement, or release gate is weakened. The latest PR head is not fully qualified.
+GitHub leaves skipped required workflow checks pending; see [skip behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs).
+Before any eventual merge, use a normal head with complete checks and exclude skip directives from the merge commit.
+The failed cohort and final-branch results remain the qualification evidence.
