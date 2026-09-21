@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 
 const uiTokens = readFileSync(new URL('./ui-tokens.css', import.meta.url), 'utf8');
+// Embedded marks inherit the page theme; standalone SVGs follow the browser theme.
+export const brandMark = readFileSync(new URL('./previewhost.svg', import.meta.url), 'utf8').replace(/<style>[\s\S]*?<\/style>/, '');
 
 /** Shared presentation only. Each page retains its own authorization and state. */
 export const uiStyle = `
@@ -26,7 +28,7 @@ a { color:var(--t1); text-underline-offset:3px; }
 a:not([href]) { pointer-events:none; color:var(--t5); }
 header { display:flex; align-items:center; gap:12px; padding:0 20px; height:52px; min-height:52px; border-bottom:1px solid var(--border); }
 #theme[aria-pressed=true] { background:var(--sel); color:var(--t1); }
-.brand { border:0; padding:0; height:auto; color:var(--t1); font-size:14.5px; font-weight:600; letter-spacing:-.2px; background:none; }
+.brand { display:inline-flex; align-items:center; gap:8px; flex:none; border:0; padding:0; height:auto; color:var(--t1); font-size:14.5px; font-weight:600; letter-spacing:-.2px; background:none; }
 .slash { color:var(--border-2); }
 #crumb { color:var(--t4); font-size:13.5px; }
 header>button:not(.brand) { padding:0 10px; }

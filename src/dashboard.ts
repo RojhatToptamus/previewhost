@@ -240,7 +240,7 @@ export async function startDashboard(options: {
         if (req.headers.origin !== undefined && (req.headers.origin !== origin || count('origin') !== 1)) throw new PreviewError('UNAUTHORIZED', 'Use the dashboard origin.');
         res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
           'x-content-type-options': 'nosniff', 'cross-origin-resource-policy': 'same-origin',
-          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
+          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
         res.end(asset[0]); return;
       }
       const supplied = req.headers.authorization ?? '';

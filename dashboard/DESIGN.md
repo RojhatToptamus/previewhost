@@ -74,13 +74,17 @@ Use the existing outline icon set. Icons support labels; they do not decorate he
 
 Hover, focus, selection, and loading must not change control geometry. Keep motion brief and functional. Honor reduced-motion preferences; only animate progress while work is pending.
 
+Use a single 2px keyboard focus outline. Hover uses `--hover`; the selected navigation row uses `--sel`. Color feedback lasts 120ms; sidebar movement uses a 180ms ease-out transition.
+
 ## 4. Layout and navigation
 
 Keep one application shell. The sidebar owns preview navigation and Secret Manager. On narrow screens, use the existing Sheet; do not build a second navigation model.
 
 A preview has one persistent identity and action header, followed immediately by Activity, Logs, and Configuration tabs. Tab changes must not move the header or tabs. Content scrolls within its workspace.
 
-Align the header's sidebar trigger with the navigation icons below it. Use a 24px desktop content gutter and 16px narrow-screen gutter. Avoid breadcrumbs that only repeat the selected view.
+Keep the brand at the left of the sidebar header area and its toggle at the right edge. Keep the toggle available when the sidebar is collapsed. Use a 24px desktop content gutter and 16px narrow-screen gutter. Avoid breadcrumbs that only repeat the selected view.
+
+The expanded sidebar and its brand header share a surface and right boundary. Use 12px sidebar gutters, 4px between navigation rows, 16px before search, and 8px between search and its filter.
 
 A preview name opens its details with one click. Keep the worktree path adjacent so previews with similar names remain distinguishable.
 
