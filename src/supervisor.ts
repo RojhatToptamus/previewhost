@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import type { Readable } from 'node:stream';
+import { windowsProcessStart } from './windows.js';
 
 // Process-group and owner-IPC behavior derives from Task Monki (MIT); see NOTICE.
 
@@ -15,6 +16,7 @@ let launch: Launch | undefined;
 let target: ChildProcess | undefined;
 let committed = false;
 let stopping = false;
+let output: Promise<void>[] = [];
 const deadline = setTimeout(() => { void stop(); }, 5_000);
 
 process.on('message', (value: Record<string, unknown>) => {
@@ -33,7 +35,7 @@ process.on('message', (value: Record<string, unknown>) => {
     target = spawn(launch.command[0], launch.command.slice(1), {
       cwd: launch.cwd, env: launch.env, stdio: ['ignore', 'pipe', 'pipe'], detached: false,
     });
-    const output = [capture(target.stdout!, launch.redactions), capture(target.stderr!, launch.redactions)];
+    output = [capture(target.stdout!, launch.redactions), capture(target.stderr!, launch.redactions)];
     target.once('spawn', () => { void send({ type: 'started', pid: target!.pid }); });
     target.once('error', (error: NodeJS.ErrnoException) => {
       const code = error.code && /^[A-Z0-9_]{1,32}$/.test(error.code) ? error.code : 'UNKNOWN';
@@ -55,7 +57,7 @@ process.on('SIGINT', () => { void stop(); });
 process.on('SIGTERM', () => { void stop(); });
 process.on('uncaughtException', () => { void fail('The native supervisor encountered an internal error.'); });
 process.on('unhandledRejection', () => { void fail('The native supervisor encountered an internal error.'); });
-void send({ type: 'online' });
+void send({ type: 'online', ...(process.platform === 'win32' ? { started: windowsProcessStart() } : {}) });
 
 async function fail(message: string) {
   await send({ type: 'failure', message: message.slice(0, 1024) });
@@ -67,6 +69,11 @@ async function stop() {
   stopping = true;
   clearTimeout(deadline);
   if (!committed) { process.exit(0); return; }
+  if (process.platform === 'win32') {
+    target?.kill();
+    await Promise.race([Promise.all(output), new Promise(resolve => setTimeout(resolve, 250))]);
+    process.exit(0); return; // The owner then terminates and verifies the entire job.
+  }
   // The supervisor owns and remains the leader of this group until escalation.
   // It deliberately survives TERM long enough to send KILL to stubborn members.
   const killTimer = setTimeout(() => {

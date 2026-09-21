@@ -14,9 +14,9 @@ import type { PreviewSpec, PreviewStatus, RuntimeOptions } from './contracts.js'
 import { testKeystore } from './testSupport/keystore.js';
 
 type Spec = Extract<PreviewSpec, { type: 'environment' }>;
-const native = { skip: process.platform !== 'darwin', timeout: 30_000 };
+const native = { skip: process.platform === 'win32', timeout: 30_000 };
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
-const database = { skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000 };
+const database = { skip: process.platform === 'win32' || !dockerSocket, timeout: 120_000 };
 async function outcome(runtime: PreviewRuntime, started: PreviewStatus) {
   for (;;) {
     try {

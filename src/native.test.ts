@@ -9,7 +9,8 @@ import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { startNative, type NativeResource, type NativeCommandSpec as CommandSpec } from './native.js';
 
-const nativeTest = process.platform === 'darwin' ? test : test.skip;
+const nativeTest = test;
+const posixTest = process.platform !== 'win32' ? test : test.skip;
 const server = `
 import http from 'node:http';
 import fs from 'node:fs';
@@ -37,8 +38,7 @@ nativeTest('native argv/env and listener ownership work from a directory with sp
     const identity = JSON.parse(await readFile(path.join(root, 'identity.json'), 'utf8'));
     await resource.stop();
     await resource.stop();
-    assert.equal(present(identity.pid), false);
-    assert.equal(present(-identity.group), false);
+    await until(() => !present(identity.pid) && !present(-identity.group));
     await assert.rejects(fetch(`http://127.0.0.1:${resource.target.port}/`));
   } finally {
     if (previous === undefined) delete process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET;
@@ -62,7 +62,7 @@ nativeTest('cancellation before supervisor spawn creates no command and preserve
   } finally { await resource?.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
-nativeTest('cancellation stops a paused supervisor even when configure backpressures its IPC channel', async () => {
+posixTest('cancellation stops a paused supervisor even when configure backpressures its IPC channel', async () => {
   const root = await fixture(server);
   const controller = new AbortController();
   const originalFork = childProcess.fork;
@@ -94,7 +94,7 @@ nativeTest('cancellation stops a paused supervisor even when configure backpress
     await deadline(configureObserved, 2_000);
     controller.abort();
     await deadline(Promise.all([outcome, resource!.stop()]), 5_000);
-    assert.equal(present(-supervisor!.pid!), false);
+    await until(() => !present(-supervisor!.pid!));
     await assert.rejects(access(path.join(root, 'identity.json')), { code: 'ENOENT' });
   } finally {
     replacement.mock.restore(); syncBuiltinESMExports();
@@ -238,8 +238,7 @@ const timer = setInterval(() => { if (fs.existsSync('exit-now')) process.exit(0)
     await writeFile(path.join(root, 'exit-now'), 'yes');
     await deadline(resource.exited!, 2_000);
     await resource.stop();
-    assert.equal(present(descendant), false);
-    assert.equal(present(-group!), false);
+    await until(() => !present(descendant!) && !present(-group!));
   } finally {
     if (group) killKnownGroup(group);
     await resource?.stop(); await rm(root, { recursive: true, force: true });
@@ -282,15 +281,15 @@ nativeTest('unexpected supervisor death uses the recorded live command identity 
     process.kill(identity!.group, 'SIGKILL');
     await deadline(resource.exited!, 2_000);
     await resource.stop();
-    assert.equal(present(identity!.pid), false);
-    assert.equal(present(-identity!.group), false);
+    // Linux may report a terminated orphan until init has reaped it.
+    await until(() => !present(identity!.pid) && !present(-identity!.group));
   } finally {
     if (identity) killKnownGroup(identity.group);
     await resource?.stop(); await rm(root, { recursive: true, force: true });
   }
 });
 
-nativeTest('supervisor loss with unavailable target identity retains cleanup debt and permits a later absence check', async () => {
+posixTest('supervisor loss with unavailable target identity retains cleanup debt and permits a later absence check', async () => {
   const root = await fixture(`
 import fs from 'node:fs';
 fs.writeFileSync('identity.json', JSON.stringify({ pid: process.pid, group: process.ppid }));
@@ -334,7 +333,7 @@ setInterval(() => {}, 1000);
   }
 });
 
-nativeTest('leaderless survivors after guardian loss are refused rather than killed by a remembered group number', async () => {
+posixTest('leaderless survivors after guardian loss are refused rather than killed by a remembered group number', async () => {
   const root = await fixture(`
 import { spawn } from 'node:child_process';
 ${server}
@@ -426,6 +425,7 @@ async function untilFile(file: string): Promise<string> {
 }
 
 function present(pid: number): boolean {
+  if (process.platform === 'win32' && pid < 0) pid = -pid;
   try { process.kill(pid, 0); return true; }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
@@ -435,6 +435,7 @@ function present(pid: number): boolean {
 }
 
 function killKnownGroup(group: number) {
+  if (process.platform === 'win32') return; // The retained resource/job owns cleanup; never emulate a group with taskkill.
   if (!present(-group)) return;
   try { process.kill(-group, 'SIGKILL'); }
   catch (error) {

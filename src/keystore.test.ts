@@ -17,11 +17,12 @@ import { SecretSetup } from './secrets-setup.js';
 const password = 'FAKE_correct_password';
 const execute = promisify(execFile);
 async function fixture(t: TestContext) {
-  const directory = await mkdtemp(join(tmpdir(), 'previewhost-vault-'));
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-vault-'));
+  const directory = join(root, 'private');
   const stores: Keystore[] = [];
   t.mock.method(keychain, 'get', async () => undefined);
   const session = () => { const store = new Keystore(directory); stores.push(store); return store; };
-  t.after(async () => { stores.forEach(store => store.close()); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { stores.forEach(store => store.close()); await rm(root, { recursive: true, force: true }); });
   const store = session();
   await store.unlock({ password, create: true, confirmation: password });
   return { directory, store, session };

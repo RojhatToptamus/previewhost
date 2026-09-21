@@ -32,7 +32,7 @@ Control requests require a random bearer token, the exact Host header, and no
 Origin header. Preview listeners contain no control routes.
 Private secret forms use separate browser authorization, described below.
 
-The token file uses mode 0600 in an owner-only directory.
+On POSIX, the token file uses mode 0600 in an owner-only directory. Windows uses restricted ACLs on the directory and file.
 previewhost rejects unsafe permissions, wrong ownership, symlinks, and non-regular files.
 Anyone who can read the token can call every daemon operation.
 The token remains after shutdown so configured clients can reconnect.
@@ -105,7 +105,7 @@ Direct CLI/library file input retains the caller's filesystem authority.
 
 The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewhost/projects`.
 A SHA-256 digest of that path gives it a fixed-length filesystem address. It is not a configuration signature or permission grant.
-A permanent Darwin kernel lock prevents concurrent owners for one project. It is held through runtime cleanup.
+A permanent kernel lock prevents concurrent owners for one project. It is held through runtime cleanup.
 The private connection file contains endpoint, PID, project path, data directory, and any explicit Docker socket. It is published after listener readiness.
 Clients authenticate with the existing private token, then verify the responding project and requested launch options.
 The file cannot authorize a new owner or restore browser-added name grants.
@@ -145,7 +145,7 @@ Earlier runtime namespaces are not discovered or migrated. Follow the [reset ins
 
 ## Native processes
 
-macOS commands run in a separate process group with an IPC-connected supervisor.
+macOS and Linux commands run in a separate process group with an IPC-connected supervisor.
 Before execution, the runtime checks that group.
 After HTTP readiness, it checks the selected port's group ownership and loopback binding.
 A port number alone never authorizes process termination.
@@ -158,6 +158,10 @@ A command can escape its group through a new session.
 The supervisor does not provide a security sandbox.
 The listener check covers the selected preview port.
 It does not check every additional listener that application code opens.
+
+Windows uses one non-inheritable Job Object handle owned by the runtime. Assignment precedes application execution.
+Owner termination closes the handle and terminates job members. Normal stop terminates the job and checks its active-process count.
+Windows has no Unix TERM grace period. These Windows behaviors still require execution testing.
 
 ## Recovery
 
@@ -179,7 +183,7 @@ See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
 
 ## Database ownership and recovery
 
-Managed PostgreSQL and Redis require macOS and an unlocked keystore, a local Docker Engine, downloaded database images, and private data storage.
+Managed PostgreSQL and Redis require an unlocked keystore, a local Docker Engine, downloaded database images, and private data storage.
 Automatic project owners create their own storage directories. Manual daemons and embedded runtimes require an explicit data directory.
 See [database prerequisites](databases.md#prepare-docker).
 previewhost does not pull images, create networks, use remote Engines, or change Docker contexts.
@@ -274,7 +278,8 @@ AES-256-GCM authenticates the payload. Each write uses a fresh 12-byte nonce.
 Scrypt derives a 32-byte key from the password and a random 16-byte salt (`N=32768`, `r=8`, `p=1`).
 SQLite stores only the encrypted payload and its salt, nonce, and authentication tag.
 Its transactions serialize writers and recover interrupted commits. POSIX directories use mode 0700 and files use mode 0600.
-Windows uses the user's profile and its filesystem permissions.
+Windows validates the current owner and ACL. New private directories grant inherited access only to that user, SYSTEM, and Administrators.
+Existing broad ACLs and reparse points are rejected. Windows execution verification is still pending.
 
 Each owner and dashboard retains only its own unlock key. Each operation reads current stored values.
 Closing the session clears its key buffer. JavaScript strings and application processes prevent a promise of complete memory erasure.

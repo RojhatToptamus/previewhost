@@ -17,9 +17,9 @@ import { testKeystore } from './testSupport/keystore.js';
 import type { PreviewSpec } from './contracts.js';
 
 const execute = promisify(execFile);
-const mac = { skip: process.platform !== 'darwin' };
+const posix = { skip: process.platform === 'win32' };
 
-test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', mac, async t => {
+test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', posix, async t => {
   const fixture = await testKeystore(t);
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
   const tokenFile = join(fixture.directory, 'control/token');
@@ -55,7 +55,7 @@ test('entry removal preserves neighbors and refuses active, stale, and private-s
   } finally { await client.close(); await daemon.close(); }
 });
 
-test('an empty owner can clear canceled secret editing without deleting the saved reference', mac, async t => {
+test('an empty owner can clear canceled secret editing without deleting the saved reference', posix, async t => {
   const fixture = await testKeystore(t);
   await fixture.store.add('user', 'disposable/shared', 'FAKE');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['disposable/shared'], authorize: () => true });
@@ -76,7 +76,7 @@ test('an empty owner can clear canceled secret editing without deleting the save
   } finally { await client.close(); await daemon.close(); }
 });
 
-test('CLI manages a deleted source and removing the last entry retires only its idle owner', mac, async () => {
+test('CLI manages a deleted source and removing the last entry retires only its idle owner', posix, async () => {
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-deleted-source-')));
   const client = connectProject({ projectDirectory: project, allowExec: true });
   const cli = resolve('dist/cli.js');
@@ -112,7 +112,7 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
     }
     const records = await discoverProjectOwners(directory);
     assert.equal(records.length, 145);
-    if (process.platform === 'darwin') {
+    if (process.platform !== 'win32') {
       const unavailable = join(directory, records[0].id);
       await assert.rejects(removeOfflineProject(unavailable), { code: 'STALE_ATTEMPT' });
       await assert.rejects(deleteOfflineData(unavailable, 'app', {}), { code: 'STALE_ATTEMPT' });
@@ -138,7 +138,7 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 test('offline projects keep real PostgreSQL data discoverable and delete only explicitly confirmed resources', {
-  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000,
+  skip: process.platform === 'win32' || !dockerSocket, timeout: 60_000,
 }, async t => {
   const fixture = await testKeystore(t);
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-offline-project-')));
@@ -225,7 +225,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
 });
 
 
-test('stale removal checks process liveness, locks, exact records, and data metadata without stopping anything', mac, async () => {
+test('stale removal checks process liveness, locks, exact records, and data metadata without stopping anything', posix, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-stale-record-'));
   const projectDirectory = join(directory, 'removed-source');
   const recordDirectory = join(directory, createHash('sha256').update(projectDirectory).digest('hex'));

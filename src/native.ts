@@ -1,4 +1,4 @@
-import { fork, execFile, type ChildProcess } from 'node:child_process';
+import { fork, execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import net from 'node:net';
@@ -7,6 +7,8 @@ import type { CommandSpec } from './contracts.js';
 import type { Resource } from './resources.js';
 import { PreviewError, throwIfAborted } from './errors.js';
 import { validateEnvironmentSize } from './spec.js';
+import { requireSupportedPlatform } from './private-files.js';
+import { createWindowsJob, assertWindowsListener } from './windows.js';
 
 // Process-group and owner-IPC behavior derives from Task Monki (MIT); see NOTICE.
 
@@ -69,12 +71,13 @@ export async function runNativeJob(input: Omit<NativeInput, 'onResource'> & {
 }
 
 async function launchNative(input: NativeInput, job: boolean): Promise<NativeResource & { completion: Promise<{ code: number | null; signal: string | null }> }> {
-  if (process.platform !== 'darwin') {
-    throw new PreviewError('UNSUPPORTED_PLATFORM', 'Native commands are currently supported on macOS only.');
-  }
+  requireSupportedPlatform();
   throwIfAborted(input.signal);
   validateEnvironmentSize(input.spec.env);
-  await Promise.all(['/bin/ps', '/usr/sbin/lsof'].map((name) => access(name, constants.X_OK)));
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(input.spec.command[0])) {
+    throw new PreviewError('INVALID_INPUT', 'Windows batch files require an explicit cmd.exe command. Use node.exe with the script path to preserve literal arguments.');
+  }
+  if (process.platform !== 'win32') await Promise.all(['/bin/ps', lsofPath()].map((name) => access(name, constants.X_OK)));
   throwIfAborted(input.signal);
   const port = job ? 0 : await availablePort();
   throwIfAborted(input.signal);
@@ -83,6 +86,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   let supervisorIdentity: ProcessIdentity | undefined;
   let commandIdentity: ProcessIdentity | undefined;
   let group: number | undefined;
+  let windowsJob: ReturnType<typeof createWindowsJob> | undefined;
   let stopping = false;
   let stopped = false;
   let unexpectedError: Error | undefined;
@@ -101,7 +105,10 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     async verifyListener() {
       ensureStarting();
       if (!group) throw new PreviewError('START_FAILED', 'The native supervisor is no longer running.');
-      await assertOwnedListener(port, group);
+      if (process.platform === 'win32') {
+        if (!windowsJob) throw new PreviewError('START_FAILED', 'Windows process ownership is unavailable.');
+        assertWindowsListener(port, windowsJob);
+      } else await assertOwnedListener(port, group);
       ensureStarting();
     },
   };
@@ -135,6 +142,28 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
 
   async function stopOnce(): Promise<void> {
     if (!supervisor || !group) return;
+    if (process.platform === 'win32') {
+      if (windowsJob) {
+        if (supervisor.connected) {
+          void send(supervisor, { type: 'stop' }).catch(() => undefined);
+          const drainDeadline = performance.now() + 500;
+          while (supervisor.exitCode === null && supervisor.signalCode === null && performance.now() < drainDeadline) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+        }
+        await windowsJob.stop();
+      }
+      else if (supervisor.exitCode === null && supervisor.signalCode === null) {
+        // Before job assignment, no application can run. ChildProcess retains the exact Windows handle.
+        supervisor.kill();
+      }
+      const deadline = performance.now() + 3000;
+      while (supervisor.exitCode === null && supervisor.signalCode === null) {
+        if (performance.now() >= deadline) throw cleanupError(group);
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      return;
+    }
     // IPC is an exact live process handle; it never signals a reused PID.
     if (supervisor.connected) {
       // A blocked configure write must not postpone the cleanup deadline.
@@ -167,10 +196,10 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   try {
     ensureStarting();
     supervisor = fork(fileURLToPath(new URL('./supervisor.js', import.meta.url)), [], {
-      detached: true,
+      detached: process.platform !== 'win32',
       silent: true,
       execArgv: [],
-      env: {},
+      env: process.platform === 'win32' ? commandEnvironment({}, undefined, '') : {},
     });
     group = supervisor.pid;
     supervisor.stdout?.resume();
@@ -193,11 +222,16 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     supervisor.once('exit', (code, signal) => {
       if (!finished) recordUnexpected(new PreviewError('START_FAILED', `Native supervisor exited (${code ?? signal ?? 'unknown'}).`));
     });
-    await waitMessage(supervisor, 'online', input.signal);
+    const online = await waitMessage(supervisor, 'online', input.signal);
     ensureStarting();
-    supervisorIdentity = group ? await inspectProcess(group) : undefined;
-    if (!supervisorIdentity || supervisorIdentity.group !== group) {
-      throw new PreviewError('START_FAILED', 'The native supervisor did not establish its owned process group.');
+    if (process.platform === 'win32') {
+      if (!group || typeof online.started !== 'string') throw new PreviewError('START_FAILED', 'Windows supervisor identity is missing.');
+      windowsJob = createWindowsJob(group, online.started);
+    } else {
+      supervisorIdentity = group ? await inspectProcess(group) : undefined;
+      if (!supervisorIdentity || supervisorIdentity.group !== group) {
+        throw new PreviewError('START_FAILED', 'The native supervisor did not establish its owned process group.');
+      }
     }
     ensureStarting();
     const argv = job ? input.spec.command : input.spec.command.map((arg) => arg.replaceAll('{port}', String(port)));
@@ -218,7 +252,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     ensureStarting();
     if (typeof started.pid !== 'number') throw new PreviewError('START_FAILED', 'Native command identity is missing.');
     // The supervisor's verified process group owns even jobs that exit before ps can observe them.
-    if (job) return resource;
+    if (job || windowsJob) return resource;
     commandIdentity = await inspectProcess(started.pid);
     if (!commandIdentity || commandIdentity.group !== group) {
       throw new PreviewError('START_FAILED', 'Native command exited before its process identity could be verified.');
@@ -235,10 +269,15 @@ function cleanupError(group: number) {
   return new PreviewError('CLEANUP_INCOMPLETE', `Could not verify cleanup of native process group ${group}. Inspect its processes manually; previewhost will not signal an unknown owner.`);
 }
 
-function commandEnvironment(values: Record<string, string>, port: number | undefined, url: string): NodeJS.ProcessEnv {
+export function commandEnvironment(values: Record<string, string>, port: number | undefined, url: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TERM']) {
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TERM', ...(process.platform === 'win32' ? ['SYSTEMROOT', 'WINDIR', 'USERPROFILE', 'COMSPEC', 'PATHEXT'] : [])]) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  if (process.platform === 'win32') {
+    const keys = Object.keys(values).map(key => key.toUpperCase());
+    if (new Set(keys).size !== keys.length) throw new PreviewError('INVALID_INPUT', 'Windows environment names must be unique without regard to case.');
+    values = Object.fromEntries(Object.entries(values).map(([key, value]) => [key.toUpperCase(), value]));
   }
   return { ...env, ...values, ...(port === undefined ? {} : { PORT: String(port), HOST: '127.0.0.1' }), PREVIEW_URL: url };
 }
@@ -298,7 +337,7 @@ function sameIdentity(actual: ProcessIdentity, expected: ProcessIdentity): boole
 
 async function assertOwnedListener(port: number, group: number): Promise<void> {
   let output: string;
-  try { output = await execute('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn']); }
+  try { output = await execute(lsofPath(), ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn']); }
   catch { throw new PreviewError('START_FAILED', `No owned listener was observed on native port ${port}.`); }
   let pid: number | undefined;
   let listeners = 0;
@@ -322,7 +361,18 @@ function execute(executable: string, args: string[]): Promise<string> {
 }
 
 function groupExists(group: number): boolean {
-  try { process.kill(-group, 0); return true; }
+  try {
+    process.kill(-group, 0);
+    if (process.platform !== 'linux') return true;
+    // A zombie cannot execute or hold a listener. Linux containers can retain unreaped orphans.
+    const rows = execFileSync('/bin/ps', ['-eo', 'pgid=,stat='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024, env: { LC_ALL: 'C' } });
+    const members = rows.trim().split('\n').map(row => {
+      const [id, state] = row.trim().split(/\s+/);
+      if (!/^\d+$/.test(id) || !state) throw cleanupError(group);
+      return { group: Number(id), state };
+    });
+    return members.some(member => member.group === group && !/^[ZX]/.test(member.state));
+  }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
     if ((error as NodeJS.ErrnoException).code === 'EPERM') return true;
@@ -338,3 +388,5 @@ async function waitForGroupAbsence(group: number, timeoutMs: number): Promise<bo
   } while (performance.now() < deadline);
   return !groupExists(group);
 }
+
+function lsofPath(): string { return process.platform === 'darwin' ? '/usr/sbin/lsof' : '/usr/bin/lsof'; }

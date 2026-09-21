@@ -15,7 +15,7 @@ Two external entries with the same connection URL still share data.
 
 ## Prepare Docker
 
-Managed databases require macOS, an unlocked keystore, and a running local Docker Engine.
+Managed databases require an unlocked keystore, private local storage, and a local Docker Engine. Windows retained-data behavior remains unverified.
 Download the images for the database types you intend to use:
 
 ```sh
@@ -24,14 +24,16 @@ docker pull redis:7-alpine
 ```
 
 Previewhost does not pull missing images automatically.
-Docker Desktop uses `~/.docker/run/docker.sock` by default.
+The default endpoint is `~/.docker/run/docker.sock` on macOS, `/var/run/docker.sock` on Linux, and `\\.\pipe\docker_engine` on Windows.
 For another local Engine, supply its actual socket path:
 
 ```sh
 previewhost start --allow-exec --docker-socket /absolute/path/to/docker.sock
 ```
 
-Replace the path before use. A Docker CLI context does not configure Previewhost.
+Replace the path before use. Local `unix://` and `npipe:////./pipe/` forms are also accepted.
+Docker CLI contexts and `DOCKER_HOST` do not configure Previewhost. Rootless Docker requires its explicit local socket.
+Remote Docker endpoints remain unsupported. Windows requires a Linux-container backend for these images.
 For MCP, append the socket flag to the registration arguments.
 If an owner already uses different options, [shut it down before changing them](troubleshooting.md#the-client-cannot-find-the-daemon).
 

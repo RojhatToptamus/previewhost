@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { limits, type ErrorCode, type PreviewApi, type SecretSetupApi, type PreviewManagementApi } from './contracts.js';
 import { PreviewError } from './errors.js';
+import { isPrivate } from './private-files.js';
 import type { ProjectOwnerInfo } from './project.js';
 
 export interface ClientOptions { endpoint?: string; tokenFile?: string }
@@ -14,8 +15,7 @@ export const defaultTokenFile = (): string => join(homedir(), '.local', 'share',
 /** Shared by the local transport's reader and creator, not a permission grant. */
 export async function checkTokenDirectory(path: string): Promise<void> {
   const info = await lstat(dirname(path));
-  if (!info.isDirectory() || (info.mode & 0o077) !== 0 ||
-      (process.getuid && info.uid !== process.getuid())) {
+  if (!info.isDirectory() || !isPrivate(dirname(path), info)) {
     throw new PreviewError('UNAUTHORIZED', 'The token directory must be owned by this user, private (0700), and not a symlink.');
   }
 }
@@ -23,11 +23,11 @@ export async function checkTokenDirectory(path: string): Promise<void> {
 export async function readToken(path: string): Promise<string> {
   try {
     await checkTokenDirectory(path);
+    if (!(await lstat(path)).isFile()) throw new PreviewError('UNAUTHORIZED', 'The token must be a regular file.');
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const info = await handle.stat();
-      if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size > 65 ||
-          (process.getuid && info.uid !== process.getuid())) {
+      if (!info.isFile() || info.nlink !== 1 || !isPrivate(path, info) || info.size > 65) {
         throw new PreviewError('UNAUTHORIZED', 'The token file must be a private (0600) regular file owned by this user.');
       }
       const buffer = Buffer.alloc(66);

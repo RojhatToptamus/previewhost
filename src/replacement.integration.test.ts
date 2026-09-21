@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { createPreviewRuntime } from './index.js';
 
 const execute = promisify(execFile);
-const nativeTest = process.platform === 'darwin' ? test : test.skip;
+const nativeTest = process.platform !== 'win32' ? test : test.skip;
 
 nativeTest('cleanup failure after replacement cutover preserves the new route and retains old debt until stop can verify absence', { timeout: 20_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost replacement '));
@@ -166,7 +166,7 @@ async function until(check: () => boolean | Promise<boolean>): Promise<void> {
 async function ownedListenerPorts(): Promise<Set<number>> {
   let stdout: string;
   try {
-    ({ stdout } = await execute('/usr/sbin/lsof', ['-nP', '-a', '-p', String(process.pid), '-iTCP', '-sTCP:LISTEN', '-Fn'], { timeout: 2_000 }));
+    ({ stdout } = await execute(process.platform === 'darwin' ? '/usr/sbin/lsof' : '/usr/bin/lsof', ['-nP', '-a', '-p', String(process.pid), '-iTCP', '-sTCP:LISTEN', '-Fn'], { timeout: 2_000 }));
   } catch (error) {
     if ((error as { code?: number; stdout?: string }).code === 1 && !(error as { stdout?: string }).stdout?.trim()) return new Set();
     throw error;

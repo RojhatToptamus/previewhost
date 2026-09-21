@@ -154,7 +154,7 @@ Disable automatic port fallback. A different port fails the ownership check.
 
 For `EXECUTION_DENIED`, review the command before a daemon restart with `--allow-exec`.
 This permission also permits managed databases and explicit data deletion/recovery.
-A client cannot grant it. Native command support requires macOS.
+A client cannot grant it. Check the [platform requirements](installation.md#requirements) before running native commands.
 
 A CLI wait timeout leaves startup active.
 Read status before another start.

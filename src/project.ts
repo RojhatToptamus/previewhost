@@ -1,7 +1,7 @@
 import { execFile, fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, opendir, rename, unlink, type FileHandle } from 'node:fs/promises';
+import { lstat, open, opendir, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -14,6 +14,8 @@ import { PreviewError, failure } from './errors.js';
 import { canonicalDirectory, isWithin } from './spec.js';
 import { createDataOwner, withRetainedData } from './data.js';
 import { Keystore } from './keystore.js';
+import { isPrivate, makePrivateDirectory, openOwnerLock, requireSupportedPlatform } from './private-files.js';
+import { normalizeDockerEndpoint } from './docker.js';
 
 export interface ProjectOptions extends ClientOptions {
   projectDirectory?: string;
@@ -98,17 +100,10 @@ export async function managementProject(explicit?: string): Promise<string> {
 
 /** The same permanent lock serializes owner startup and offline management. Never unlink it. */
 export async function lockProject(directory: string): Promise<FileHandle> {
-  if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Automatic project management currently requires macOS.');
-  await mkdir(directory, { recursive: true, mode: 0o700 });
+  makePrivateDirectory(directory);
   await checkTokenDirectory(join(directory, 'token'));
-  let lock: FileHandle | undefined;
-  try {
-    lock = await open(join(directory, '.lock'), constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK | 0x20, 0o600);
-    const stat = await lock.stat();
-    if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== process.getuid!() || (stat.mode & 0o077) !== 0) throw new PreviewError('UNAUTHORIZED', 'The project lock is unsafe.');
-    return lock;
-  } catch (error) {
-    await lock?.close();
+  try { return await openOwnerLock(join(directory, '.lock')); }
+  catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EAGAIN') throw new PreviewError('BUSY', 'This project has a running owner or another operation in progress.');
     throw error;
   }
@@ -151,7 +146,7 @@ export async function readProjectRecord(directory: string): Promise<ProjectRecor
     file = await open(join(directory, 'connection.json'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const info = await file.stat();
     if (info.nlink === 0) return undefined; // Clean shutdown can unlink an already-open record.
-    if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid!() || (info.mode & 0o077) !== 0 || info.size > 16_384) throw new Error();
+    if (!info.isFile() || info.nlink !== 1 || !isPrivate(join(directory, 'connection.json'), info) || info.size > 16_384) throw new Error();
     const buffer = Buffer.alloc(16_385);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     if (bytesRead !== info.size) throw new Error();
@@ -261,7 +256,7 @@ async function launchOptions(options: ProjectOptions, project: string): Promise<
     allowedRoots: [...new Set(await Promise.all((options.allowedRoots ?? [project]).map(root => canonicalDirectory(resolve(root)))))].sort(),
     allowExec: options.allowExec ?? false, inputKeys, secretIds: [...new Set(options.secretIds ?? [])].sort(),
     dataDirectory,
-    ...(dockerSocket ? { dockerSocket: resolve(dockerSocket) } : {}),
+    ...(dockerSocket ? { dockerSocket: normalizeDockerEndpoint(dockerSocket) } : {}),
   };
   if (!ownerInfoSchema.safeParse(info).success) {
     throw new PreviewError('INVALID_INPUT', 'Invalid project launch options. Supply valid roots, input keys and secret names.');
@@ -275,7 +270,7 @@ async function launchOptions(options: ProjectOptions, project: string): Promise<
 }
 
 function startOwner(launch: ProjectLaunch): Promise<void> {
-  if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Automatic project owners currently require macOS. Use an explicit daemon connection on other platforms.');
+  requireSupportedPlatform();
   return new Promise((done, reject) => {
     const child = fork(fileURLToPath(new URL('./owner-process.js', import.meta.url)), [], {
       detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [],
@@ -347,7 +342,7 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
       if (options.inputKeys) expected.inputKeys = [...new Set(options.inputKeys)].sort();
       if (options.secretIds) expected.secretIds = [...new Set(options.secretIds)].sort();
       if (options.dataDirectory) expected.dataDirectory = resolve(options.dataDirectory);
-      if (options.dockerSocket) expected.dockerSocket = resolve(options.dockerSocket);
+      if (options.dockerSocket) expected.dockerSocket = normalizeDockerEndpoint(options.dockerSocket);
       for (const key of Object.keys(expected) as Array<keyof ProjectOwnerInfo>) {
         if (!isDeepStrictEqual(expected[key], actual.data[key])) throw new PreviewError('INVALID_INPUT', `The owner for ${root} has different ${key}. Its permissions were not changed. To apply new options, explicitly shut down this project using CLI shutdown with --project set to that path and no launch overrides. This stops only that owner’s previews and ends its dynamic secret approvals; stored values and managed data remain. Other project owners are unaffected.`);
       }

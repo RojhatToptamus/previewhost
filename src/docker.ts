@@ -1,7 +1,26 @@
 import http from 'node:http';
 import type { Socket } from 'node:net';
 import { realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join, posix } from 'node:path';
 import { PreviewError, throwIfAborted } from './errors.js';
+
+export function defaultDockerEndpoint(): string {
+  if (process.platform === 'win32') return String.raw`\\.\pipe\docker_engine`;
+  return process.platform === 'darwin' ? join(homedir(), '.docker/run/docker.sock') : '/var/run/docker.sock';
+}
+
+/** Only local transports. Explicit paths win; ambient Docker contexts never retarget retained data. */
+export function normalizeDockerEndpoint(value: string, platform = process.platform): string {
+  if (platform === 'win32') {
+    const pipe = value.replace(/^npipe:\/\/\/\/\.\/pipe\//i, '\\\\.\\pipe\\');
+    if (/^\\\\\.\\pipe\\[a-z0-9_.-]+$/i.test(pipe)) return pipe.toLowerCase();
+  } else {
+    const path = value.startsWith('unix://') ? value.slice(7) : value;
+    if (!path.includes('://') && !path.startsWith('\\') && (!value.startsWith('unix://') || posix.isAbsolute(path))) return posix.resolve(path);
+  }
+  throw new PreviewError('INVALID_INPUT', 'Select a local Docker Unix socket or Windows named pipe. Remote Docker endpoints are not supported.');
+}
 
 export interface DockerResponse { status: number; body: unknown }
 export interface DockerAttach { send(value: string): void; close(): Promise<void> }
@@ -11,8 +30,10 @@ export class Docker {
   constructor(readonly socket: string) {}
 
   static async connect(socket: string): Promise<Docker> {
+    const endpoint = normalizeDockerEndpoint(socket);
+    if (process.platform === 'win32') return new Docker(endpoint);
     try {
-      const canonical = await realpath(socket);
+      const canonical = await realpath(endpoint);
       if (!(await stat(canonical)).isSocket()) throw new Error();
       return new Docker(canonical);
     } catch {

@@ -15,7 +15,7 @@ import { testKeystore } from './testSupport/keystore.js';
 import { createPreviewRuntime } from './runtime.js';
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
-const enabled = { skip: process.platform !== 'darwin' || !dockerSocket, timeout: 90_000 };
+const enabled = { skip: process.platform === 'win32' || !dockerSocket, timeout: 90_000 };
 const specs = { database: { type: 'postgres' as const }, cache: { type: 'redis' as const } };
 const signal = () => new AbortController().signal;
 

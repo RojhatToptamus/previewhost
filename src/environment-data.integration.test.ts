@@ -15,9 +15,9 @@ import type { PreviewSpec, PreviewStatus } from './contracts.js';
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 beforeEach(async (t) => {
   assert.ok('mock' in t, 'The isolated keystore must belong to a test context.');
-  if (process.platform === 'darwin' && dockerSocket) await testKeystore(t);
+  if (process.platform !== 'win32' && dockerSocket) await testKeystore(t);
 });
-const enabled = { skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000 };
+const enabled = { skip: process.platform === 'win32' || !dockerSocket, timeout: 60_000 };
 const signal = () => new AbortController().signal;
 
 async function complete(runtime: PreviewRuntime, value: PreviewStatus) {

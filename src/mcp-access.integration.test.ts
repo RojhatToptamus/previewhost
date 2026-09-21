@@ -8,7 +8,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { connectProject, projectOwnerDirectory } from './project.js';
 import type { AttemptResult, PreviewStatus } from './contracts.js';
 
-for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global project approval and isolation over real stdio (${version})`, { skip: process.platform !== 'darwin', timeout: 60_000 }, async t => {
+for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global project approval and isolation over real stdio (${version})`, { skip: process.platform === 'win32', timeout: 60_000 }, async t => {
   const projects = await Promise.all([1, 2, 3].map(async () => realpath(await mkdtemp(join(tmpdir(), 'previewhost-access-')))));
   const [front, other, backend] = projects;
   for (const [i, project] of projects.entries()) await writeFile(join(project, 'index.html'), `project ${i}`);

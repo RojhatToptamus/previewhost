@@ -174,7 +174,7 @@ test('a hung owner is bounded without blocking healthy-owner results', { timeout
   assert.ok(performance.now() - start < 6000);
 });
 
-test('Secret Manager updates existing references through the authenticated dashboard without returning values or changing approvals', { skip: process.platform !== 'darwin', timeout: 15_000 }, async t => {
+test('Secret Manager updates existing references through the authenticated dashboard without returning values or changing approvals', { skip: process.platform === 'win32', timeout: 15_000 }, async t => {
   const { testKeystore } = await import('./testSupport/keystore.js');
   const fixture = await testKeystore(t);
   const opened: string[] = [];

@@ -16,6 +16,48 @@ permissions:
   contents: read
 
 jobs:
+  platforms:
+    name: Verify ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.0
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx tsc -p tsconfig.test.json
+      - name: Linux dependencies and databases
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y procps lsof
+          docker pull postgres:17-alpine
+          docker pull redis:7-alpine
+          echo 'PREVIEWHOST_TEST_DOCKER_SOCKET=/var/run/docker.sock' >> "$GITHUB_ENV"
+      - name: Linux regression suite
+        if: runner.os == 'Linux'
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/*.test.js
+      - name: Windows kernel ownership, native commands, ACLs, and named-pipe transport
+        if: runner.os == 'Windows'
+        # Linux-container database tests require a separate Windows Docker Desktop host.
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js
+      - name: Installed package
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/platform-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/platform-package"
+          npm run check:package -- "$RUNNER_TEMP"/platform-package/*.tgz
+
   docs:
     name: Verify documentation
     runs-on: ubuntu-latest

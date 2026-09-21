@@ -2,9 +2,10 @@
 
 ## Set up development
 
-Use Node.js 22.23 or later. Native tests need macOS with `ps` and `lsof`.
+Use Node.js 22.23 or later. POSIX native tests need `ps` and `lsof`.
+On Debian or Ubuntu, install `procps` and `lsof` before the suite.
 The tests use temporary source directories, loopback ports, and real child processes.
-The native Keychain build requires Xcode Command Line Tools (`clang` and `codesign`).
+On macOS, the native Keychain build requires Xcode Command Line Tools (`clang` and `codesign`).
 Terminal input tests use `/usr/bin/python3` to create and close temporary pseudo-terminals.
 
 From the repository directory, run:
@@ -18,7 +19,8 @@ npm pack --dry-run
 ```
 
 `npm test` builds the package and runs the compiled Node tests one at a time.
-Native tests skip on unsupported platforms. A skipped test does not establish platform support.
+POSIX fixtures run on macOS and Linux. Windows runs the portable native and platform suites defined in CI.
+Windows full-workflow and retained-data qualification remains incomplete. A skipped test does not establish platform support.
 Some sandbox environments require explicit permission for local listeners and
 process inspection.
 
@@ -30,7 +32,7 @@ docker pull postgres:17-alpine
 docker pull redis:7-alpine
 ```
 
-Select your local Docker Unix socket. The command below uses the Docker Desktop default:
+Select your local Docker Unix socket (`/var/run/docker.sock` on standard Linux installations). The command below uses the Docker Desktop default:
 
 ```sh
 PREVIEWHOST_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify

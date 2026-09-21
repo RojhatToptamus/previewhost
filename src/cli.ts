@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { normalizeDockerEndpoint } from './docker.js';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { connectPreviewDaemon, defaultTokenFile } from './client.js';
@@ -181,7 +182,7 @@ async function main(): Promise<void> {
       inputs[key] = value;
     }
     const dataDirectory = values['data-dir'] ? resolve(values['data-dir']) : undefined;
-    const dockerSocket = values['docker-socket'] ? resolve(values['docker-socket']) : undefined;
+    const dockerSocket = values['docker-socket'] ? normalizeDockerEndpoint(values['docker-socket']) : undefined;
     if (dockerSocket && !dataDirectory) throw new PreviewError('INVALID_INPUT', '--docker-socket requires --data-dir.');
     const runtime = await createPreviewRuntime({ allowedRoots, inputs, secretIds: values.secret, dataDirectory, dockerSocket,
       ...(values['allow-exec'] ? { authorize: () => true } : {}),

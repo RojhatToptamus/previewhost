@@ -13,6 +13,11 @@ const directory = await realpath(await mkdtemp(join(tmpdir(), 'previewhost packa
 assert(relative(repository, directory).startsWith('..'), 'The consumer must be outside the source repository.');
 console.log(`Checking ${candidate} in ${directory}`);
 function run(command, args) {
+  if (command === 'npm' && process.platform === 'win32') {
+    const npm = process.env.npm_execpath;
+    if (!npm) throw new Error('Run package verification through npm run check:package.');
+    args = [npm, ...args]; command = process.execPath;
+  }
   execFileSync(command, args, { cwd: directory, stdio: 'inherit', timeout: 180_000 });
 }
 let passed = false;
