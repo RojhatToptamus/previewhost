@@ -80,14 +80,19 @@ export class Docker {
       };
       const timer = options.timeoutMs === 0 ? undefined : setTimeout(fail, options.timeoutMs ?? 15_000);
       options.signal?.addEventListener('abort', abort, { once: true });
-      req.once('error', fail);
+      req.once('error', cause => {
+        fail(cause);
+        // A rejected createConnection emits error without assigning a socket or emitting close.
+        if (!req.socket) finish();
+      });
       req.once('upgrade', (_res, socket) => { socket.destroy(); fail(); });
-      req.once('close', () => {
+      const finish = () => {
         clearTimeout(timer);
         options.signal?.removeEventListener('abort', abort);
         if (error || !result) reject(error ?? new PreviewError('CLEANUP_INCOMPLETE', 'The local Docker response was incomplete.'));
         else resolve(result);
-      });
+      };
+      req.once('close', finish);
       req.end(encoded);
     });
   }

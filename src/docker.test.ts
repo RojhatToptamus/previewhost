@@ -8,6 +8,17 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import koffi from 'koffi';
 import { Docker, normalizeDockerEndpoint } from './docker.js';
+import { PreviewError } from './errors.js';
+
+test('Docker connection rejection settles even when HTTP never assigns a socket', { timeout: 2000 }, async t => {
+  const request = http.request;
+  t.mock.method(http, 'request', (options: http.RequestOptions, callback?: (res: http.IncomingMessage) => void) => request({
+    ...options, agent: undefined, createConnection() { throw new PreviewError('UNAUTHORIZED', 'Rejected connected pipe.'); },
+  }, callback));
+  const docker = new Docker('unused');
+  await assert.rejects(docker.request('POST', '/containers/create', { marker: 'DUMMY' }), { code: 'UNAUTHORIZED' });
+  await assert.rejects(docker.attach('fixture'), { code: 'UNAUTHORIZED' });
+});
 
 test('Docker endpoints accept only local transports and normalize pipe aliases', () => {
   const pipe = String.raw`\\.\pipe\docker_engine`;
@@ -47,7 +58,7 @@ test('Docker HTTP and attach share the local socket or named-pipe transport', as
   await stream.close();
 });
 
-if (process.platform === 'win32') test('Docker checks each connected pipe before HTTP bodies or attach input', async t => {
+if (process.platform === 'win32') test('Docker checks each connected pipe before HTTP bodies or attach input', { timeout: 5000 }, async t => {
   const endpoint = `\\\\.\\pipe\\previewhost-${randomUUID()}`;
   let requests = 0;
   let bytes = 0;
