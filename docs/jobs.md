@@ -1,6 +1,6 @@
 # Services and jobs
 
-An environment starts related services and setup jobs in dependency order.
+Run migrations and seed scripts before your app starts. Set the order in which services and jobs run.
 
 ## Define services and jobs
 

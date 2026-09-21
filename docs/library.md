@@ -1,6 +1,6 @@
 # Node.js library
 
-Run Previewhost inside a Node.js program. Your program owns the runtime and stops its previews when it closes the runtime.
+Serve a local page, check its response, and stop the preview from a Node.js program.
 
 ## Install and prepare a page
 

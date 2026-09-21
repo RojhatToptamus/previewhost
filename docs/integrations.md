@@ -1,6 +1,6 @@
 # Integrations
 
-Use MCP for a coding client, or configure an application's development server to run behind Previewhost's local URL.
+Configure Vite, Next.js, or a Python server for Previewhost. Check setup notes and tested behavior for coding agents.
 
 ## Connect an MCP client
 

@@ -1,6 +1,6 @@
 # Databases
 
-Use managed PostgreSQL or Redis for separate preview data. Connect an existing local database when another tool owns its lifecycle.
+Add PostgreSQL or Redis to a preview. Connect your app, keep data between runs, or delete it when finished.
 
 ## Choose who owns the data
 

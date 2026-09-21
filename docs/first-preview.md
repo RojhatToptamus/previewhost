@@ -1,6 +1,6 @@
 # First preview with the CLI
 
-Run a frontend that requests a message from a backend. Previewhost supplies both ports and connects the two services.
+Start a frontend and API from your terminal. Open the local URL, read logs, update the app, and stop it.
 
 ## Create the example
 

@@ -1,6 +1,8 @@
 # API and CLI reference
 
-Look up runtime methods, spec fields, CLI flags, and MCP tool arguments. For a complete workflow, start with [MCP](mcp.md), [CLI](first-preview.md), or the [library](library.md).
+Find configuration fields, CLI commands, MCP tool arguments, and Node.js API methods.
+
+For setup instructions, see [MCP setup](mcp.md), [CLI quickstart](first-preview.md), or the [Node.js library](library.md).
 
 ## Runtime and client
 

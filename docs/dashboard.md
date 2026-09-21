@@ -1,6 +1,6 @@
 # Dashboard
 
-Inspect local previews, manage retained database data, and diagnose a failed start or update.
+Check running previews, read service logs, and stop or update an app from the browser.
 
 ## Open the dashboard
 

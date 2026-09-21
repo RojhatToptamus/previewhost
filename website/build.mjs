@@ -12,7 +12,7 @@ const absolute = (path) => url ? new URL(path, url).href : path;
 function pageHead(page) {
   const canonical = absolute(pagePath(page.id, base));
   const image = absolute(`${base}social-card.png`);
-  const imageAlt = 'Previewhost documentation. Local application previews with MCP, CLI, or the Node.js library.';
+  const imageAlt = 'Previewhost documentation. Local application previews. Start your app and its services. Open a local URL.';
   const meta = (name, value, attribute = 'name') => `<meta ${attribute}="${name}" content="${escapeHtml(value)}" />`;
   const tags = [
     meta('robots', url ? 'index, follow, max-image-preview:large' : 'noindex, nofollow'),
@@ -66,7 +66,7 @@ try {
   }
   const index = [
     '# Previewhost', '', `> ${pages[0].description}`, '',
-    'Choose the MCP, CLI, or Node.js library guide for your workflow. The configuration guide explains preview.yaml.', '',
+    'For coding agents, start with MCP setup. For terminal commands, use CLI quickstart. For a Node.js program, use the library guide.', '',
   ];
   for (const group of [...new Set(pages.map((page) => page.group))]) {
     index.push(`## ${group}`, '');

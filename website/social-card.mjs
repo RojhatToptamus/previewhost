@@ -17,7 +17,7 @@ try {
     p { margin: 0; color: #52525b; font-size: 30px; }
     footer { margin-top: 62px; padding-top: 24px; border-top: 1px solid #d4d4d8; font-size: 22px; color: #52525b; }
   </style><body><header><img src="data:image/svg+xml;base64,${logo.toString('base64')}" alt="">Previewhost</header>
-    <h1>Local application previews</h1><p>Run previews with MCP, the CLI, or the Node.js library.</p>
+    <h1>Local application previews</h1><p>Start your app and its services. Open a local URL.</p>
     <footer>Documentation</footer></body></html>`);
   await page.evaluate(() => document.fonts.ready);
   await page.locator('img').evaluate(image => image.decode());

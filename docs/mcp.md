@@ -1,6 +1,6 @@
 # MCP setup
 
-Register Previewhost with your coding client so an agent can start, inspect, replace, and stop local previews across projects.
+Connect your coding agent to Previewhost so it can start your app, read logs, and stop the preview.
 
 ## Register a client
 

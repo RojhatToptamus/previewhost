@@ -1,8 +1,6 @@
 # Secrets
 
-Store credentials in an encrypted keystore and bind them to applications by name.
-
-Private setup handles access approval, password unlock, and missing values outside the agent conversation.
+Store API keys and passwords outside preview.yaml. Approve access and enter secret values in a private browser form.
 
 ## Declare references
 

@@ -1,6 +1,6 @@
 # Ownership, security, and recovery
 
-Previewhost controls local processes and data with your user permissions. These boundaries explain what it owns, what it can access, and how cleanup works.
+Application commands run with your user permissions, without a sandbox. Stopping a preview ends its processes but keeps managed database data.
 
 ## Ownership
 

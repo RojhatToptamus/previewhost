@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Resolve Previewhost installation, startup, routing, database, and secret access errors. Recover an owner or inspect a failed preview.
+Fix missing commands, failed starts, broken connections, and a locked keystore. Check logs and recover previews after an error.
 
 Commands on this page use `previewhost` from PATH.
 For a local installation, use `./node_modules/.bin/previewhost` from your application directory.

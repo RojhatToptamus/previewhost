@@ -1,6 +1,6 @@
 # Worktrees
 
-Run separate previews from existing Git worktrees. Each worktree gets its own automatic owner, service ports, and managed database data.
+Run previews from several Git worktrees at once, with separate ports and managed databases for each worktree.
 
 ## Select a worktree
 

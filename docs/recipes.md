@@ -1,6 +1,6 @@
 # Write preview.yaml
 
-Describe your application's commands, readiness checks, and service connections in one file. The CLI and MCP can reuse it for each preview.
+Write preview.yaml to define your app's startup commands, service connections, and readiness checks.
 
 ## Choose an input
 

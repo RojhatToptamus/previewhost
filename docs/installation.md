@@ -1,6 +1,6 @@
 # Installation
 
-Install the CLI for terminal and MCP use, or add Previewhost to a Node.js project for library imports.
+Install Previewhost with npm. Check the Node.js, macOS, and Docker requirements for the features you need.
 
 ## Requirements
 

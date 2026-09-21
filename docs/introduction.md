@@ -1,6 +1,6 @@
 # Introduction
 
-Previewhost runs local previews of your application and its services. Use a coding agent, the CLI, or the Node.js library to control them.
+Previewhost starts your app and its services on your machine, assigns local URLs, and keeps previews from different Git worktrees separate.
 
 ## Choose your starting point
 
