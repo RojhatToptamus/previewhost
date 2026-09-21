@@ -109,9 +109,13 @@ if (process.platform === 'win32') test('Windows rejects non-inheritable private 
   function directory(name: string, inherited: boolean) {
     const path = join(root, name);
     makePrivateDirectory(path);
+    execFileSync('icacls.exe', [path, '/remove:g', `*${sid}`], { timeout: 10_000 });
     execFileSync('icacls.exe', [path, '/grant:r', `*${sid}:${inherited ? '(CI)(M)' : '(F)'}`], { timeout: 10_000 });
     if (inherited) execFileSync('icacls.exe', [path, '/grant', `*${sid}:(OI)(IO)(M)`], { timeout: 10_000 });
     execFileSync('icacls.exe', [path, '/remove:g', '*S-1-5-18', '*S-1-5-32-544'], { timeout: 10_000 });
+    const acl = execFileSync('icacls.exe', [path], { encoding: 'utf8', timeout: 10_000 });
+    if (inherited) { assert.match(acl, /\(CI\)\(M\)/); assert.match(acl, /\(OI\)\(IO\)\(M\)/); }
+    else assert.doesNotMatch(acl, /\((?:OI|CI)\)/);
     return path;
   }
   const unsafe = directory('non-inheritable', false);
