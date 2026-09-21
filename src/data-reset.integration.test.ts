@@ -35,9 +35,9 @@ test('dashboard reset enforces authorization, stale and concurrent guards, and e
     return true;
   });
   try {
-    let ready = await outcome(f.runtime, await f.runtime.start(f.spec)); assert.equal(ready.state, 'ready', JSON.stringify(ready));
+    let ready = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(ready.state, 'ready', JSON.stringify(ready));
     assert.equal((await rows(ready.url!, 'POST')).length, 2);
-    const other = await outcome(f.runtime, await f.runtime.start({ ...f.spec, name: 'other-data' }));
+    const other = await outcome(f.runtime, await f.runtime.start({ ...f.spec, name: 'other-data' }), t.signal);
     assert.equal(other.state, 'ready', JSON.stringify(other));
     assert.equal((await rows(other.url!, 'POST')).length, 2);
     // Missing confirmation and stale attempts cannot stop the running preview.
@@ -54,17 +54,17 @@ test('dashboard reset enforces authorization, stale and concurrent guards, and e
     const stopped = await f.runtime.get(f.spec.name);
     assert.ok(!stopped.active && !stopped.candidate); assert.ok(stopped.data);
     allowDelete = true;
-    ready = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, stopped.latest!.id));
+    ready = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, stopped.latest!.id), t.signal);
     assert.equal((await rows(ready.url!)).length, 2, 'denied deletion retained data');
     // Stop retains the serving configuration after a failed update. Reset must use it too.
     const failedUpdate: Spec = { ...f.spec, services: { ...f.spec.services, migrate: job(f.directory, 'process.exit(12)') } };
-    assert.equal((await outcome(f.runtime, await f.runtime.replace(f.spec.name, failedUpdate))).state, 'failed');
+    assert.equal((await outcome(f.runtime, await f.runtime.replace(f.spec.name, failedUpdate), t.signal)).state, 'failed');
     // Concurrent confirmations of the same serving attempt cannot delete twice.
     const request = await resetRequest(); const prior = deletionRequests;
     const simultaneous = await Promise.all([post(request), post(request)]);
     assert.equal(simultaneous.filter(response => !response.error).length, 1);
     assert.equal(deletionRequests, prior + 1);
-    ready = await outcome(f.runtime, simultaneous.find(response => !response.error)!.result);
+    ready = await outcome(f.runtime, simultaneous.find(response => !response.error)!.result, t.signal);
     assert.equal(ready.state, 'ready', JSON.stringify(ready));
     assert.equal(ready.services?.seed.state, 'succeeded'); assert.equal((await rows(ready.url!)).length, 1);
     assert.equal((await rows(other.url!)).length, 2, 'other environment is untouched');
@@ -82,7 +82,7 @@ test('dashboard reset requires explicit recovery after deletion, startup and can
     return true;
   });
   try {
-    const ready = await outcome(f.runtime, await f.runtime.start(f.spec));
+    const ready = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal);
     assert.equal(ready.state, 'ready', JSON.stringify(ready));
     assert.equal((await rows(ready.url!, 'POST')).length, 2);
     const migration = await readFile(join(f.directory, 'migrate.mjs'), 'utf8');
@@ -97,7 +97,7 @@ test('dashboard reset requires explicit recovery after deletion, startup and can
     await f.keys.control('unlock');
     const recovered = await post(await resetRequest()); assert.equal(recovered.error, undefined);
     // After explicit deletion recovery, a migration failure must not trigger another reset.
-    const failed = await outcome(f.runtime, recovered.result);
+    const failed = await outcome(f.runtime, recovered.result, t.signal);
     assert.equal(failed.state, 'failed', JSON.stringify(failed));
     assert.equal(failed.services?.migrate.state, 'failed');
     assert.equal(deletionRequests, 2);
@@ -105,7 +105,7 @@ test('dashboard reset requires explicit recovery after deletion, startup and can
     assert.match(selected.result.text, /deliberate migration failure/);
     await writeFile(join(f.directory, 'migrate.mjs'), migration);
     const retry = await post({ action: 'startAgain', owner: id, name: f.spec.name, attemptId: failed.id });
-    const restarted = await outcome(f.runtime, retry.result);
+    const restarted = await outcome(f.runtime, retry.result, t.signal);
     assert.equal(restarted.state, 'ready', JSON.stringify(restarted));
     assert.equal((await rows(restarted.url!)).length, 1);
     assert.equal(deletionRequests, 2, 'startup recovery does not delete again');

@@ -15,11 +15,11 @@ const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 
 export const database = { skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000 };
 
-export async function outcome(runtime: PreviewRuntime, started: PreviewStatus) {
+export async function outcome(runtime: PreviewRuntime, started: PreviewStatus, signal: AbortSignal) {
   for (;;) {
     try {
       // Exercise pending observation windows without extending startup or repeating effects.
-      return await runtime.wait(started.name, started.candidate!.id, { timeoutMs: 1000 });
+      return await runtime.wait(started.name, started.candidate!.id, { timeoutMs: 1000, signal });
     } catch (error) {
       if (!(error instanceof PreviewError) || error.code !== 'TIMEOUT') throw error;
     }
