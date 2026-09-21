@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 128b9d030cff2d4b03f94090fc24889071da8ee5
+          ref: 045512a
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -30,22 +30,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npx tsc -p tsconfig.test.json
-      - name: Windows selected regression suite
-        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/platform.test.js .local/test-build/native.test.js .local/test-build/docker.test.js .local/test-build/keystore.test.js .local/test-build/jobs.integration.test.js .local/test-build/project.integration.test.js .local/test-build/mcp-access.integration.test.js
-      - uses: actions/checkout@v7
-        with:
-          ref: codex/ci-diagnosis
-          path: diagnosis
-          persist-credentials: false
-      - name: Connected handle experiment
-        run: node diagnosis/scripts/windows-pipe-probe.mjs
-      - name: Docker backend inventory
-        if: always()
-        shell: pwsh
+      - name: Connected pipe authentication and private-storage regressions
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/docker.test.js .local/test-build/platform.test.js
+      - name: Installed package
+        shell: bash
         run: |
-          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture | ConvertTo-Json -Compress
-          Get-CimInstance Win32_ComputerSystem | Select-Object HypervisorPresent, TotalPhysicalMemory | ConvertTo-Json -Compress
-          Get-CimInstance Win32_Processor | Select-Object Name, VirtualizationFirmwareEnabled, SecondLevelAddressTranslationExtensions | ConvertTo-Json -Compress
-          Get-WindowsOptionalFeature -Online | Where-Object FeatureName -Match 'VirtualMachinePlatform|Subsystem-Linux|Hyper-V' | Select-Object FeatureName, State | ConvertTo-Json -Compress
-          node -e "const {spawnSync}=require('node:child_process');for(const [bin,args] of [['wsl.exe',['--status']],['wsl.exe',['--list','--verbose']],['docker.exe',['version']],['docker.exe',['info','--format','{{json .}}']]]){const r=spawnSync(bin,args,{timeout:10000});console.log(JSON.stringify({bin,args,status:r.status,error:r.error?.code,stdout:r.stdout?.toString(bin==='wsl.exe'?'utf16le':'utf8'),stderr:r.stderr?.toString(bin==='wsl.exe'?'utf16le':'utf8')}));}"
-          exit 0
+          mkdir -p "$RUNNER_TEMP/platform-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/platform-package"
+          npm run check:package -- "$RUNNER_TEMP"/platform-package/*.tgz
