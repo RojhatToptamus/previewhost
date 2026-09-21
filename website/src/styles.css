@@ -331,9 +331,10 @@ html[data-site-theme] .docs-search-results > button {
   place-items: center;
 }
 
-.docs-brand-mark img {
-  width: 26px;
-  height: 26px;
+.docs-brand-mark svg {
+  width: 24px;
+  height: 27px;
+  color: var(--paper-strong);
 }
 
 .docs-brand-name {

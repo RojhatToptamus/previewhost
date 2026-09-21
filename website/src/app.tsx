@@ -4,8 +4,10 @@ import { SiteThemeToggle, type SiteTheme, useSiteTheme } from "./siteTheme";
 import { pages, notFoundPage, type DocPage, type DocPageId, pageHref } from "./pages";
 import "./styles.css";
 import "./previewhost.css";
+import brandSvg from "../../assets/previewhost.svg?raw";
 
 const GITHUB_URL = "https://github.com/RojhatToptamus/previewhost";
+const brandMark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
 
 async function copyText(text: string) {
   if (navigator.clipboard && window.isSecureContext) {
@@ -130,9 +132,7 @@ function DocsHeader({
           {menuOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
         </button>
         <a className="docs-brand" href={pageHref("welcome")} aria-label="Previewhost documentation">
-          <span className="docs-brand-mark">
-            <img src={`${import.meta.env.BASE_URL}previewhost.svg`} alt="" />
-          </span>
+          <span className="docs-brand-mark" aria-hidden="true" dangerouslySetInnerHTML={{ __html: brandMark }} />
           <span className="docs-brand-name">Previewhost</span>
           <span className="docs-brand-divider" aria-hidden="true" />
           <span className="docs-brand-section">Docs</span>

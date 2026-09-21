@@ -9,6 +9,9 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   await expect(page).toHaveTitle('Previewhost documentation | Local application previews');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Introduction');
   await expect(page.locator('.docs-sidebar')).toBeVisible();
+  const logo = page.locator('.docs-brand-mark svg');
+  await expect(logo).toHaveAttribute('viewBox', '0 0 32 36');
+  const lightLogoColor = await logo.evaluate(element => getComputedStyle(element).color);
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('desktop-light.png') });
   const links = await page.locator('.docs-sidebar-nav a').evaluateAll(elements => elements.map(element => (element as HTMLAnchorElement).pathname));
   for (const href of links) {
@@ -51,6 +54,8 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-site-theme', 'dark');
   await expect(page.locator('.docs-app')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
+  expect(await logo.evaluate(element => getComputedStyle(element).color)).not.toBe(lightLogoColor);
+  await expect(logo).toHaveCSS('color', await page.locator('.docs-brand-name').evaluate(element => getComputedStyle(element).color));
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('desktop-dark.png') });
   await page.getByRole('link', { name: 'Next CLI quickstart' }).click();
   await expect(page).toHaveURL(/first-preview/);
