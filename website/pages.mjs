@@ -5,7 +5,7 @@ export const pageSources = [
   ['first-preview', 'CLI quickstart', 'Start', 'docs/first-preview.md'],
   ['mcp', 'MCP setup', 'Start', 'docs/mcp.md'],
   ['library', 'Node.js library', 'Start', 'docs/library.md'],
-  ['configuration', 'Write preview.yml', 'Guides', 'docs/recipes.md'],
+  ['configuration', 'Write preview.yaml', 'Guides', 'docs/recipes.md'],
   ['services-and-jobs', 'Services and jobs', 'Guides', 'docs/jobs.md'],
   ['databases', 'Databases', 'Guides', 'docs/databases.md'],
   ['secrets', 'Secrets', 'Guides', 'docs/secrets.md'],

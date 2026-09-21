@@ -367,7 +367,7 @@ Editing changes future reads of the exact reference. It does not restart preview
 change bindings, or extend approvals. Agent setup uses separate, expiring private forms. MCP cannot write secret values.
 
 Explicit configuration saving selects an exact retained attempt and writes only the
-automatic owner's root `preview.yml`. It checks source access and creates the file only if no file or symlink already exists. Secret/input references
+automatic owner's root `preview.yaml`. It checks source access and refuses to save if `preview.yaml` or `preview.yml` exists, including a directory or symlink. Secret/input references
 remain unexpanded. No resolved environment or raw declaration is returned to the browser,
 and saving changes no running application. Literal strings originally supplied in a
 spec remain literal strings. The saver is not a secret scanner.

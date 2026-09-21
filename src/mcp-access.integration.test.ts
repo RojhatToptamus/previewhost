@@ -50,7 +50,7 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
   const first = (await call('preview_start', front, { spec: { name: 'app', type: 'static', directory: front } })).result as PreviewStatus;
   const ready = (await call('preview_wait', front, { name: 'app', attemptId: first.candidate!.id })).result as AttemptResult;
   assert.equal(await (await fetch(ready.url!)).text(), 'project 0');
-  await assert.rejects(import('node:fs/promises').then(fs => fs.stat(join(front, 'preview.yml'))), { code: 'ENOENT' });
+  await assert.rejects(import('node:fs/promises').then(fs => fs.stat(join(front, 'preview.yaml'))), { code: 'ENOENT' });
   const spec = { name: 'app', type: 'environment', primary: 'web', services: { web: { type: 'static', directory: front }, api: { type: 'static', directory: backend } } };
   assert.equal((await call('preview_inspect', front, { spec })).error.code, 'SOURCE_DENIED');
   assert.ok((await call('preview_access', front, { sources: [backend] })).result);
@@ -65,9 +65,9 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
   await call('preview_stop', front, { name: 'app' });
   assert.equal(await (await fetch(ready2.url)).text(), 'project 1');
   assert.ok((await call('preview_save_config', front, { spec })).result);
-  await writeFile(join(front, 'preview.yml'), 'name: app\nservices: [\n');
+  await writeFile(join(front, 'preview.yaml'), 'name: app\nservices: [\n');
   const broken = await call('preview_start');
-  assert.equal(broken.error.code, 'INVALID_INPUT'); assert.match(broken.error.message, /preview.yml.*line/);
+  assert.equal(broken.error.code, 'INVALID_INPUT'); assert.match(broken.error.message, /preview.yaml.*line/);
   const reconnect = await adapter();
   assert.equal((await call('preview_get', other, { name: 'app' }, reconnect)).error.code, 'SOURCE_DENIED');
   assert.ok((await call('preview_access', other, {}, reconnect)).result);

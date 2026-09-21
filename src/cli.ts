@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { connectPreviewDaemon, defaultTokenFile } from './client.js';
 import { limits, type AttemptResult, type PreviewSpec } from './contracts.js';
-import { loadPreviewSpec, readPreviewSpec } from './config.js';
+import { loadPreviewSpec, readPreviewSpec, resolvePreviewFile } from './config.js';
 import { startDaemon } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
 import { listSecrets, removeSecret, setSecret, validateSecretId } from './secrets.js';
@@ -72,8 +72,9 @@ An edit affects future readers; running applications retain their delivered valu
 
 Use --file - (or omit --file with piped stdin) to read JSON. Source paths in a file
 resolve relative to that file; stdin paths resolve relative to the current directory.
-Without explicit file or nonempty stdin, use project-root preview.yml. It is optional;
-direct JSON input works without creating a file. Invalid default files are errors.
+Without explicit file or nonempty stdin, use project-root preview.yaml, then preview.yml.
+If both exist, select one with --file or keep only one default. Invalid files are errors.
+Direct JSON input works without creating a file.
 YAML files reject aliases, tags, merge keys, and duplicate keys. previewhost does not
 load .env files. Application commands can. Source directories stay live and caller-owned.
 Environment status includes each service and retained database data.
@@ -102,9 +103,9 @@ function integer(value: string | undefined, name: string, maximum: number, minim
 async function readSpec(file: string | undefined, signal: AbortSignal, project: string): Promise<PreviewSpec> {
   if (file && file !== '-') return loadPreviewSpec(file, { signal });
   if (file === '-' && process.stdin.isTTY) throw new PreviewError('INVALID_INPUT', 'Pipe one JSON spec to --file -.');
-  const fallbackFile = file === undefined ? resolve(project, 'preview.yml') : undefined;
-  if (process.stdin.isTTY) return loadPreviewSpec(fallbackFile!, { signal });
-  return readPreviewSpec(process.stdin, { baseDirectory: process.cwd(), format: 'json', signal, fallbackFile });
+  if (process.stdin.isTTY) return loadPreviewSpec(await resolvePreviewFile(project), { signal });
+  return readPreviewSpec(process.stdin, { baseDirectory: process.cwd(), format: 'json', signal,
+    fallbackProject: file === undefined ? project : undefined });
 }
 
 const launchFlags = ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket'];

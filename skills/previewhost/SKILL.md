@@ -5,14 +5,15 @@ description: Operate local previews and create or update PreviewSpec recipes wit
 
 # previewhost
 
-Use root `preview.yml` when present. If it is invalid, fix it before file-based startup.
-If it is absent, construct a spec from project evidence and use it directly. A YAML file is optional.
+Use root `preview.yaml`, then `preview.yml` if it is absent. If both exist, report the conflict.
+If the selected file is invalid, fix it before file-based startup.
+If neither file exists, construct a spec from project evidence and use it directly. A YAML file is optional.
 Keep one preview name for continuing work and retained database data.
 Read only the references needed for the current operation.
 
 ## Find the recipe and connection
 
-Read project instructions and root `preview.yml`. An explicit alternate file or spec overrides that default.
+Read project instructions and the selected root configuration. An explicit file or spec bypasses default lookup, including filename conflicts.
 Reuse the task's current sources, including uncommitted files and worktrees.
 If no suitable recipe exists, use [Create or update a recipe](references/docs/recipes.md).
 
@@ -55,7 +56,7 @@ Start preview reuses the retained configuration and current source without reloa
 The dashboard does not start owners or replace the private secret form.
 Keep ordinary startup in the existing CLI/MCP workflow; do not open management automatically for every preview.
 
-The CLI examples use optional root `preview.yml`, a preview named `app`, and the returned `ATTEMPT_ID`.
+The CLI examples use optional root `preview.yaml`, a preview named `app`, and the returned `ATTEMPT_ID`.
 Substitute the actual recipe, name, executable, and connection arguments.
 For direct MCP specs, use absolute `cwd` and `directory` paths, even when `project` is supplied.
 Do not bind `PORT`, `HOST`, or `PREVIEW_URL` in `env`. Previewhost injects them at runtime.
@@ -104,7 +105,8 @@ For incomplete cleanup or uncertain process ownership, use the [recovery guide](
 Retain affected source until cleanup is complete.
 Get/list include source directories on attempts and incomplete cleanup records. Check all consuming previews before source removal.
 
-Save configuration only when the user requests it. MCP `preview_save_config` creates root `preview.yml` from the original prepared spec.
+Save configuration only when the user requests it. MCP `preview_save_config` creates root `preview.yaml` from the original prepared spec.
+Saving fails if either default filename exists, including a directory or symlink.
 It validates source paths and declarative structure without resolving values, running code, or claiming application health.
 Existing files are preserved. Use the host editor for requested updates, then validate the result.
 Do not serialize inspection output: it omits literal environment bindings.

@@ -76,7 +76,7 @@ The frontend forwards `/message` to the backend. Browser requests use the fronte
 
 ## Describe the services
 
-Save this as `preview.yml` beside the two server files:
+Save this as `preview.yaml` beside the two server files:
 
 ```yaml
 name: hello
@@ -151,4 +151,4 @@ previewhost shutdown
 Stop ends the preview. Shutdown ends this project's owner and all its previews.
 The source files remain. For a project with databases, stop also retains managed data.
 
-Next, [write preview.yml](recipes.md) for your own application.
+Next, [write preview.yaml](recipes.md) for your own application.

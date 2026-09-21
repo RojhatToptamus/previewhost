@@ -134,7 +134,7 @@ test('global MCP defaults support private setup, isolated worktree databases and
     assert.equal(owners.length, 2);
     const records = await Promise.all(owners.map(id => readFile(join(home, '.local/share/previewd/projects', id, 'data/notes.json'), 'utf8')));
     assert.notEqual(JSON.parse(records[0]).resources[0].volume, JSON.parse(records[1]).resources[0].volume);
-    await assert.rejects(readFile(join(projects[0], 'preview.yml')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(projects[0], 'preview.yaml')), { code: 'ENOENT' });
     await call('preview_stop', projects[0], { name: 'notes' });
     assert.equal(await count(second.url!, 'POST'), 1);
     const restarted = await start(projects[0], { spec: spec(projects[0]) });

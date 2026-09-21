@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -242,7 +242,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       .click();
     await page.getByRole("tab", { name: "Configuration", exact: true }).click();
     await expect(
-      page.getByRole("button", { name: "Save as preview.yml" }),
+      page.getByRole("button", { name: "Save as preview.yaml" }),
     ).toBeVisible();
     expect((await page.locator(".diagnostic-toolbar").boundingBox())!.y).toBe(
       top,
@@ -284,16 +284,41 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     expect((await page.locator(".env-table thead").boundingBox())!.y).toBe(
       headingY,
     );
-    await page.getByRole("button", { name: "Save as preview.yml" }).click();
+    const yml = join(directory, "first/preview.yml");
+    await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByText("preview.yml exists.", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "Save as preview.yaml" }).click();
+    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "preview.yml" })).toBeVisible();
+    await expect(readFile(join(directory, "first/preview.yaml"))).rejects.toMatchObject({ code: "ENOENT" });
+    await rm(yml);
+    await page.getByRole("button", { name: "Save as preview.yaml" }).click();
     await expect
       .poll(() =>
-        readFile(join(directory, "first/preview.yml"), "utf8").catch(() => ""),
+        readFile(join(directory, "first/preview.yaml"), "utf8").catch(() => ""),
       )
       .toContain("name: app");
-    await page.getByRole("button", { name: "Save as preview.yml" }).click();
+    await page.getByRole("button", { name: "Save as preview.yaml" }).click();
     await expect(
-      page.locator("[data-sonner-toast]").filter({ hasText: "already exists" }),
+      page.locator("[data-sonner-toast]").filter({ hasText: "already exists" }).filter({ hasText: "preview.yaml" }),
     ).toBeVisible();
+    await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await expect(page.getByText("Configuration needs attention", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Both preview.yaml and preview.yml exist/)).toBeVisible();
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+    await expect(page.getByText(/Both preview.yaml and preview.yml exist/)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await page.locator(".activity-panel").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.getByText(/Both preview.yaml and preview.yml exist/).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+    await page.setViewportSize({ width: 1360, height: 900 });
+    await rm(yml);
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByText("Configuration needs attention", { exact: true })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Configuration", exact: true }).click();
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await expect(page.locator("body")).toHaveClass(/ph-dark/);
     await page.getByRole("button", { name: "Dark mode", exact: true }).press("Space");
@@ -311,7 +336,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
         ),
       ).toBe(true);
       await expect(
-        page.getByRole("button", { name: "Save as preview.yml" }),
+        page.getByRole("button", { name: "Save as preview.yaml" }),
       ).toBeInViewport();
     }
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();

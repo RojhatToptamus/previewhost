@@ -93,7 +93,7 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 | Previews | Compare worktrees, status, and available applications in aligned rows. Names open details; Open app opens the running application. |
 | Activity | Show actionable failures, serving/latest attempts, services, jobs, history, private setup, and managed data. Put recovery beside the affected resource. |
 | Logs | Put search, attempt, source, and refresh controls above output. Offer line wrapping for long output and preserve it across tabs. Explain omitted output; do not imply captured logs are live. |
-| Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yml visible outside the scrolling body. |
+| Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yaml visible outside the scrolling body. |
 | Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
 
 Long lists need bounded scrolling without burying actions. The environment table uses a 320px height capped at 45% of viewport height, with its own scrollbar and sticky header. Secret lists use the existing bounded scroll area. Short lists should not gain artificial filler rows.
@@ -155,9 +155,9 @@ Use other truthful states when needed, including Startup failed, Configuration e
 Keep these consequences explicit at the relevant decision:
 
 - Stop retains managed database data. It affects only the selected preview.
-- Restart uses retained configuration and current source; it does not reload preview.yml.
-- Invalid YAML is an error, not permission to fall back silently.
-- Saving YAML is explicit and does not change the running preview. Existing files are not overwritten.
+- Restart uses retained configuration and current source; it does not reload preview.yaml.
+- Default lookup uses preview.yaml, then preview.yml. Both files present or invalid YAML is an error.
+- Saving YAML is explicit and does not change the running preview. Either default filename blocks saving, including directories and symlinks.
 - Reset erases the named managed databases, not external databases or secrets. Deletion and job writes cannot be rolled back.
 - A rerun can repeat database writes. A canceled process does not undo earlier writes.
 - Stored secret references differ from application environment-variable names. Updating a shared reference affects future starts in every project that uses it.
@@ -186,7 +186,7 @@ Omit permanent reassurance and help text from navigation. Use an icon with an ac
 | Avoid | Prefer |
 | --- | --- |
 | Ready — Every startup check passed. | Ready |
-| Save this attempt as preview.yml. Existing files are never overwritten. [Save as preview.yml] | Existing files are never overwritten. [Save as preview.yml] |
+| Save this attempt as preview.yaml. Existing files are never overwritten. [Save as preview.yaml] | Existing files are never overwritten. [Save as preview.yaml] |
 | Started at the time shown. | The timestamp alone. |
 | Values are never shown. | Stored values are never shown. |
 | Its owner may have shut down. | Start through your agent or CLI to reconnect. |

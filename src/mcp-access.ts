@@ -84,7 +84,7 @@ export class McpAccess {
   }
 
   private result(project: string, sources: string[]): CallToolResult {
-    const value = { result: { project, sources, message: 'Access approved. Continue with this project on every call. Inspect dependencies and use preview.yml if present, otherwise submit a direct spec.' } };
+    const value = { result: { project, sources, message: 'Access approved. Continue with this project on every call. Inspect dependencies. Use preview.yaml, then preview.yml. If both exist, report the conflict. If neither exists, submit a direct spec.' } };
     return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
   }
   close() { this.controller.abort(); this.grants.clear(); this.pending.clear(); }

@@ -147,6 +147,7 @@
 }
 [data-slot="alert-description"] {
   color: var(--t3);
+  overflow-wrap: anywhere;
 }
 [data-slot="alert-description"] p {
   margin-bottom: 8px;

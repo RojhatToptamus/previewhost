@@ -5,7 +5,7 @@ Run separate previews from existing Git worktrees. Each worktree gets its own au
 ## Select a worktree
 
 Previewhost uses the canonical Git worktree root as the project. Outside Git, it uses the current directory.
-From a worktree with root `preview.yml`, run:
+From a worktree with root `preview.yaml`, run:
 
 ```sh
 previewhost inspect
@@ -31,7 +31,7 @@ Previewhost does not create worktrees or change Git state. Prepare the worktree 
 
 Read the application's instructions and install its dependencies in the selected worktree.
 Check command entrypoints as well as working directories. An absolute entrypoint can still refer to another worktree after a `cwd` change.
-Paths in `preview.yml` resolve relative to that file.
+Paths in `preview.yaml` resolve relative to that file.
 
 If preparation changes files used by a running preview, stop that preview first.
 Wait for preparation to finish before startup.

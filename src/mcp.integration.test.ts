@@ -52,8 +52,8 @@ test('MCP discovers with no daemon in both protocol eras and returns actionable 
       assert.match(bindings, /native DNS resolution and candidate readiness are not guaranteed/);
       const instructions = client.getInstructions()!;
       assert.match(instructions, /fixed owner; do not supply project/);
-      assert.match(instructions.slice(0, 512), /project-root preview\.yml/);
-      assert.match(instructions.slice(0, 512), /Save preview\.yml only on an explicit user request/);
+      assert.match(instructions.slice(0, 512), /project-root preview\.yaml/);
+      assert.match(instructions.slice(0, 512), /Save preview\.yaml only on an explicit user request/);
       assert.match(instructions.slice(0, 512), /request private setup/);
       assert.match(instructions.slice(0, 512), /wait for the returned attempt ID/);
       assert.match(instructions, /cleanup is uncertain.*block conflicting/);

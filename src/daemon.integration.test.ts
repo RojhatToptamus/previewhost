@@ -66,7 +66,7 @@ test('configuration saving requires owner project metadata', async t => {
   await f.client.wait('page', status.candidate!.id);
   await assert.rejects(f.client.saveConfiguration('page', status.candidate!.id), { code: 'INVALID_INPUT' });
   await assert.rejects(f.client.allowSources([f.directory]), { code: 'EXECUTION_DENIED' });
-  await assert.rejects(readFile(join(f.directory, 'preview.yml')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(f.directory, 'preview.yaml')), { code: 'ENOENT' });
 });
 
 test('control authority, content, strict schemas, and body bounds are enforced before execution', async (t) => {

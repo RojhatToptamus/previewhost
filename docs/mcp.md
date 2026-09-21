@@ -55,15 +55,16 @@ In your project chat, ask:
 
 ```text
 Preview this application with Previewhost. Read its instructions and start commands,
-reuse preview.yml if present, and verify the returned URL in a browser.
+reuse the project configuration if present, and verify the returned URL in a browser.
 ```
 
 The agent supplies the actual project path on each call.
 `preview_access` asks you to approve that project and any additional source directories.
 Your client can also require approval for individual tools.
 
-The agent can reuse root `preview.yml` or supply a spec directly. You do not need to write a file first.
-An invalid existing file is an error. To keep a working spec for later use, ask the agent to save it as `preview.yml`.
+The agent can reuse root `preview.yaml`, fall back to `preview.yml`, or supply a spec directly.
+If both files exist, the agent must report the conflict instead of choosing silently. You do not need to write a file first.
+An invalid existing file is an error. To keep a working spec for later use, ask the agent to save it as `preview.yaml`.
 
 If credentials are missing, approve the intended references in the private browser form.
 Enter the missing values there.

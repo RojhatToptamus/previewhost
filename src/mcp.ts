@@ -5,7 +5,7 @@ import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/s
 import { connectProject, selectMcpProject, type ProjectOptions } from './project.js';
 import { limits, requestSchemas, secretRequestSchemas } from './contracts.js';
 import { failure, PreviewError } from './errors.js';
-import { loadPreviewSpec, savePreviewSpec } from './config.js';
+import { loadPreviewSpec, resolvePreviewFile, savePreviewSpec } from './config.js';
 import { McpAccess, accessSchema } from './mcp-access.js';
 import { canonicalDirectory, normalizeSources, parseSpec } from './spec.js';
 import { version } from './version.js';
@@ -21,13 +21,13 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   const scope = { project: fixed ? z.never().optional() : options.projectDirectory ? projectField.optional() : projectField };
   const inputShape = { ...scope, spec: requestSchemas.start.shape.spec.optional()
     .describe('Direct spec: all cwd and directory paths must be absolute, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. Use file instead for JSON/YAML with file-relative paths.'), file: z.string().min(1).max(4096).optional()
-    .describe('One regular JSON/YAML file within the project or an explicitly allowed root, relative to the project directory. Sources resolve relative to this file. Omit both file and spec to use root preview.yml.') };
+    .describe('One regular JSON/YAML file within the project or an explicitly allowed root, relative to the project directory. Sources resolve relative to this file. Omit both file and spec to use root preview.yaml, then preview.yml. If both exist, select a file explicitly or keep one default.') };
   const exclusive = (input: { file?: string; spec?: unknown }) => !(input.file !== undefined && input.spec !== undefined);
   const inputSchema = z.strictObject(inputShape).refine(exclusive, 'Supply either file or spec, never both.');
   const rootsFor = (project: string) => access ? access.roots(project) : Promise.resolve([project, ...(options.allowedRoots ?? [])]);
   const load = async (input: z.output<typeof inputSchema>, project: string, signal?: AbortSignal) => {
     const allowedRoots = await rootsFor(project);
-    const spec = input.spec ?? await loadPreviewSpec(resolve(project, input.file ?? 'preview.yml'), { allowedRoots, signal });
+    const spec = input.spec ?? await loadPreviewSpec(input.file === undefined ? await resolvePreviewFile(project) : resolve(project, input.file), { allowedRoots, signal });
     if (access) {
       try { return await normalizeSources(parseSpec(spec), allowedRoots); }
       catch (error) {
@@ -47,10 +47,10 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     instructions:
       (fixed ? 'This connection uses one fixed owner; do not supply project. ' :
         'Supply this chat’s actual worktree as project on every call; connections can be shared. ') +
-      'Use project-root preview.yml when present; fix invalid files. Otherwise inspect the project and ' +
-      'supply a spec directly. Start, then wait for the returned attempt ID. For secrets, supply {secret: ID}; ' +
-      'request private setup, wait on status, then retry startup only after complete. Never request values in chat or inspect the private form. ' +
-      'Save preview.yml only on an explicit user request, using the original spec. An active owner survives MCP disconnect. ' +
+      'Use project-root preview.yaml, then preview.yml. Both files present is an error. Fix invalid files; if neither exists, supply a spec directly. ' +
+      'Save preview.yaml only on an explicit user request, using the original spec. ' +
+      'Start, then wait for the returned attempt ID. For secrets, request private setup, wait on status, then retry only after complete. Never request values in chat or inspect the private form. ' +
+      'Use {secret: ID} for stored references. An active owner survives MCP disconnect. ' +
       'Use preview_access for unapproved projects and backend source directories when available; do not edit registration or relocate sources. Denial or cancellation means stop until the user asks to continue. ' +
       'When the user wants to compare or manage local previews, suggest previewhost dashboard; it can inspect, stop, rerun, and explicitly save a retained configuration. Use preview_replace for replacement; the dashboard does not replace previews. ' +
       'If secret setup is canceled, stop and wait for an explicit user request before new setup or startup. Never assume accidental browser closure. ' +
@@ -115,7 +115,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     inputSchema: z.strictObject({ name: requestSchemas.replace.shape.name, ...inputShape }).refine(exclusive, 'Supply either file or spec, never both.'), annotations: { ...write, destructiveHint: true },
   }, (input, context) => run('request', input, async (client, project) => client.replace(input.name, await loadForStartup(input, project, client, context.mcpReq.signal))));
   server.registerTool('preview_save_config', {
-    description: 'Only on an explicit user request, create project-root preview.yml from the original prepared spec, never an inspect result. Validates sources, schema and dependencies, and preserves declarative references without reading secrets or owner inputs. Does not start or health-test an application. Project-local paths become relative; externalSources identifies nonportable paths. Create-only: an existing file or symlink is left untouched. Use the host editor for explicitly requested updates. Credential values must never enter this tool; use {secret: ID}.',
+    description: 'Only on an explicit user request, create project-root preview.yaml from the original prepared spec, never an inspect result. Validates sources, schema and dependencies, and preserves declarative references without reading secrets or owner inputs. Does not start or health-test an application. Project-local paths become relative; externalSources identifies nonportable paths. Saving fails if preview.yaml or preview.yml exists, including a directory or symlink. Use the host editor for explicitly requested updates. Credential values must never enter this tool; use {secret: ID}.',
     inputSchema: requestSchemas.start.extend(scope), annotations: { ...write, openWorldHint: false },
   }, (input, context) => run('request', input, async (_client, project) => savePreviewSpec(input.spec, { projectDirectory: project, allowedRoots: await rootsFor(project), signal: context.mcpReq.signal })));
   server.registerTool('preview_list', {

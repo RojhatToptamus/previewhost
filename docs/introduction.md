@@ -30,7 +30,7 @@ Its **primary** service receives requests at the environment URL.
 ## How a preview works
 
 1. Prepare your application dependencies in an existing checkout or worktree.
-2. Describe its services in [preview.yml](recipes.md), or supply a spec through MCP or the library.
+2. Describe its services in [preview.yaml](recipes.md), or supply a spec through MCP or the library.
 3. Start the preview. Previewhost runs setup jobs and waits for service readiness.
 4. Open the returned URL and try the application.
 5. Read logs or replace the preview after changes. When you finish, stop the preview.
@@ -51,6 +51,6 @@ Stop ends owned processes and retains managed data for the next start.
 
 Previewhost uses existing source directories. It does not create Git worktrees or install project dependencies automatically.
 You choose the commands, readiness routes, and database setup that your application needs.
-The [preview.yml guide](recipes.md) explains these choices.
+The [preview.yaml guide](recipes.md) explains these choices.
 
 Application commands run with your user permissions, without a sandbox. Preview URLs stay local to your machine.

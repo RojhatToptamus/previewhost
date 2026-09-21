@@ -20,7 +20,7 @@ Stored secrets require macOS 13 or later and the packaged Keychain helper.
 
 ## Approve and enter values
 
-From the project with root `preview.yml`, run:
+From the project with root `preview.yaml`, run:
 
 ```sh
 previewhost secrets setup --allow-exec

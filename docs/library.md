@@ -63,10 +63,10 @@ Direct specs require absolute source paths within `allowedRoots`.
 To reuse a file, import `loadPreviewSpec` from `previewhost` and pass its result to `runtime.start`:
 
 ```js
-const spec = await loadPreviewSpec('./preview.yml');
+const spec = await loadPreviewSpec('./preview.yaml');
 ```
 
-File paths resolve relative to the configuration file. See [Write preview.yml](recipes.md) for commands, readiness checks, and service connections.
+File paths resolve relative to the configuration file. See [Write preview.yaml](recipes.md) for commands, readiness checks, and service connections.
 
 Native commands and managed databases require an `authorize` callback in `createPreviewRuntime`.
 The callback must decide whether to allow the requested operation. Without it, these operations fail with `EXECUTION_DENIED`.

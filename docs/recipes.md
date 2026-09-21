@@ -1,13 +1,15 @@
-# Write preview.yml
+# Write preview.yaml
 
 Describe your application's commands, readiness checks, and service connections in one file. The CLI and MCP can reuse it for each preview.
 
 ## Choose an input
 
-Save `preview.yml` at the project root for the default CLI and MCP workflow.
+Save `preview.yaml` at the project root for the default CLI and MCP workflow.
+If it is absent, Previewhost reads `preview.yml`. If both exist, default lookup reports an error.
+Select a file explicitly or keep one default configuration.
 The file is optional: MCP and library calls also accept a spec object, and the CLI accepts JSON stdin.
 
-An explicit file or spec replaces the default input. Previewhost does not merge configurations or ignore an invalid root file.
+An explicit `--file` selection, MCP `file`, or direct spec bypasses default lookup, including a conflict between the two filenames. Previewhost does not merge configurations or ignore an invalid root file.
 Source paths in a file resolve relative to that file. Direct MCP and library specs require absolute paths.
 JSON stdin paths resolve from the current directory.
 
@@ -30,7 +32,7 @@ Use [setup jobs](jobs.md) for commands that finish, such as migrations.
 
 ## Serve a static page
 
-For a project with prepared files in `site`, save this as root `preview.yml`:
+For a project with prepared files in `site`, save this as root `preview.yaml`:
 
 ```yaml
 name: site
@@ -163,10 +165,10 @@ For a stopped preview, use `start`. Keep the same preview name to reuse its mana
 
 ## Save a configuration from MCP
 
-Ask your agent to save the spec after it works. `preview_save_config` creates root `preview.yml` from that spec.
-The dashboard also offers **Save as preview.yml** for a retained attempt.
+Ask your agent to save the spec after it works. `preview_save_config` creates root `preview.yaml` from that spec.
+The dashboard also offers **Save as preview.yaml** for a retained attempt.
 
 Both operations preserve references without resolving secret values, ports, or service URLs.
 Paths inside the project become relative. External source paths remain absolute and are not portable to another machine.
-Saving does not change the running preview or overwrite an existing file.
+Saving does not change the running preview. It fails if either `preview.yaml` or `preview.yml` already exists, including a directory or symlink.
 To change an existing file, edit it and inspect it again.

@@ -65,7 +65,8 @@ The `active` field identifies the attempt that serves requests.
 During replacement, both can exist under the same preview name.
 
 The fragments below describe each spec type.
-CLI accepts JSON stdin or an explicit JSON/YAML file. Root `preview.yml` is the optional default.
+CLI accepts JSON stdin or an explicit JSON/YAML file. Default lookup checks root `preview.yaml`, then `preview.yml`.
+If both exist, it reports an error. Explicit files and direct specs bypass default lookup.
 MCP accepts a direct spec or a file and starts a project owner when needed.
 See [CLI commands](#cli) for startup, status, and cleanup.
 
@@ -435,8 +436,8 @@ authorization and source checks, before candidate resources or databases start.
 Only declared recipients receive each value. Failed replacement preserves active routes.
 
 ```sh
-previewhost secrets setup --file preview.yml --allow-exec
-previewhost secrets setup --file preview.yml --allow-exec --reopen
+previewhost secrets setup --file preview.yaml --allow-exec
+previewhost secrets setup --file preview.yaml --allow-exec --reopen
 previewhost secrets edit shop/dev/token
 previewhost secrets status REQUEST_ID --timeout-ms 25000
 previewhost secrets set shop/dev/token
@@ -546,7 +547,8 @@ A shared connection retains no current-chat or last-project state. Equal preview
 Explicit endpoint/token mode keeps one fixed owner and rejects `project` tool arguments.
 
 MCP inspect/start/replace/setup accepts either `spec` or `file`, never both.
-If both are omitted, it reads project-root `preview.yml`. Invalid or unreadable files are errors.
+If both are omitted, it reads project-root `preview.yaml`, or `preview.yml` if `preview.yaml` is absent.
+If both files exist, default lookup reports an error. Invalid or unreadable files are errors.
 
 Explicit file paths resolve from the MCP project. Source paths resolve relative to that file.
 
@@ -555,14 +557,14 @@ MCP files and sources must resolve within the connection’s approved roots or e
 The HTTP/runtime API continues to accept spec objects only. `reopen` remains owner-only.
 There is no public name-approval, secret edit, set, remove, value-read, or export tool.
 
-`preview_save_config({project, spec})` creates root `preview.yml` only on an explicit user request.
+`preview_save_config({project, spec})` creates root `preview.yaml` only on an explicit user request.
 It uses the original prepared spec, validates schema, dependencies, attachments and source scope, then round-trips through the strict YAML loader.
 
 It preserves non-secret literals and references without resolving inputs, credentials, service URLs or ports.
 Project-local source paths become relative. The result contains `file` and `externalSources` (nonportable paths).
 It does not run code or establish application health. Save/load cannot certify arbitrary strings contain no secrets.
 
-Existing files, directories and symlinks produce `ALREADY_EXISTS`. Use a normal editor for requested updates and validate them.
+Either `preview.yaml` or `preview.yml` at the destination produces `ALREADY_EXISTS`, including directories and symlinks. Use a normal editor for requested updates and validate them.
 
 Complete-file publication permits one concurrent creator and exposes no partial file.
 The same operation is available as `savePreviewSpec(spec, {projectDirectory, allowedRoots?, signal?})` in the library.
@@ -636,7 +638,7 @@ The authenticated owner client also supports:
   busy, and cleanup checks still apply. No YAML is reloaded. The dashboard labels a
   stopped attempt **Start preview** and a failed attempt **Retry start**.
   Canceled attempts cannot use this operation.
-- `saveConfiguration(name, attemptId)`: create root `preview.yml` from that exact
+- `saveConfiguration(name, attemptId)`: create root `preview.yaml` from that exact
   retained attempt through the existing validated saver. The automatic owner's project
   fixes the destination. Callers cannot supply a path or a replacement spec. Returns
   `{ file, externalSources }` and does not start, stop, or replace an application.
@@ -663,7 +665,7 @@ managed data. An authorized agent can start a preview again after you stop it.
 Saving keeps secret/input references unexpanded. It never reads Keychain values or
 exports the raw declaration through the dashboard response. Sources inside the project
 become relative paths. External sources keep absolute paths and appear in `externalSources`.
-Existing files and symlinks win: saving returns `ALREADY_EXISTS` without overwriting them.
+If either default filename exists, saving returns `ALREADY_EXISTS` without overwriting it. Directories and symlinks also block saving.
 
 An expired attempt cannot be reconstructed from status. An owner without a project
 directory cannot use this operation. Save the original spec through CLI/MCP or the library.

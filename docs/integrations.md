@@ -94,7 +94,7 @@ previewhost start --file preview.json --allow-exec
 ```
 
 Open the returned URL and check the application. After use, run `previewhost stop PREVIEW_NAME`, with the spec's `name`.
-For YAML and service bindings, see [Write preview.yml](recipes.md).
+For YAML and service bindings, see [Write preview.yaml](recipes.md).
 
 Recorded checks used Vite 8.2.2, Next.js 16.3.4, Python 3.14.6, and Node.js 22.23.1 on macOS.
 Vite and Next.js served interactive pages and source updates through numeric URLs and environment aliases, including WebSocket connections.

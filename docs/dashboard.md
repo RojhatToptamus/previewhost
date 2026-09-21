@@ -38,7 +38,7 @@ Open a preview's **Activity** tab to see services, setup jobs, and available rec
 | Retry a failed initial start | **Retry start** reruns that attempt after you fix its cause. |
 | Start with fresh managed data | **Reset data** names the databases before confirmation. Deletion cannot be undone. |
 
-Start and retry do not reload `preview.yml`. To apply file changes, use CLI or MCP start/replace with the updated file.
+Start and retry do not reload `preview.yaml`. To apply file changes, use CLI or MCP start/replace with the updated file.
 See [setup jobs](jobs.md#progress-and-recovery) for explicit reruns and reset behavior.
 
 ## Read logs
@@ -51,8 +51,8 @@ Logs are bounded tails, not a permanent archive.
 
 ## Save configuration and manage secrets
 
-In **Configuration**, **Save as preview.yml** writes the selected attempt's recipe to the project root.
-It never overwrites an existing file and does not change the running application.
+In **Configuration**, **Save as preview.yaml** writes the selected attempt's recipe to the project root.
+Saving fails if `preview.yaml` or `preview.yml` already exists. It does not change the running application.
 Secret references remain references. Stored values do not appear in this view.
 
 **Secret Manager** edits existing stored references. **Open private form** handles missing values and access approval.

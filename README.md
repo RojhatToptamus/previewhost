@@ -33,7 +33,10 @@ Choose the interface you need:
 
 Each guide includes its installation steps. The [introduction](docs/introduction.md) explains how previews, environments, and project owners work.
 
-For a project with root `preview.yml` and the global CLI installed:
+Default lookup uses root `preview.yaml`, then `preview.yml`. If both exist, select one with `--file` or keep one default.
+New configurations save as `preview.yaml` only when neither file exists.
+
+For a project with a configuration file and the global CLI installed:
 
 ```sh
 previewhost inspect
@@ -51,7 +54,7 @@ The dashboard opens in your browser and needs its terminal to remain open. Closi
 | Install or update Previewhost | [Installation](docs/installation.md) |
 | Run a complete example | [First preview with the CLI](docs/first-preview.md) |
 | Connect a coding agent | [MCP setup](docs/mcp.md) |
-| Describe your application | [Write preview.yml](docs/recipes.md) |
+| Describe your application | [Write preview.yaml](docs/recipes.md) |
 | Run services, migrations, and seeds | [Services and jobs](docs/jobs.md) |
 | Connect or manage local data | [Databases](docs/databases.md) |
 | Supply private credentials | [Secrets](docs/secrets.md) |
