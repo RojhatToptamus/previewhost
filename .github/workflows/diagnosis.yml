@@ -38,6 +38,6 @@ jobs:
       - name: Check cancellation regression
         run: |
           node --test --test-reporter=tap --test-name-pattern='^aborting outcome stops test continuation' .local/test-build/jobs.integration.test.js | tee "$RUNNER_TEMP/cancellation.tap"
-          grep -Fx '# tests 1' "$RUNNER_TEMP/cancellation.tap"
-          grep -Fx '# pass 1' "$RUNNER_TEMP/cancellation.tap"
-          grep -Fx '# skipped 0' "$RUNNER_TEMP/cancellation.tap
+          grep -qFx '# tests 1' "$RUNNER_TEMP/cancellation.tap"
+          grep -qFx '# pass 1' "$RUNNER_TEMP/cancellation.tap"
+          grep -qFx '# skipped 0' "$RUNNER_TEMP/cancellation.tap"
