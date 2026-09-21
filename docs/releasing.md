@@ -102,7 +102,7 @@ Then run:
 
 ```sh
 npm ci
-PREVIEWD_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
+PREVIEWHOST_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify:release
 npm pack --ignore-scripts
 npm run check:package -- "$PWD/previewhost-0.1.0-alpha.0.tgz"
 npm publish ./previewhost-0.1.0-alpha.0.tgz --dry-run --ignore-scripts --access public --tag alpha

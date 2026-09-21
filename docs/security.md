@@ -103,7 +103,7 @@ Direct CLI/library file input retains the caller's filesystem authority.
 
 ## Automatic project owners
 
-The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewd/projects`.
+The canonical Git worktree root (or explicit project directory) selects a private directory under `~/.local/share/previewhost/projects`.
 A SHA-256 digest of that path gives it a fixed-length filesystem address. It is not a configuration signature or permission grant.
 A permanent Darwin kernel lock prevents concurrent owners for one project. It is held through runtime cleanup.
 The private connection file contains endpoint, PID, project path, data directory, and any explicit Docker socket. It is published after listener readiness.
@@ -133,17 +133,15 @@ not prove orphaned native-process cleanup. Unknown data locations block removal.
 No process is stopped, data deleted, secret accessed, or authorization restored by removal.
 Never kill a process based only on the recorded PID; it can have been reused. See [recovery](troubleshooting.md#the-client-cannot-find-the-daemon).
 
-## Retained storage identifiers
+## Runtime storage and resource names
 
-The following storage identifiers are unchanged:
+The default token is `~/.local/share/previewhost/token`. Automatic project records use `~/.local/share/previewhost/projects`.
+`--data-dir` and `dataDirectory` select the exact directory supplied by the owner.
+Docker object names use `previewhost-`, and ownership labels use `io.previewhost.*`.
+Managed PostgreSQL uses `previewhost` for its user and database.
+The gateway uses `x-previewhost-hops` to detect forwarding loops.
 
-- The default token remains at `~/.local/share/previewd/token`.
-- `--data-dir` and `dataDirectory` still select the exact directory supplied by the owner.
-- Docker names retain `previewd-`. Ownership labels retain `io.previewd.*`.
-- Managed PostgreSQL retains its `previewd` user and database.
-
-The [Keystore access rules](#stored-secrets-and-private-entry) still apply to package updates.
-The internal `x-previewd-hops` header also remains unchanged so old and new gateways detect loops together.
+Earlier runtime namespaces are not discovered or migrated. Follow the [reset instructions](../README.md#reset-required-for-earlier-installations) before updating an existing installation.
 
 ## Native processes
 

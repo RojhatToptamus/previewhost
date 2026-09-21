@@ -301,9 +301,7 @@ previewhost shutdown --token-file .local/token
 It leaves application source files intact. Shutdown closes the daemon.
 If cleanup fails, resolve the reported error before you remove `.local/data` or the source directory.
 
-The table name `previewd_demo_notes` and cache key `previewd:demo:latest-note` preserve earlier example data.
-To continue an earlier example's environment, keep its data directory.
-See [retained storage identifiers](../../docs/security.md#retained-storage-identifiers).
+The example uses the table `previewhost_demo_notes` and cache key `previewhost:demo:latest-note`.
 
 ## Adapt the recipe to existing repositories
 

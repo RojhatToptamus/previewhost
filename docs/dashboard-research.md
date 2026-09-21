@@ -321,7 +321,7 @@ No product decision blocks this research plan. Two scope choices need confirmati
 ## Initial implementation verification — 14 September 2026
 
 - Focused dashboard/runtime/private-setup tests passed first (23 tests). The final
-  `PREVIEWD_TEST_DOCKER_SOCKET=/Users/rojhat/.docker/run/docker.sock npm run verify`
+  `PREVIEWHOST_TEST_DOCKER_SOCKET=/Users/rojhat/.docker/run/docker.sock npm run verify`
   passed **118 tests, zero failures and zero skips**, using Node 22.23.1 and local Docker.
   An earlier run failed one multi-repo test because this worktree lacked its own
   `node_modules`; installing the locked dependencies fixed it. The focused rerun passed.

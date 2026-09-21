@@ -190,7 +190,7 @@ try {
   await gone(cliNative.url);
   assert.throws(() => process.kill(cliApplication.pid, 0), { code: 'ESRCH' });
   assert.equal(await readFile(tokenFile, 'utf8'), existingToken);
-  record('daemon-shutdown-resource-cleanup', { existingPreviewdTokenReused: true });
+  record('daemon-shutdown-resource-cleanup', { existingTokenReused: true });
 
   automaticProject = site;
   const automatic = await cli(['start', '--project', site, '--allow-exec', '--file', join(directory, 'native.json')]);

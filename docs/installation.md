@@ -44,7 +44,7 @@ See the [library guide](library.md) for a complete program.
 
 ## Update an installation
 
-If you used Previewhost before the encrypted keystore, follow the [reset instructions](../README.md#reset-required-for-earlier-installations) before restarting previews.
+Before updating an existing installation, follow the [reset instructions](../README.md#reset-required-for-earlier-installations) for runtime storage and managed data.
 
 For a global installation:
 

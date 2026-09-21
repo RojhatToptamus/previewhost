@@ -12,7 +12,7 @@ import { createDataOwner } from './data.js';
 import { Docker } from './docker.js';
 import type { PreviewSpec, PreviewStatus } from './contracts.js';
 
-const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
+const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 beforeEach(async (t) => {
   assert.ok('mock' in t, 'The isolated keystore must belong to a test context.');
   if (process.platform === 'darwin' && dockerSocket) await testKeystore(t);

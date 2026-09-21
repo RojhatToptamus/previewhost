@@ -10,7 +10,7 @@ import type { AttemptResult, PreviewSpec, PreviewStatus, SecretSetupStatus } fro
 import { testKeystore } from './testSupport/keystore.js';
 
 const execute = promisify(execFile);
-const dockerSocket = process.env.PREVIEWD_TEST_DOCKER_SOCKET;
+const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 
 test('global MCP defaults support private setup, isolated worktree databases and owner restart without launch overrides', {
   skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000,
@@ -130,9 +130,9 @@ test('global MCP defaults support private setup, isolated worktree databases and
     assert.equal(updated.state, 'ready');
     assert.deepEqual(await (await fetch(updated.url!)).json(), { count: 1, updated: true });
     assert.deepEqual(await (await fetch(second.url!)).json(), { count: 0 });
-    const owners = await readdir(join(home, '.local/share/previewd/projects'));
+    const owners = await readdir(join(home, '.local/share/previewhost/projects'));
     assert.equal(owners.length, 2);
-    const records = await Promise.all(owners.map(id => readFile(join(home, '.local/share/previewd/projects', id, 'data/notes.json'), 'utf8')));
+    const records = await Promise.all(owners.map(id => readFile(join(home, '.local/share/previewhost/projects', id, 'data/notes.json'), 'utf8')));
     assert.notEqual(JSON.parse(records[0]).resources[0].volume, JSON.parse(records[1]).resources[0].volume);
     await assert.rejects(readFile(join(projects[0], 'preview.yaml')), { code: 'ENOENT' });
     await call('preview_stop', projects[0], { name: 'notes' });

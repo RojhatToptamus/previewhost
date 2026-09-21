@@ -22,7 +22,7 @@ The September 15 checks used a local `0.1.0` development build on macOS, disposa
 | Claude Code 2.1.271 and 2.1.272 | Interactive terminal workflows passed project approval, private secret entry, startup, and owner recovery. | Auto mode blocked project-access calls in the 2.1.271 check. |
 | Codex CLI 0.154.0 | Interactive workflows passed project approval, private entry, startup, and database retention after owner recovery. | A completed agent turn can require a continuation message after private entry. |
 | Codex desktop | MCP initialization was observed. | A complete desktop workflow was not verified. |
-| OpenCode 1.18.25 | Earlier interactive tests passed command and API/web previews with per-call start/stop approval. | These used the former `previewd` package and a separate daemon. Global project approval, databases, and secrets remain unverified. |
+| OpenCode 1.18.25 | Earlier interactive tests passed command and API/web previews with per-call start/stop approval. | These used an earlier package version and a separate daemon. Global project approval, databases, and secrets remain unverified. |
 
 The tested workflows included application requests, not only tool discovery.
 An agent's successful behavior in one trial does not guarantee that it will choose correct commands in another project.

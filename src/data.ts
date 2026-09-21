@@ -25,8 +25,7 @@ export interface DataOwner {
 }
 
 const token = z.string().regex(/^[a-f0-9]{32}$/);
-// Persisted Docker names, ownership labels, and database names retain the previewd namespace.
-const objectName = z.string().regex(/^previewd-[a-f0-9]{32}-(?:data|db)$/);
+const objectName = z.string().regex(/^previewhost-[a-f0-9]{32}-(?:data|db)$/);
 const containerId = z.string().regex(/^[a-f0-9]{64}$/);
 const resourceSchema = z.strictObject({
   name: nameSchema, type: z.enum(['postgres', 'redis']),
@@ -56,7 +55,7 @@ async function retainedRecords(root: Awaited<ReturnType<typeof acquireRoot>>): P
   for (const [filename, contents] of await root.records()) {
     let record: RecordData;
     try { record = recordSchema.parse(JSON.parse(contents)); }
-    catch { throw cleanupError('This retained database record is unsupported or invalid. No data was changed. Use a new data directory; see the keystore reset instructions in README.md.'); }
+    catch { throw cleanupError('This retained database record is unsupported or invalid. No data was changed. Use a new data directory; see the reset instructions in README.md.'); }
     if (filename !== `${record.name}.json` || record.owner !== root.owner
       || new Set(record.resources.map((item) => item.name)).size !== record.resources.length
       || (record.pending && !record.resources.some((item) => item.name === record.pending!.resource))
@@ -124,8 +123,8 @@ export async function createDataOwner(options: { directory: string; dockerSocket
     return { docker, id };
   };
   const labels = (record: RecordData, resource: StoredResource, name: string) => ({
-    'io.previewd.owner': record.owner, 'io.previewd.environment': record.name,
-    'io.previewd.resource': resource.name, 'io.previewd.object': name,
+    'io.previewhost.owner': record.owner, 'io.previewhost.environment': record.name,
+    'io.previewhost.resource': resource.name, 'io.previewhost.object': name,
   });
   const inspect = async (record: RecordData, resource: StoredResource, kind: 'volume' | 'container') => {
     const { docker } = await engine(record);
@@ -321,13 +320,13 @@ export async function createDataOwner(options: { directory: string; dockerSocket
             throwIfAborted(startOptions.signal);
             if (resource.container) throw cleanupError('An earlier owned database container still requires cleanup.');
             if (!resource.volume) {
-              resource.volume = `previewd-${fresh()}-data`;
+              resource.volume = `previewhost-${fresh()}-data`;
               await mutate(record, resource, 'create-volume', 'POST', '/volumes/create',
                 { Name: resource.volume, Driver: 'local', Labels: labels(record, resource, resource.volume) }, [201], () => {}, startOptions.signal);
             }
             if (!await inspect(record, resource, 'volume')) throw cleanupError('The retained data volume is missing. Explicit data deletion is required before recreation.');
             throwIfAborted(startOptions.signal);
-            resource.container = { name: `previewd-${fresh()}-db` };
+            resource.container = { name: `previewhost-${fresh()}-db` };
             await mutate(record, resource, 'create-container', 'POST', `/containers/create?name=${resource.container.name}`,
               containerConfig(resource, images.get(resource.type)!, labels(record, resource, resource.container.name)), [201], (response) => {
                 const id = object(response).Id;
@@ -346,7 +345,7 @@ export async function createDataOwner(options: { directory: string; dockerSocket
               const found = await inspect(record, resource, 'container');
               if (!found) throw cleanupError('The owned database container disappeared during startup.');
               const port = publishedPort(found, resource);
-              const url = resource.type === 'postgres' ? `postgresql://previewd:${password}@127.0.0.1:${port}/previewd`
+              const url = resource.type === 'postgres' ? `postgresql://previewhost:${password}@127.0.0.1:${port}/previewhost`
                 : `redis://:${password}@127.0.0.1:${port}/0`;
               const deadline = performance.now() + 30_000;
               while (true) {
@@ -443,7 +442,7 @@ function containerConfig(resource: StoredResource, image: string, labels: Record
     ExposedPorts: { [port]: {} },
     ...(postgres ? { Entrypoint: ['/bin/sh', '-c'],
       Cmd: ['IFS= read -r POSTGRES_PASSWORD || exit 9; test "${#POSTGRES_PASSWORD}" = 64 || exit 9; export POSTGRES_PASSWORD; exec docker-entrypoint.sh postgres'],
-      Env: ['POSTGRES_USER=previewd', 'POSTGRES_DB=previewd'] } : { Cmd: ['redis-server', '-'] }),
+      Env: ['POSTGRES_USER=previewhost', 'POSTGRES_DB=previewhost'] } : { Cmd: ['redis-server', '-'] }),
     HostConfig: { AutoRemove: false, RestartPolicy: { Name: 'no' }, NetworkMode: 'bridge',
       Memory: 536_870_912, NanoCpus: 1_000_000_000, PidsLimit: 128,
       PortBindings: { [port]: [{ HostIp: '127.0.0.1', HostPort: '' }] },

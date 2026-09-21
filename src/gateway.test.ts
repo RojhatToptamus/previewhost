@@ -145,7 +145,7 @@ test('rejects invalid authorities and proxy requests, and bounds HTTP and WebSoc
   const first = await gateway(t, upstream.target);
   assert.equal((await request(first.url, { headers: { host: 'evil.example' } })).status, 421);
   assert.equal((await request(first.url, { path: 'http://evil.example/' })).status, 400);
-  assert.equal((await request(first.url, { headers: { 'x-previewd-hops': 'invalid' } })).status, 400);
+  assert.equal((await request(first.url, { headers: { 'x-previewhost-hops': 'invalid' } })).status, 400);
   const duplicate = await rawClient(t, first.url);
   duplicate.socket.write(`GET / HTTP/1.1\r\nHost: ${new URL(first.url).host}\r\nHost: evil.example\r\n\r\n`);
   await eventually(() => duplicate.text.includes('421'), 'duplicate Host rejection');

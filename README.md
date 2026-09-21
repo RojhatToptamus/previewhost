@@ -25,7 +25,7 @@ Native commands, automatic project owners, and managed databases require macOS.
 The encrypted keystore supports password access across platforms. Password-only tests also run on Linux; Windows remains unverified.
 Automatic unlock requires macOS 13 or later.
 
-For an installation from before the encrypted keystore, follow the [reset instructions](#reset-required-for-earlier-installations) before starting previews.
+For an existing installation, read the [reset instructions](#reset-required-for-earlier-installations) before updating.
 
 Choose the interface you need:
 
@@ -76,10 +76,11 @@ MCP registration and skill installation are separate operations.
 
 ## Reset required for earlier installations
 
-This release does not read, migrate, or delete earlier Keychain secrets or retained-data records.
+This release uses `~/.local/share/previewhost` for runtime storage and Previewhost names for managed Docker resources.
+It does not discover or migrate earlier runtime namespaces, Keychain secrets, or retained-data records. Existing files and resources are left intact.
 
-1. Stop earlier Previewhost owners.
-2. Run `previewhost secrets init`, then [enter required user secrets](docs/secrets.md#change-a-stored-value) through private input.
+1. Before updating, stop earlier Previewhost owners with the installed version.
+2. If no encrypted keystore exists, run `previewhost secrets init`. Enter required secrets through [private input](docs/secrets.md#change-a-stored-value).
 3. For new managed databases, choose a fresh `--data-dir`.
 4. Keep old data directories, Docker volumes, and Keychain items until you decide how to retain them.
 

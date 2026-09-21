@@ -15,7 +15,7 @@ const app = `import http from 'node:http'; import fs from 'node:fs';
   fs.appendFileSync('starts', process.pid + '\\n');
   console.log(process.env.VALUE, encodeURIComponent(process.env.VALUE || ''));
   http.createServer((req,res)=>res.end(JSON.stringify({value:process.env.VALUE,again:process.env.AGAIN,
-    owner:process.env.OWNER,literal:process.env.LITERAL,ambient:process.env.PREVIEWD_UNSELECTED_TEST,other:process.env.OTHER})))
+    owner:process.env.OWNER,literal:process.env.LITERAL,ambient:process.env.PREVIEWHOST_UNSELECTED_TEST,other:process.env.OTHER})))
     .listen(Number(process.env.PORT),process.env.HOST);`;
 
 function body(url: string): Promise<Record<string, string>> {
@@ -38,8 +38,8 @@ test('selected references resolve once before effects, reach only declared recip
   await setSecret('shared', 'FAKE_shared ü\nnext'); await setSecret('other', 'FAKE_other');
   const originalGet = keystore.get.bind(fixture.store);
   const reads = t.mock.method(keystore, 'get', originalGet);
-  const oldAmbient = process.env.PREVIEWD_UNSELECTED_TEST;
-  process.env.PREVIEWD_UNSELECTED_TEST = 'FAKE_ambient';
+  const oldAmbient = process.env.PREVIEWHOST_UNSELECTED_TEST;
+  process.env.PREVIEWHOST_UNSELECTED_TEST = 'FAKE_ambient';
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['shared', 'other'],
     inputs: { SOURCE: 'FAKE_owner' }, authorize: () => true });
   const command = { type: 'command' as const, cwd: fixture.directory, command: [process.execPath, 'app.mjs'] };
@@ -81,7 +81,7 @@ test('selected references resolve once before effects, reach only declared recip
     assert.equal((await body(standalone.url!)).value, 'FAKE_restored');
   } finally {
     await runtime.close();
-    if (oldAmbient === undefined) delete process.env.PREVIEWD_UNSELECTED_TEST; else process.env.PREVIEWD_UNSELECTED_TEST = oldAmbient;
+    if (oldAmbient === undefined) delete process.env.PREVIEWHOST_UNSELECTED_TEST; else process.env.PREVIEWHOST_UNSELECTED_TEST = oldAmbient;
   }
 });
 

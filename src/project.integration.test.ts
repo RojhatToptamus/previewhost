@@ -293,7 +293,7 @@ test('Git worktree roots are distinct and command wait timeout preserves continu
 });
 
 test('one shared MCP connection routes Git worktrees to separate owners and managed data', {
-  ...enabled, skip: process.platform !== 'darwin' || !process.env.PREVIEWD_TEST_DOCKER_SOCKET,
+  ...enabled, skip: process.platform !== 'darwin' || !process.env.PREVIEWHOST_TEST_DOCKER_SOCKET,
 }, async t => {
   const { directory, projects } = await fixture(t);
   const keystore = await testKeystore(t);
@@ -313,7 +313,7 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   const client = new Client({ name: 'worktree-launch', version: '1' });
   t.after(() => client.close());
   await client.connect(new StdioClientTransport({ command: process.execPath,
-    args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWD_TEST_DOCKER_SOCKET!],
+    args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWHOST_TEST_DOCKER_SOCKET!],
     env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } as Record<string, string>, stderr: 'pipe' }));
   const tools = (await client.listTools()).tools;
   assert.ok(tools.every(tool => tool.inputSchema.required?.includes('project')));

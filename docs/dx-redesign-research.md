@@ -77,7 +77,7 @@ The credential workflow keeps values out of YAML, MCP arguments/results and agen
 
 The automatic owner is the existing runtime and daemon in a detached process. Its lifetime is independent of stdio. CLI and MCP use the existing authenticated HTTP client.
 
-A private directory under `~/.local/share/previewd/projects` contains a token, permanent lock and connection record. A SHA-256 digest of the canonical project path supplies a fixed-length filesystem address for arbitrary path lengths. This digest is neither a configuration signature nor an authority check.
+A private directory under `~/.local/share/previewhost/projects` contains a token, permanent lock and connection record. A SHA-256 digest of the canonical project path supplies a fixed-length filesystem address for arbitrary path lengths. This digest is neither a configuration signature nor an authority check.
 
 The lifetime lock uses Darwin `O_EXLOCK`, the same mechanism already used by the data owner. It prevents competing first callers from owning the project. The connection record is published after listener readiness and contains endpoint, PID, project path, data directory, and any explicit Docker socket. Clients authenticate, then compare the responding project and explicitly requested launch settings. They never reconstruct authority from the record.
 

@@ -9,8 +9,7 @@ import type { ProjectOwnerInfo } from './project.js';
 
 export interface ClientOptions { endpoint?: string; tokenFile?: string }
 export const defaultEndpoint = 'http://127.0.0.1:9400';
-// Retain the existing token path so renamed clients reconnect without moving secrets.
-export const defaultTokenFile = (): string => join(homedir(), '.local', 'share', 'previewd', 'token');
+export const defaultTokenFile = (): string => join(homedir(), '.local', 'share', 'previewhost', 'token');
 
 /** Shared by the local transport's reader and creator, not a permission grant. */
 export async function checkTokenDirectory(path: string): Promise<void> {

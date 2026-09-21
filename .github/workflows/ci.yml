@@ -39,7 +39,7 @@ jobs:
         run: |
           colima start --runtime docker --vm-type vz --cpus 2 --memory 4
           docker info
-          echo "PREVIEWD_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+          echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
       - name: Pull database images
         run: |
           docker pull postgres:17-alpine

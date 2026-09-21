@@ -4,8 +4,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export async function checkReleasePrerequisites(platform, socket) {
   if (platform !== 'darwin') throw new Error('Release verification requires macOS.');
-  if (!socket?.trim()) throw new Error('Set PREVIEWD_TEST_DOCKER_SOCKET to the local Docker Unix socket before release verification.');
-  if (!(await stat(socket)).isSocket()) throw new Error('PREVIEWD_TEST_DOCKER_SOCKET must select a local Docker Unix socket.');
+  if (!socket?.trim()) throw new Error('Set PREVIEWHOST_TEST_DOCKER_SOCKET to the local Docker Unix socket before release verification.');
+  if (!(await stat(socket)).isSocket()) throw new Error('PREVIEWHOST_TEST_DOCKER_SOCKET must select a local Docker Unix socket.');
 }
 
 export function checkReleaseResult(code, output) {
@@ -23,7 +23,7 @@ export function checkReleaseResult(code, output) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    await checkReleasePrerequisites(process.platform, process.env.PREVIEWD_TEST_DOCKER_SOCKET);
+    await checkReleasePrerequisites(process.platform, process.env.PREVIEWHOST_TEST_DOCKER_SOCKET);
     const child = spawn('npm', ['run', 'verify'], { cwd: fileURLToPath(new URL('..', import.meta.url)), stdio: ['inherit', 'pipe', 'inherit'] });
     let tail = '';
     child.stdout.setEncoding('utf8');

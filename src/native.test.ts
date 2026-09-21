@@ -16,15 +16,15 @@ import fs from 'node:fs';
 fs.writeFileSync('identity.json', JSON.stringify({ pid: process.pid, group: process.ppid }));
 http.createServer((request, response) => response.end(JSON.stringify({
   port: process.env.PORT, host: process.env.HOST, url: process.env.PREVIEW_URL,
-  inheritedSecret: process.env.PREVIEWD_TEST_UNDECLARED_SECRET,
+  inheritedSecret: process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET,
   argv: process.argv.slice(2),
 }))).listen(Number(process.env.PORT), process.env.HOST);
 `;
 
 nativeTest('native argv/env and listener ownership work from a directory with spaces; stop removes the group', async () => {
   const root = await fixture(server);
-  const previous = process.env.PREVIEWD_TEST_UNDECLARED_SECRET;
-  process.env.PREVIEWD_TEST_UNDECLARED_SECRET = 'must-not-inherit';
+  const previous = process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET;
+  process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET = 'must-not-inherit';
   let resource: NativeResource | undefined;
   try {
     resource = await launch(root, { command: [process.execPath, 'server.mjs', '{port}', 'literal $HOME; echo ignored'] });
@@ -41,8 +41,8 @@ nativeTest('native argv/env and listener ownership work from a directory with sp
     assert.equal(present(-identity.group), false);
     await assert.rejects(fetch(`http://127.0.0.1:${resource.target.port}/`));
   } finally {
-    if (previous === undefined) delete process.env.PREVIEWD_TEST_UNDECLARED_SECRET;
-    else process.env.PREVIEWD_TEST_UNDECLARED_SECRET = previous;
+    if (previous === undefined) delete process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET;
+    else process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET = previous;
     await resource?.stop(); await rm(root, { recursive: true, force: true });
   }
 });

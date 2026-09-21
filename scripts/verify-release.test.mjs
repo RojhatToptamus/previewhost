@@ -9,7 +9,7 @@ const execute = promisify(execFile);
 
 test('release verification rejects missing prerequisites before running the suite', async () => {
   await assert.rejects(checkReleasePrerequisites('linux', '/unused'), /requires macOS/);
-  await assert.rejects(checkReleasePrerequisites('darwin', undefined), /PREVIEWD_TEST_DOCKER_SOCKET/);
+  await assert.rejects(checkReleasePrerequisites('darwin', undefined), /PREVIEWHOST_TEST_DOCKER_SOCKET/);
   await assert.rejects(checkReleasePrerequisites('darwin', fileURLToPath(import.meta.url)), /Unix socket/);
 });
 

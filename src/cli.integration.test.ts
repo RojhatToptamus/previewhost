@@ -119,8 +119,8 @@ test('the foreground CLI owns its daemon and explicit shutdown ends it without a
   const directory = await mkdtemp(join(tmpdir(), 'previewhost serve '));
   const tokenFile = join(directory, 'private', 'token');
   const secret = 'selected-owner-input-must-stay-private';
-  const owner = spawn(process.execPath, [cli, 'serve', '--root', directory, '--env', 'PREVIEWD_SELECTED_INPUT', '--token-file', tokenFile, '--port', '0'], {
-    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PREVIEWD_SELECTED_INPUT: secret, PREVIEWD_UNSELECTED_INPUT: 'not-selected' },
+  const owner = spawn(process.execPath, [cli, 'serve', '--root', directory, '--env', 'PREVIEWHOST_SELECTED_INPUT', '--token-file', tokenFile, '--port', '0'], {
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PREVIEWHOST_SELECTED_INPUT: secret, PREVIEWHOST_UNSELECTED_INPUT: 'not-selected' },
   });
   const exit = once(owner, 'exit');
   let stderr = '';
@@ -134,18 +134,18 @@ test('the foreground CLI owns its daemon and explicit shutdown ends it without a
   lines.close();
   const info = JSON.parse(line);
   assert.equal(info.execution, 'disabled');
-  assert.deepEqual(info.inputKeys, ['PREVIEWD_SELECTED_INPUT']);
+  assert.deepEqual(info.inputKeys, ['PREVIEWHOST_SELECTED_INPUT']);
   assert.ok(!line.includes(secret));
   const client = connectPreviewDaemon({ endpoint: info.endpoint, tokenFile });
   t.after(() => client.close());
   assert.deepEqual(await client.list(), []);
   const environment = { name: 'inputs', type: 'environment' as const, primary: 'api', services: {
     api: { type: 'command' as const, cwd: directory, command: [process.execPath, '-e', 'process.exit(99)'],
-      env: { TOKEN: { fromEnv: 'PREVIEWD_SELECTED_INPUT' } } },
+      env: { TOKEN: { fromEnv: 'PREVIEWHOST_SELECTED_INPUT' } } },
   } };
   const description = await client.inspect(environment);
   assert.ok(!JSON.stringify(description).includes(secret));
-  environment.services.api.env.TOKEN.fromEnv = 'PREVIEWD_UNSELECTED_INPUT';
+  environment.services.api.env.TOKEN.fromEnv = 'PREVIEWHOST_UNSELECTED_INPUT';
   await assert.rejects(client.inspect(environment), { code: 'INVALID_INPUT' });
   await client.shutdown();
   assert.equal((await exit)[0], 0, stderr);

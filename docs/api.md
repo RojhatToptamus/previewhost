@@ -370,7 +370,7 @@ Incompatible explicit settings report an error without reconfiguring or terminat
 Selected input values are captured at startup. Restarting the owner is required to refresh them.
 
 An explicit `--endpoint` or `--token-file` selects connection-only mode.
-That mode uses `http://127.0.0.1:9400` and `~/.local/share/previewd/token` for any omitted connection value.
+That mode uses `http://127.0.0.1:9400` and `~/.local/share/previewhost/token` for any omitted connection value.
 It accepts no launch-permission flags and never starts an owner.
 `--version` prints the installed package version.
 

@@ -57,7 +57,7 @@ Approval starts a project owner; each worktree and additional source needs appro
 MCP, inspect/start/replace, and secrets setup/edit accept the owner launch options
 shown above. Incompatible options leave a living owner unchanged.
 Explicit --endpoint or --token-file selects connection-only mode. Its defaults
-are http://127.0.0.1:9400 and ~/.local/share/previewd/token. This mode accepts no
+are http://127.0.0.1:9400 and ~/.local/share/previewhost/token. This mode accepts no
 launch permissions. Serve remains a supported foreground owner.
 --allow-exec grants native execution, managed database operations, private secret
 setup, and explicit data deletion/recovery. It is not a sandbox.
