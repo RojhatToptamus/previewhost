@@ -60,6 +60,42 @@ if (process.platform === 'win32') test('Windows private creation, inherited ACLs
   assert.throws(() => makePrivateDirectory(junction), { code: 'UNAUTHORIZED' });
 });
 
+if (process.platform === 'win32') test('Windows connection reads tolerate clean shutdown unlinking after stat', async t => {
+  const fs = (await import('node:fs/promises')).default;
+  const { basename } = await import('node:path');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { projectOwnerDirectory, readProjectRecord, writeProjectRecord } = await import('./project.js');
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-record-unlink-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, basename(projectOwnerDirectory(root)));
+  makePrivateDirectory(directory);
+  const record = { projectDirectory: root, dataDirectory: join(root, 'data') };
+  await writeProjectRecord(directory, record);
+  assert.deepEqual(await readProjectRecord(directory), record);
+  const path = join(directory, 'connection.json');
+  const open = fs.open;
+  let unlinked = false;
+  const replacement = t.mock.method(fs, 'open', async (...args: Parameters<typeof open>) => {
+    const file = await open(...args);
+    if (args[0] === path) {
+      const stat = file.stat.bind(file);
+      t.mock.method(file, 'stat', async () => {
+        const info = await stat();
+        assert.equal(info.nlink, 1);
+        await fs.unlink(path);
+        unlinked = true;
+        return info;
+      });
+    }
+    return file;
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(await readProjectRecord(directory), undefined);
+    assert.equal(unlinked, true, 'The record must be removed after the open handle was statted.');
+  } finally { replacement.mock.restore(); syncBuiltinESMExports(); }
+});
+
 if (process.platform === 'win32') test('Windows rejects non-inheritable private directories before writing a token and permits split inheritance', async t => {
   const { execFileSync } = await import('node:child_process');
   const { mkdir, lstat } = await import('node:fs/promises');

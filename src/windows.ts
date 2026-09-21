@@ -72,13 +72,19 @@ function currentIdentity() {
   } finally { win().close(token[0]); }
 }
 
+function privateStorageError(code: number): Error {
+  if (code === 2 || code === 3) return Object.assign(new Error('Private storage path is missing.'), { code: 'ENOENT' });
+  return new PreviewError('UNAUTHORIZED', `Cannot inspect private storage (${code}).`);
+}
+
 /** Existing ACLs are validated, never silently repaired. SYSTEM and administrators retain OS authority. */
 export function assertWindowsPrivate(path: string): void {
   const attributes = win().fileAttributes(path);
-  if (attributes === 0xffffffff || (attributes & 0x400)) throw new PreviewError('UNAUTHORIZED', 'Private storage must not contain a reparse point.');
+  if (attributes === 0xffffffff) throw privateStorageError(win().error());
+  if (attributes & 0x400) throw new PreviewError('UNAUTHORIZED', 'Private storage must not contain a reparse point.');
   const owner = [null], dacl = [null], descriptor = [null];
   const result = win().securityInfo(path, 1, 0x00000001 | 0x00000004, owner, null, dacl, null, descriptor);
-  if (result !== 0) throw new PreviewError('UNAUTHORIZED', `Cannot inspect private storage ACL (${result}).`);
+  if (result !== 0) throw privateStorageError(result);
   try {
     if (!owner[0] || !dacl[0]) throw new PreviewError('UNAUTHORIZED', 'Private storage requires an owner and a restricted ACL.');
     const account = currentIdentity(), actualOwner = sidText(owner[0]);

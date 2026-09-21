@@ -93,7 +93,13 @@ try {
   assert.deepEqual(manifest.bin, { previewhost: './dist/cli.js' });
   for (const hook of ['preinstall', 'install', 'postinstall']) assert.equal(manifest.scripts[hook], undefined);
   for (const extra of ['typescript', '@types/node', '@modelcontextprotocol/client', 'react', 'react-dom', 'vite', 'tailwindcss', 'radix-ui', 'sonner']) await assert.rejects(stat(join(directory, 'node_modules', extra)));
-  assert((await stat(binary)).mode & 0o111);
+  if (process.platform === 'win32') {
+    assert((await stat(binary + '.cmd')).isFile());
+    const version = execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `""${binary}.cmd" --version"`], {
+      windowsVerbatimArguments: true, encoding: 'utf8', timeout: 10_000,
+    });
+    assert.equal(version.trim(), manifest.version);
+  } else assert((await stat(binary)).mode & 0o111);
   await mkdir(site, { recursive: true });
   await writeFile(join(site, 'index.html'), 'packaged-static');
   await writeFile(join(site, 'server.mjs'), 'import http from "node:http"; http.createServer((_q,r)=>r.end(JSON.stringify({message:"packaged-native",pid:process.pid}))).listen(Number(process.env.PORT),"127.0.0.1");');
