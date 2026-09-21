@@ -278,6 +278,8 @@ AES-256-GCM authenticates the payload. Each write uses a fresh 12-byte nonce.
 Scrypt derives a 32-byte key from the password and a random 16-byte salt (`N=32768`, `r=8`, `p=1`).
 SQLite stores only the encrypted payload and its salt, nonce, and authentication tag.
 Its transactions serialize writers and recover interrupted commits. POSIX directories use mode 0700 and files use mode 0600.
+Windows managed-database operations are disabled until the connected Docker pipe server can be authenticated.
+
 Windows validates the owner and ACL. Elevated processes can create administrator-owned files; these are accepted only when Administrators is the token's default owner. New private directories grant inherited access only to that user, SYSTEM, and Administrators.
 Existing broad ACLs and reparse points are rejected. See the [platform verification results](cross-platform-research.md#results).
 

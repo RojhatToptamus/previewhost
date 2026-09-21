@@ -22,7 +22,8 @@ Stop ends owned processes and retains managed database data.
 
 Previewhost requires Node.js 22.23 or later on x64 or arm64.
 Native commands, automatic project owners, and managed databases have macOS and Linux implementations.
-Windows qualification is incomplete, particularly managed database retention. See the [verification results](docs/cross-platform-research.md#results).
+Windows native workflows are under qualification. Managed databases remain disabled pending Docker pipe authentication and retention testing.
+See the [verification results](docs/cross-platform-research.md#results).
 Linux requires procps (`/bin/ps`) and `lsof` (`/usr/bin/lsof`).
 Automatic unlock requires macOS 13 or later.
 

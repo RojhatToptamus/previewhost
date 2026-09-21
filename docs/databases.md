@@ -15,7 +15,7 @@ Two external entries with the same connection URL still share data.
 
 ## Prepare Docker
 
-Managed databases require an unlocked keystore, private local storage, and a local Docker Engine. Windows retained-data behavior remains unverified.
+Managed databases require an unlocked keystore, private local storage, and a local Docker Engine. Windows managed databases are disabled pending Docker pipe authentication and retained-data tests.
 Download the images for the database types you intend to use:
 
 ```sh

@@ -132,7 +132,14 @@ Previewhost does not read `DOCKER_HOST` or change behavior with the active Docke
 This preserves explicit ownership and avoids silent endpoint changes during retained-data recovery.
 Engine IDs, endpoint comparisons, resource labels, and exact container identities remain mandatory before cleanup.
 HTTP requests and upgraded initialization streams share the existing transport implementation.
-Windows database verification needs a Linux-container backend for the existing PostgreSQL and Redis images.
+Windows managed-database operations remain blocked before Docker access or credential creation.
+A pipe name does not authenticate its server. The first engine ID is supplied by that server, so it cannot establish initial trust.
+[Microsoft pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights) protects an existing pipe; it does not reserve an absent name.
+Another account impersonating a stopped endpoint is a source-supported risk, not a reproduced cross-account attack.
+Qualification requires checking the actual connected pipe before sending credentials, including on each attach connection.
+A separate pathname check would leave a replacement race.
+The next experiment must use an unused pipe name, two disposable accounts, and dummy input.
+Real database verification also needs a Linux-container backend for PostgreSQL and Redis.
 
 ### Reproducible checks
 
@@ -173,7 +180,8 @@ Permission errors remain failures. A deterministic test deletes a real record be
 Package checks now handle temporary directories on another drive and execute the installed Windows `.cmd` launcher instead of asserting Unix execute bits.
 No retries or longer deadlines were added.
 
-Full Windows database retention and recovery still need a Windows machine with Docker Desktop Linux containers.
+Windows managed databases remain disabled until connected-pipe authentication is implemented and tested.
+Full retention and recovery then need a Windows machine with Docker Desktop Linux containers.
 The configured hosted Windows jobs do not supply that backend. Named-pipe transport tests do not qualify database behavior.
 The two missing-Docker project fixtures also need a Windows named-pipe fixture and error-contract verification.
 Ordinary-user execution, explicit nested-job compatibility, and host/power-loss behavior remain unverified.

@@ -14,8 +14,8 @@ Install Previewhost with npm. Check the Node.js, operating-system, and Docker re
 | Your application's dependencies | Install these before startup, or declare [setup jobs](jobs.md). |
 
 Windows native and private-storage checks have execution results on x64 and arm64.
-Windows managed databases require Docker Desktop with Linux containers.
-Windows qualification, including retained-data recovery, is incomplete. See the [verification results](cross-platform-research.md#results).
+Windows managed databases are disabled pending Docker pipe authentication and retained-data tests.
+Their qualification needs a Windows host with Docker Desktop Linux containers. Windows qualification is incomplete. See the [verification results](cross-platform-research.md#results).
 
 The npm package includes the macOS Keychain helper and uses Koffi platform packages for kernel APIs. Installation needs no compiler or GitHub access.
 
