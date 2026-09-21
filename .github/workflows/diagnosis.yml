@@ -15,11 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        os: [windows-2025]
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: c30ea2d78524da74659b6bff982e0cceb2bd25f7
+          ref: 82d4e12c8d2c92cc6fabef5e7d5ae8961e52dbcf
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
