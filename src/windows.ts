@@ -1,5 +1,6 @@
 import koffi from 'koffi';
-import { lstatSync } from 'node:fs';
+import { closeSync, lstatSync } from 'node:fs';
+import { Socket } from 'node:net';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { PreviewError } from './errors.js';
@@ -21,6 +22,9 @@ function load() {
     close: kernel.func('int __stdcall CloseHandle(void *)'),
     free: kernel.func('void * __stdcall LocalFree(void *)'),
     current: kernel.func('void * __stdcall GetCurrentProcess()'),
+    module: kernel.func('void * __stdcall GetModuleHandleW(const char16_t *)'),
+    procedure: kernel.func('void * __stdcall GetProcAddress(void *, const char *)'),
+    adoptPipe: koffi.proto('int previewhost_adopt_pipe(void *)'),
     openProcess: kernel.func('void * __stdcall OpenProcess(uint32, int, uint32)'),
     times: kernel.func('int __stdcall GetProcessTimes(void *, _Out_ uint64 *, _Out_ uint64 *, _Out_ uint64 *, _Out_ uint64 *)'),
     createJob: kernel.func('void * __stdcall CreateJobObjectW(void *, const char16_t *)'),
@@ -35,6 +39,7 @@ function load() {
     sidString: security.func('int __stdcall ConvertSidToStringSidW(void *, _Out_ void **)'),
     descriptor: security.func('int __stdcall ConvertStringSecurityDescriptorToSecurityDescriptorW(const char16_t *, uint32, _Out_ void **, void *)'),
     securityInfo: security.func('uint32 __stdcall GetNamedSecurityInfoW(const char16_t *, int, uint32, _Out_ void **, void *, _Out_ void **, void *, _Out_ void **)'),
+    handleSecurity: security.func('uint32 __stdcall GetSecurityInfo(void *, int, uint32, _Out_ void **, void *, _Out_ void **, void *, _Out_ void **)'),
     ace: security.func('int __stdcall GetAce(void *, uint32, _Out_ void **)'),
     mkdir: kernel.func('__stdcall', 'CreateDirectoryW', 'int', ['str16', koffi.pointer(attributes)]),
     open: kernel.func('void * __stdcall CreateFileW(const char16_t *, uint32, uint32, void *, uint32, uint32, void *)'),
@@ -77,6 +82,54 @@ function privateStorageError(code: number): Error {
   return new PreviewError('UNAUTHORIZED', `Cannot inspect private storage (${code}).`);
 }
 
+function restrictedAcl(dacl: unknown, label: string): number {
+  if (!dacl) throw new PreviewError('UNAUTHORIZED', `${label} requires a restricted ACL.`);
+  const allowed = [currentIdentity().user, 'S-1-5-18', 'S-1-5-32-544'];
+  const count = koffi.decode(dacl, 4, 'uint16') as number;
+  let inheritance = 0;
+  for (let i = 0; i < count; i++) {
+    const entry = [null];
+    if (!win().ace(dacl, i, entry)) throw failure('ACL inspection');
+    const header = Buffer.from(koffi.decode(entry[0], 'uint8', 4));
+    // Accept only ordinary allow entries for known principals. Unknown ACE forms fail closed.
+    if (header[0] !== 0 || header.readUInt16LE(2) < 16) throw new PreviewError('UNAUTHORIZED', `${label} has an unsupported ACL entry.`);
+    const sid = sidText(koffi.address(entry[0]) + 8n);
+    if (!allowed.includes(sid)) throw new PreviewError('UNAUTHORIZED', `${label} permits another account.`);
+    if (!(header[1] & 0x04)) inheritance |= header[1] & 0x03; // OI/CI without NO_PROPAGATE.
+  }
+  return inheritance;
+}
+
+/** Authenticate the connected pipe's account boundary before giving that same handle to HTTP. */
+export function connectWindowsPipe(path: string): Socket {
+  const api = win();
+  const adopt = api.procedure(api.module(null), 'uv_open_osfhandle');
+  if (!adopt) throw new PreviewError('UNSUPPORTED_PLATFORM', 'This Node build cannot adopt a verified Windows pipe.');
+  // OVERLAPPED and anonymous SQOS: the pipe server must never impersonate this client.
+  const handle = api.open(path, 0xc0000000, 0, null, 3, 0x40000000 | 0x00100000, null);
+  if (koffi.address(handle) === 0xffffffffffffffffn) throw failure('Docker pipe open');
+  let adopted = false;
+  try {
+    const owner = [null], dacl = [null], descriptor = [null];
+    const result = api.handleSecurity(handle, 6, 0x1 | 0x4, owner, null, dacl, null, descriptor);
+    if (result !== 0) throw new PreviewError('UNAUTHORIZED', `Cannot inspect connected Docker pipe (${result}).`);
+    try {
+      if (!owner[0] || ![currentIdentity().user, 'S-1-5-18', 'S-1-5-32-544'].includes(sidText(owner[0]))) {
+        throw new PreviewError('UNAUTHORIZED', 'Docker pipe has an untrusted owner.');
+      }
+      restrictedAcl(dacl[0], 'Docker pipe');
+    } finally { api.free(descriptor[0]); }
+    // Use Node's exported libuv function, not another DLL's independent C runtime descriptor table.
+    const fd = koffi.call(adopt, api.adoptPipe, handle) as number;
+    if (fd < 0) throw new PreviewError('START_FAILED', 'The verified Docker pipe could not be adopted.');
+    adopted = true;
+    // libuv duplicates stdio descriptors and leaves the original open. Refuse that ownership exception.
+    if (fd <= 2) { closeSync(fd); throw new PreviewError('START_FAILED', 'Docker pipe adoption requires open standard streams.'); }
+    try { return new Socket({ fd, readable: true, writable: true }); }
+    catch (error) { closeSync(fd); throw error; }
+  } finally { if (!adopted) api.close(handle); }
+}
+
 /** Existing ACLs are validated, never silently repaired. SYSTEM and administrators retain OS authority. */
 export function assertWindowsPrivate(path: string): void {
   const attributes = win().fileAttributes(path);
@@ -92,18 +145,7 @@ export function assertWindowsPrivate(path: string): void {
     if (actualOwner !== account.user && !(actualOwner === account.owner && actualOwner === 'S-1-5-32-544')) {
       throw new PreviewError('UNAUTHORIZED', 'Private storage has an untrusted owner.');
     }
-    const count = koffi.decode(dacl[0], 4, 'uint16') as number;
-    let inheritance = 0;
-    for (let i = 0; i < count; i++) {
-      const entry = [null];
-      if (!win().ace(dacl[0], i, entry)) throw failure('ACL inspection');
-      const header = Buffer.from(koffi.decode(entry[0], 'uint8', 4));
-      // Accept only ordinary allow entries for known principals. Unknown ACE forms fail closed.
-      if (header[0] !== 0 || header.readUInt16LE(2) < 16) throw new PreviewError('UNAUTHORIZED', 'Private storage has an unsupported ACL entry.');
-      const sid = sidText(koffi.address(entry[0]) + 8n);
-      if (![account.user, 'S-1-5-18', 'S-1-5-32-544'].includes(sid)) throw new PreviewError('UNAUTHORIZED', 'Private storage permits another account.');
-      if (!(header[1] & 0x04)) inheritance |= header[1] & 0x03; // OI/CI without NO_PROPAGATE.
-    }
+    const inheritance = restrictedAcl(dacl[0], 'Private storage');
     // Otherwise new children can fall back to the creator token's default DACL.
     if ((attributes & 0x10) && inheritance !== 0x03) throw new PreviewError('UNAUTHORIZED', 'Private directories must propagate restricted permissions to files and subdirectories.');
   } finally { win().free(descriptor[0]); }
