@@ -1,7 +1,20 @@
 {
   "name": "previewhost",
   "version": "0.2.0-alpha.0",
-  "description": "Local HTTP previews for applications and coding agents.",
+  "description": "Run apps and services in local preview environments with stable URLs.",
+  "keywords": [
+    "local-preview",
+    "preview-environment",
+    "local-development",
+    "dev-server",
+    "preview",
+    "cli",
+    "mcp",
+    "coding-agents",
+    "ai-agents",
+    "worktrees",
+    "localhost"
+  ],
   "homepage": "https://previewhost.app",
   "type": "module",
   "license": "MIT",
