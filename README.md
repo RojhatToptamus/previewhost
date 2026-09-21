@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/previewhost.svg" width="144" height="144" alt="previewhost app icon">
+  <img src="./assets/previewhost.svg" width="96" height="108" alt="Previewhost logo">
 </p>
 
 <h1 align="center">previewhost</h1>

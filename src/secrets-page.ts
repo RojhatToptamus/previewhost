@@ -1,10 +1,10 @@
-import { uiStyle, themeScript } from './ui.js';
+import { uiStyle, themeScript, brandMark } from './ui.js';
 
 // Fixed first-party assets. Request labels are inserted as text by the script.
 export const secretsPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>previewhost · Secrets</title><link rel="stylesheet" href="/secrets.css"><script src="/secrets.js" defer></script></head>
-<body><header><span class="brand">previewhost</span><span class="slash">/</span><span id="crumb">Private setup</span><button id="theme" aria-label="Switch to dark theme">Dark</button></header><main><h1 id="title">Private secret setup</h1>
+<body><header><span class="brand"><span class="brand-icon" aria-hidden="true">${brandMark}</span>previewhost</span><span class="slash">/</span><span id="crumb">Private setup</span><button id="theme" aria-label="Switch to dark theme">Dark</button></header><main><h1 id="title">Private secret setup</h1>
 <p id="message" role="status" aria-live="polite">Loading this request…</p>
 <dl id="context"></dl><form id="form" hidden autocomplete="off"><div id="fields"></div>
 <label class="reveal" id="reveal-label"><input type="checkbox" id="reveal"> Show values</label>
@@ -42,6 +42,9 @@ input[type=checkbox] { width:16px; height:16px; accent-color:var(--inv-bg); }
   .path { flex-wrap:wrap; }
   .path-parent { flex-basis:100%; }
   .path-tail { white-space:normal; overflow-wrap:anywhere; flex-shrink:1; }
+}
+@media(max-width:380px) {
+  header .slash,header #crumb { display:none; }
 }
 `;
 

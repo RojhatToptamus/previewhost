@@ -8,6 +8,7 @@ body {
   --ok:#0f7b55; --err:#c5372c; --warn:#9a6700;
   --err-border:#eddcda; --warn-border:#ece4d3; --err-soft:#8a3a33;
   --control-height:32px; --control-small:28px; --control-radius:6px; --panel-radius:8px;
+  --brand-icon-size:20px;
   color-scheme:light;
 }
 body.ph-dark {
@@ -19,3 +20,5 @@ body.ph-dark {
   --err-border:#3a2320; --warn-border:#37301c; --err-soft:#f0a29b;
   color-scheme:dark;
 }
+.brand-icon { display:inline-flex; flex:none; width:var(--brand-icon-size); height:var(--brand-icon-size); color:inherit; }
+.brand-icon>svg { display:block; width:100%; height:100%; }

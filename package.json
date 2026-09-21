@@ -23,6 +23,7 @@
     "dist/fonts",
     "dist/dashboard",
     "dist/ui-tokens.css",
+    "dist/previewhost.svg",
     "dist/skills/previewhost",
     "examples/static.json",
     "examples/command.json",
