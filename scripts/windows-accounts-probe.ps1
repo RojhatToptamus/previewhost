@@ -9,7 +9,7 @@ $node = (Get-Command node.exe).Source
 $ProductRoot = (Resolve-Path $ProductRoot).Path
 if (-not (Test-Path (Join-Path $ProductRoot 'dist/docker.js'))) { throw 'Compile the product before this probe.' }
 $id = [Guid]::NewGuid().ToString('N')
-$directory = Join-Path $env:TEMP "previewhost-accounts-$id"
+$directory = Join-Path $env:PUBLIC "previewhost-accounts-$id"
 $accounts = @()
 $processes = [Collections.Generic.List[Diagnostics.Process]]::new()
 $deadline = [DateTime]::UtcNow.AddSeconds(150)

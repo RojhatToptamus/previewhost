@@ -32,6 +32,12 @@ jobs:
       - run: npx tsc -p tsconfig.test.json
       - name: Connected pipe authentication and private-storage regressions
         run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/docker.test.js .local/test-build/platform.test.js
+      - name: Installed package
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/platform-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/platform-package"
+          npm run check:package -- "$RUNNER_TEMP"/platform-package/*.tgz
       - uses: actions/checkout@v7
         with:
           ref: codex/ci-diagnosis
@@ -43,15 +49,9 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Get-ChildItem $env:TEMP -Directory -Filter 'previewhost-accounts-*' | ForEach-Object {
+          Get-ChildItem $env:PUBLIC -Directory -Filter 'previewhost-accounts-*' | ForEach-Object {
             Get-ChildItem $_.FullName -File | Where-Object Name -Match 'result.json$|stderr$|stdout$' | ForEach-Object {
               Write-Output $_.Name
               Get-Content -LiteralPath $_.FullName
             }
           }
-      - name: Installed package
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/platform-package"
-          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/platform-package"
-          npm run check:package -- "$RUNNER_TEMP"/platform-package/*.tgz
