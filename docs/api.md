@@ -503,7 +503,7 @@ A fresh setup rechecks availability after CLI entry and invalidates an obsolete 
 Save starts no application. Check status and current preview state before another start/replace with the current spec.
 Re-read file-based specs after private entry. Do not run an obsolete file or implicitly approve newly edited names.
 
-If the agent turn ends, send “Secrets saved—continue”. Retain the original project path and request ID together.
+If the agent turn ends, send “Secrets saved. Continue.” Retain the original project path and request ID together.
 Form close or expiry also starts no application.
 
 Owner restart loses access approvals and setup history, but stored values remain.

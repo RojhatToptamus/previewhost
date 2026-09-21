@@ -1,6 +1,7 @@
 # Secrets
 
 Store credentials in an encrypted keystore and bind them to applications by name.
+
 Private setup handles access approval, password unlock, and missing values outside the agent conversation.
 
 ## Declare references
@@ -47,7 +48,7 @@ previewhost secrets status REQUEST_ID --timeout-ms 25000
 
 Replace `REQUEST_ID` with the actual ID. A `complete` result means setup finished, not that an application started.
 Read the current configuration and preview status before starting or replacing the preview.
-If the agent turn ended, send it “Secrets saved—continue”.
+If the agent turn ended, send it “Secrets saved. Continue.”
 
 If setup is `pending` or `saving`, keep the same request ID.
 If you cancel the form, that request stays canceled. Partial saves retain completed writes.

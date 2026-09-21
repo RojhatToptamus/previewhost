@@ -691,7 +691,7 @@ export function DocsApp({ initialPageId = "welcome", html }: { initialPageId?: D
   }, [mobileNavOpen, searchOpen]);
 
   useEffect(() => {
-    document.title = `${currentPage.title} · Previewhost`;
+    document.title = currentPage.documentTitle;
     document.querySelector('meta[name="description"]')?.setAttribute("content", currentPage.description);
     setActiveSection(currentPage.sections[0]?.id ?? "");
     setPageCopied(false);

@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Resolve Previewhost installation, startup, routing, database, and secret access errors. Recover an owner or inspect a failed preview.
+
 Commands on this page use `previewhost` from PATH.
 For a local installation, use `./node_modules/.bin/previewhost` from your application directory.
 Replace `NAME`, `ATTEMPT_ID`, and `REQUEST_ID` with values from your configuration or command output.
@@ -205,7 +207,7 @@ The private owner form first approves access to unselected names, then collects 
 Save does not start an application.
 
 Check `previewhost secrets status REQUEST_ID --timeout-ms 25000` before a startup retry.
-Use the original project path and re-read the current spec. If the agent turn ended, send “Secrets saved—continue”.
+Use the original project path and re-read the current spec. If the agent turn ended, send “Secrets saved. Continue.”
 
 If status is `canceled`, stop setup. Wait for an explicit user request before new setup or startup.
 Do not assume the user closed the browser accidentally. A canceled form cannot be reused.

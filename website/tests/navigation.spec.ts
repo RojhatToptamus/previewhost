@@ -6,7 +6,7 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
-  await expect(page).toHaveTitle('Introduction · Previewhost');
+  await expect(page).toHaveTitle('Previewhost documentation | Local application previews');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Introduction');
   await expect(page.locator('.docs-sidebar')).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('desktop-light.png') });
@@ -15,6 +15,12 @@ test('static documentation, links, images, search, theme and copying', async ({ 
     const response = await page.goto(href);
     expect(response?.status(), href).toBe(200);
     await expect(page.locator('h1')).toHaveCount(1);
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', await page.title());
+    await expect(page.locator('meta[property="og:description"]')).toHaveAttribute('content', await page.locator('meta[name="description"]').getAttribute('content') ?? '');
+    const markdown = await page.locator('link[rel="alternate"][type="text/markdown"]').getAttribute('href');
+    const markdownResponse = await page.request.get(new URL(markdown!, page.url()).pathname);
+    expect(markdownResponse.status()).toBe(200);
+    expect(await markdownResponse.text()).toMatch(/^# /);
     await expect(page.locator('.docs-sidebar-nav [aria-current="page"]')).toHaveAttribute('href', href);
     expect(await page.locator('img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)), href).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), href).toBe(true);
@@ -50,6 +56,9 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   await expect(page).toHaveURL(/first-preview/);
   await page.goBack();
   await expect(page).toHaveURL(/installation/);
+  await page.goto('/mcp/index.html');
+  await expect(page.locator('h1')).toHaveText('MCP setup');
+  await expect(page).toHaveTitle('MCP setup | Previewhost');
   expect(errors).toEqual([]);
 });
 

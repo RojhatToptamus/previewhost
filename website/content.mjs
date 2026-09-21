@@ -9,7 +9,7 @@ export const escapeHtml = (value) => value.replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]);
 const slug = (text) => text.toLowerCase().replace(/<[^>]*>/g, '').replace(/[^\p{L}\p{N}_\s-]/gu, '').trim().replace(/\s/g, '-');
-const plain = (text) => text.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim();
+const plain = (text) => text.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
 
 export function loadPages(base = '/') {
   return pageSources.map((page) => {
@@ -17,17 +17,18 @@ export function loadPages(base = '/') {
     const parser = new Marked();
     const tokens = parser.lexer(markdown);
     const title = plain(tokens.find((token) => token.type === 'heading')?.text ?? page.label);
+    const documentTitle = page.id === 'welcome' ? 'Previewhost documentation | Local application previews' : `${title} | Previewhost`;
     const description = plain(tokens.find((token) => token.type === 'paragraph')?.text ?? page.label);
     const sections = [];
     const seen = new Map();
     const references = [];
-    function localUrl(href, image = false) {
+    function localUrl(href, image = false, asMarkdown = false) {
       if (/^(https?:|mailto:)/.test(href) || href.startsWith('#')) return href;
       const [filename, fragment] = href.split('#');
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(page.source), filename));
       if (!existsSync(path.join(repository, target))) throw new Error(`${page.source}: missing link ${href}`);
       const destination = pageSources.find((candidate) => candidate.source === target);
-      if (destination) return `${pagePath(destination.id, base)}${fragment ? `#${fragment}` : ''}`;
+      if (destination) return `${pagePath(destination.id, base)}${asMarkdown ? 'index.md' : ''}${fragment ? `#${fragment}` : ''}`;
       if (image && target.startsWith('assets/')) return `${base}${target.slice("assets/".length)}`;
       return `https://github.com/RojhatToptamus/previewhost/blob/main/${target}${fragment ? `#${fragment}` : ''}`;
     }
@@ -81,6 +82,9 @@ export function loadPages(base = '/') {
       sections[i].summary = text.slice(sections[i].title.length).trim().slice(0, 180);
       sections[i].keywords = text;
     }
-    return { ...page, title, description, html, markdown, sections, references };
+    // Keep code examples intact while resolving links for the published Markdown path.
+    const publishedMarkdown = markdown.replace(/(`{3,}|~{3,})[\s\S]*?\1|`[^`\n]+`|(!?\[[^\]\n]*\]\()([^\s)]+)(\))/g,
+      (match, fence, prefix, href, suffix) => href ? `${prefix}${localUrl(href, prefix.startsWith('!'), true)}${suffix}` : match);
+    return { ...page, title, documentTitle, description, html, markdown, publishedMarkdown, sections, references };
   });
 }

@@ -16,6 +16,25 @@ permissions:
   contents: read
 
 jobs:
+  docs:
+    name: Verify documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DOCS_URL: https://docs.example.test/
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check:docs
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:docs
+
   verify:
     name: Verify macOS package
     # Colima uses this Intel runner in its own macOS integration suite.

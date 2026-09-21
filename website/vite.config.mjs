@@ -2,21 +2,24 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { loadPages, repository } from './content.mjs';
 import { resolve } from 'node:path';
+import { siteSettings } from './site.mjs';
+
+const { base } = siteSettings();
 
 export default defineConfig(({ isPreview }) => ({
   appType: isPreview ? 'mpa' : 'spa',
   root: resolve(repository, 'website'),
   publicDir: resolve(repository, 'assets'),
-  base: process.env.DOCS_BASE || '/',
+  base,
   plugins: [react(), {
     name: 'documentation-content',
     resolveId(id) { if (id === 'virtual:docs') return '\0virtual:docs'; },
     load(id) {
       if (id !== '\0virtual:docs') return;
-      const pages = loadPages(process.env.DOCS_BASE || '/');
+      const pages = loadPages(base);
       for (const page of pages) this.addWatchFile(resolve(repository, page.source));
-      const metadata = pages.map(({ html, markdown, references, source, ...page }) => page);
-      const rendered = pages.map(({ markdown, references, source, ...page }) => page);
+      const metadata = pages.map(({ html, markdown, publishedMarkdown, references, source, ...page }) => page);
+      const rendered = pages.map(({ markdown, publishedMarkdown, references, source, ...page }) => page);
       return `export default (import.meta.env.SSR || import.meta.env.DEV) ? ${JSON.stringify(rendered)} : ${JSON.stringify(metadata)};`;
     },
     handleHotUpdate({ file, server }) {

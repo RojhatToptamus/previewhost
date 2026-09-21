@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  /* Graphite light — source: Theme System Audit proposed token set. */
+  /* Graphite light theme. */
   --ground: #ebebec;
   --panel: #f1f1f2;
   --surface: #f5f5f6;
@@ -93,7 +93,7 @@
 
 :root[data-site-theme="dark"] {
   color-scheme: dark;
-  /* Graphite dark — source: Theme System Audit proposed token set. */
+  /* Graphite dark theme. */
   --ground: #08090a;
   --panel: #0d0f10;
   --surface: #111416;
