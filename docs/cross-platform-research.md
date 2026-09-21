@@ -132,7 +132,8 @@ Previewhost does not read `DOCKER_HOST` or change behavior with the active Docke
 This preserves explicit ownership and avoids silent endpoint changes during retained-data recovery.
 Engine IDs, endpoint comparisons, resource labels, and exact container identities remain mandatory before cleanup.
 HTTP requests and upgraded initialization streams share the existing transport implementation.
-Windows managed-database operations remain blocked before Docker access or credential creation.
+Windows Docker-backed database startup and access remain blocked before connecting or creating credentials.
+Local record reads and credential-only deletion recovery remain available.
 A pipe name does not authenticate its server. The first engine ID is supplied by that server, so it cannot establish initial trust.
 [Microsoft pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights) protects an existing pipe; it does not reserve an absent name.
 Another account impersonating a stopped endpoint is a source-supported risk, not a reproduced cross-account attack.
@@ -162,17 +163,21 @@ Results apply to the stated commit and environment. Passing a selected group doe
 | --- | --- | --- |
 | macOS 26.6.2 arm64, Node 22.23.1 | `f07e375` | Release gate: 168 passed, zero skips or failures, including PostgreSQL and Redis. TAP duration 203.7 seconds. |
 | Ubuntu 24.04 x64, Node 22.23.0 | `c30ea2d` | Source suite: 159 passed, four macOS-specific skips, zero failures. Installed ESM, CLI, MCP, cleanup, and strict TypeScript consumer passed with install scripts disabled. |
-| Windows Server 2025 x64, Node 22.23.0 | `41e1934` | 39 passed, 13 explicit skips; one PowerShell ACL-fixture setup timeout. Shutdown race, jobs, CLI, and both MCP protocols passed. |
-| Windows 11 arm64, Node 22.23.0 | `41e1934` | 40 passed, 13 explicit skips, zero failures. Installed ESM, CLI, MCP, cleanup, and strict TypeScript consumer passed with install scripts disabled. |
+| Windows Server 2025 x64, Node 22.23.0 | `97c9ad3` | 40 passed, 13 explicit skips, zero failures. Installed ESM, CLI, MCP, cleanup, and strict TypeScript consumer passed with install scripts disabled. |
+| Windows 11 arm64, Node 22.23.0 | `97c9ad3` | 40 passed, 13 explicit skips, zero failures. The same installed-package checks passed with install scripts disabled. |
 
 The [Linux run](https://github.com/RojhatToptamus/previewhost/actions/runs/35656792666) took 4m56s elapsed and 4m53s runner time.
 It exercised real PostgreSQL and Redis retention, recovery, jobs, CLI, MCP, and project ownership.
 Earlier Debian 12 arm64 execution passed the source and installed-package checks against the pre-integration implementation.
 
-The [Windows architecture run](https://github.com/RojhatToptamus/previewhost/actions/runs/35659690054) verified native ownership, process cleanup, ACLs, publication interruption, named pipes, password storage, jobs, project owners, and MCP isolation.
+The [Windows architecture run](https://github.com/RojhatToptamus/previewhost/actions/runs/35660749026) passed both jobs: 5m39s elapsed and 8m44s total runner time.
+The x64 job took 3m08s; arm64 took 5m36s. Both verified native ownership, process cleanup, ACLs, publication interruption, named pipes, password storage, jobs, project owners, and MCP isolation.
 Its 13 skips cover three POSIX signal cases, Keychain, seven database cases, and two missing-Docker project fixtures.
-The x64 ACL fixture timeout occurred in PowerShell setup. The replacement uses native `icacls` and checks its inheritance entries before product assertions.
-The [focused x64 follow-up](https://github.com/RojhatToptamus/previewhost/actions/runs/35660424325), at `5c57e57`, passed that fixture and every installed-package check in 1m35s elapsed, using 1m32s runner time.
+An earlier ARM64 run also passed this group and the installed package. These are selected-workflow results, not full Windows qualification.
+The final macOS tarball at `97c9ad3` passed installed ESM, CLI, MCP, cleanup, and strict TypeScript checks.
+The [database safety-guard follow-up](https://github.com/RojhatToptamus/previewhost/actions/runs/35661303170), at `db50ac8`, passed its focused regression and installed-package checks on both Windows architectures.
+It took 3m35s elapsed and 5m28s total runner time. The regression verified zero pipe connections, credential writes, and retained database records.
+Each platform installed a tarball built on that runner. A single release tarball still needs validation across all three operating systems before publishing support.
 
 Targeted execution also identified and corrected token-default file ownership, premature SQLite fixture deletion, and a clean-shutdown record race.
 The record fix maps only [Windows errors 2 and 3](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-) to `ENOENT`.
