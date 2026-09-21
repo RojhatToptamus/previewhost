@@ -52,6 +52,9 @@ The current user owns the directory. The user, SYSTEM, and Administrators receiv
 Existing ACLs are validated without repair. Unknown ACE forms and other principals fail closed.
 Inspected files and directories must not be reparse points.
 Inheritable entries are also checked, because later token and temporary-file creation depends on them.
+Directories must propagate restricted entries to both files and subdirectories, without `NO_PROPAGATE`.
+Separate inheritance entries and `INHERIT_ONLY` are permitted. Full-control rights are not required.
+Without inherited entries, Windows can use the creator token's default DACL; see [new-object DACL rules](https://learn.microsoft.com/en-us/windows/win32/secauthz/dacl-for-a-new-object).
 Existing token files, ownership records, locks, and the encrypted keystore receive their own checks.
 
 The parent ACL alone does not prove that an existing child is private.
@@ -161,5 +164,7 @@ The installed Linux tarball also passed ESM, CLI, MCP, automatic-owner cleanup, 
 
 Windows-only tests are registered only on Windows; they add no macOS release skips.
 Windows code has passed TypeScript checks, but its OS API calls have not executed on Windows.
+The branch includes the merged CI cancellation and release-artifact checks from `main`.
+The new inheritance regression requires Windows execution before it counts as verified.
 CI configuration is present but has not run from this branch.
 Neither Windows nor Linux x64 has execution evidence from this task.

@@ -59,6 +59,49 @@ if (process.platform === 'win32') test('Windows private creation, inherited ACLs
   assert.throws(() => makePrivateDirectory(junction), { code: 'UNAUTHORIZED' });
 });
 
+if (process.platform === 'win32') test('Windows rejects non-inheritable private directories before writing a token and permits split inheritance', async t => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdir, lstat } = await import('node:fs/promises');
+  const { readToken } = await import('./client.js');
+  const { startDaemon } = await import('./daemon.js');
+  const { createPreviewRuntime } = await import('./runtime.js');
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-inheritance-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  async function directory(name: string, inherited: boolean) {
+    const path = join(root, name);
+    await mkdir(path);
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'
+      $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+      $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+      $acl.SetOwner($sid)
+      $acl.SetAccessRuleProtection($true, $false)
+      if ($env:PREVIEWHOST_ACL_INHERITANCE -eq 'yes') {
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'Modify', 'ObjectInherit', 'InheritOnly', 'Allow'))
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'Modify', 'ContainerInherit', 'None', 'Allow'))
+      } else {
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'None', 'None', 'Allow'))
+      }
+      Set-Acl -LiteralPath $env:PREVIEWHOST_ACL_DIRECTORY -AclObject $acl
+    `], { env: { ...process.env, PREVIEWHOST_ACL_DIRECTORY: path, PREVIEWHOST_ACL_INHERITANCE: inherited ? 'yes' : 'no' }, timeout: 10_000 });
+    return path;
+  }
+  const unsafe = await directory('non-inheritable', false);
+  const token = join(unsafe, 'token');
+  assert.throws(() => makePrivateDirectory(unsafe), { code: 'UNAUTHORIZED' });
+  await assert.rejects(readToken(token), { code: 'UNAUTHORIZED' });
+  const runtime = await createPreviewRuntime({ allowedRoots: [root] });
+  t.after(() => runtime.close());
+  let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
+  t.after(async () => { await daemon?.close(); });
+  await assert.rejects(async () => { daemon = await startDaemon({ runtime, tokenFile: token, port: 0 }); }, { code: 'UNAUTHORIZED' });
+  await assert.rejects(lstat(token), { code: 'ENOENT' });
+  const safe = await directory('split-inheritance', true);
+  assert.doesNotThrow(() => makePrivateDirectory(safe));
+  await writeFile(join(safe, 'token'), 'a'.repeat(64));
+  assert.equal(await readToken(join(safe, 'token')), 'a'.repeat(64));
+});
+
 if (process.platform === 'win32') test('Windows process death during record replacement leaves a complete published record', { timeout: 15000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'previewhost-publication-'));
   t.after(() => rm(root, { recursive: true, force: true }));

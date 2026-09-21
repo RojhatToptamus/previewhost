@@ -78,6 +78,7 @@ export function assertWindowsPrivate(path: string): void {
   try {
     if (!owner[0] || sidText(owner[0]) !== currentSid() || !dacl[0]) throw new PreviewError('UNAUTHORIZED', 'Private storage must be owned by the current user with a restricted ACL.');
     const count = koffi.decode(dacl[0], 4, 'uint16') as number;
+    let inheritance = 0;
     for (let i = 0; i < count; i++) {
       const entry = [null];
       if (!win().ace(dacl[0], i, entry)) throw failure('ACL inspection');
@@ -86,7 +87,10 @@ export function assertWindowsPrivate(path: string): void {
       if (header[0] !== 0 || header.readUInt16LE(2) < 16) throw new PreviewError('UNAUTHORIZED', 'Private storage has an unsupported ACL entry.');
       const sid = sidText(koffi.address(entry[0]) + 8n);
       if (![currentSid(), 'S-1-5-18', 'S-1-5-32-544'].includes(sid)) throw new PreviewError('UNAUTHORIZED', 'Private storage permits another account.');
+      if (!(header[1] & 0x04)) inheritance |= header[1] & 0x03; // OI/CI without NO_PROPAGATE.
     }
+    // Otherwise new children can fall back to the creator token's default DACL.
+    if ((attributes & 0x10) && inheritance !== 0x03) throw new PreviewError('UNAUTHORIZED', 'Private directories must propagate restricted permissions to files and subdirectories.');
   } finally { win().free(descriptor[0]); }
 }
 
