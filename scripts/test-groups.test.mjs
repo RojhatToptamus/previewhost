@@ -28,7 +28,11 @@ test('workflow executes every group and gates publication on every mandatory job
   assert.ok(workflow.jobs.docs.steps.some(step => step.run === 'npm run typecheck'));
   assert.deepEqual([...workflow.jobs.verify.needs].sort(), ['database', 'docs', 'package']);
   assert.equal(workflow.jobs.verify.if, 'always()');
-  assert.ok(workflow.jobs.verify.steps.some(step => step.run?.includes('checkRequiredJobs(JSON.parse(process.env.JOB_RESULTS)')));
+  const gate = workflow.jobs.verify.steps.find(step => step.name === 'Require every verification job');
+  assert.equal(gate.env.JOB_RESULTS, '${{ toJSON(needs) }}');
+  assert.equal(gate.env.EVENT_NAME, '${{ github.event_name }}');
+  assert.equal(gate.env.RELEASE_PLAN, '${{ inputs.publish-plan-artifact-id }}');
+  assert.ok(gate.run.includes('checkRequiredJobs(JSON.parse(process.env.JOB_RESULTS), process.env.EVENT_NAME, process.env.RELEASE_PLAN)'));
   assert.equal(workflow.on.workflow_call.outputs['pack-dir-artifact-id'].value, '${{ jobs.verify.outputs.pack-dir-artifact-id }}');
   assert.equal(workflow.jobs.verify.outputs['pack-dir-artifact-id'], '${{ needs.package.outputs.pack-dir-artifact-id }}');
   assert.equal(workflow.jobs.package.outputs['pack-dir-artifact-id'], '${{ steps.upload.outputs.artifact-id }}');

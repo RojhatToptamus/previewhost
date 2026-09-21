@@ -3,7 +3,147 @@
 The investigation separates existing CI from the unmerged Linux and Windows work.
 The benchmark starts at main commit `36ed345`, without those platform changes.
 Three agent reviews checked workflow structure, test isolation, source behavior, and comparable projects.
-The next strategy below is a proposal. It has not been implemented or qualified.
+The scheduling candidate is implemented on [draft PR 25](https://github.com/RojhatToptamus/previewhost/pull/25).
+The planned five candidates and three controls are complete. The candidate failed the admission targets and must not merge.
+No package was published. The separate platform-support work remains unverified by these runs.
+
+## Qualification decision
+
+Keep the candidate as a draft. Do not merge it or publish a package from this investigation.
+All 163 original cases remain, with three added CI checks. Each passing candidate executed all 166 cases with zero skips.
+Four of five candidates passed; only one of three controls passed completely. These samples do not establish a stable failure rate.
+
+| Admission target | Observed result | Decision |
+| --- | --- | --- |
+| Median execution ≤13m; every run ≤16m | All-five median 18m16s; maximum 20m04s | Failed |
+| Native/package ≤5m | 3m56s–5m44s; three runs exceeded 5m | Failed |
+| Docs/types ≤2m | 45–66s | Passed |
+| Both overlapping PRs complete within 18m | C4 passed in 18m21s; C5 failed in 16m50s | Failed |
+| Runner usage ≤1.6× observed control median | Ceiling 43m58.4s; largest candidate 40m30s | Arithmetic bound met; failed runs limit comparison |
+| Complete coverage and successful required groups | Four complete passes; C5 omitted 19 cases after setup failure | Failed qualification; gate correctly blocked it |
+
+Passing candidates alone had median execution of 18m49s, versus 26m48s for the only passing control.
+That is an observed 29.8% reduction, not a repeatable controlled improvement or a target pass.
+Their median runner usage was 37m31s, versus 27m29s for that control: 36.5% more compute.
+Failed and incomplete runs remain in the primary tables; their shorter work must not be credited as optimization.
+
+The five candidates consumed 2h53m11s of summed runner time; the three controls consumed 1h26m08s.
+Total qualification usage was **4h19m19s**. This excludes local checks, earlier probes, the pilot, and later branch validation.
+The failed pilot separately consumed 48m17s. These figures are raw runner wall time, not billing amounts.
+
+The results support separate engines as a coverage-preserving experiment, but do not qualify this layout for adoption.
+Startup and Docker-operation variability remain the main measured constraints. One image-download failure adds an availability issue.
+Do not add another macOS shard, cache mutable engine state, remove lifecycle coverage, or raise deadlines to make this cohort pass.
+The next investigation should address Docker/Colima costs and measure native Linux Docker after the platform implementation is qualified.
+A Linux migration remains a hypothesis. Windows behavior still requires direct verification.
+
+The original MCP approval failure remains unresolved because its old assertion discarded the public error response.
+New assertions retain that error. No test retries, timeout increases, or production behavior changes were used to hide it.
+
+## Frozen qualification cohort
+
+The candidate source is `2dc9c2701d679aff6d0495a61ecaffa9c471c4fc`.
+The serial control is `bf8d871f6881cef563423b564ef5bd5a1e189164`; only two workflow files differ.
+Production code and test bodies are identical. Production image lookup remains at its original implementation.
+C1/B1, C2/B2, and C3/B3 use separate runners in paired time windows, with the candidate requested first.
+The first pair's workflow creation times differ by 105 seconds. Later pairs target a two-minute request offset.
+These pairs request four macOS runners. Any observed scheduling delay remains in the measurements.
+C4/C5 are separate simultaneous PRs and intentionally request six macOS runners to measure account capacity.
+They use distinct PR cancellation groups. Their queueing is part of the throughput result.
+
+| Run / attempt | Result | Request or creation to completion | Execution span | Summed runner time |
+| --- | --- | ---: | ---: | ---: |
+| [C1 / 1](https://github.com/RojhatToptamus/previewhost/actions/runs/35605555323/attempts/1) | 166 passed | 20m08s | 20m04s | 40m30s |
+| [B1 / 1](https://github.com/RojhatToptamus/previewhost/actions/runs/35605746179/attempts/1) | 165 passed, 1 failed | 26m31s | 26m28s | 27m11s |
+| [C2 / 2](https://github.com/RojhatToptamus/previewhost/actions/runs/35605555323/attempts/2) | 166 passed | 19m26s | 19m22s | 38m43s |
+| [B2 / 2](https://github.com/RojhatToptamus/previewhost/actions/runs/35605746179/attempts/2) | Canceled, incomplete | 30m52s | 30m49s | 31m28s |
+| [C3 / 3](https://github.com/RojhatToptamus/previewhost/actions/runs/35605555323/attempts/3) | 166 passed | 14m26s | 14m20s | 33m59s |
+| [B3 / 3](https://github.com/RojhatToptamus/previewhost/actions/runs/35605746179/attempts/3) | 166 passed | 26m55s | 26m48s | 27m29s |
+| [C4 / 4](https://github.com/RojhatToptamus/previewhost/actions/runs/35605555323/attempts/4) | 166 passed | 18m21s | 18m16s | 36m19s |
+| [C5 / 1](https://github.com/RojhatToptamus/previewhost/actions/runs/35615889744/attempts/1) | 147 passed; 19 not run | 16m50s | 16m43s | 23m40s |
+
+C1 failed the latency budgets despite passing every correctness check.
+Its critical project job spent 9m31s before tests, 10m06s in tests, and 15s after tests.
+Its native/package job took 5m44s. Documentation/types took 66s; the aggregate gate took seven seconds.
+Its three complete TAP summaries preserved all 163 original cases plus three CI checks, with zero skips.
+All C1 jobs checked out merge commit `36907b6f2d3b50352125e8a429ef30c6da0002db`.
+macOS jobs used Node 24.19.0; Ubuntu jobs used 24.20.0. Both database engines and pulled image digests matched.
+
+B1 failed a different MCP scenario: two concurrent worktree previews exceeded one 30-second observation window.
+The public `TIMEOUT` response leaves startup running. It does not establish that startup eventually failed.
+The test ended before its later isolation and restart checks; package validation was consequently skipped.
+The historical global-approval cases passed in B1. Their earlier unexplained failure remains a separate issue.
+No retries, deadline changes, or removal of intentional concurrency were applied.
+
+Runner time is the sum of API-reported job start-to-finish durations, including setup and cleanup.
+It excludes time before jobs start and is not billable time. Public-repository billing endpoints report zero here.
+Repeated attempts use the recorded dispatch timestamp for user-visible latency, not the original run creation date.
+Some runner step/log timestamps precede API job start timestamps. The report retains this discrepancy instead of silently shifting clocks.
+Results and logs are retained separately for every attempt. Failed controls are not passing performance baselines.
+
+C2 also passed all 166 cases with zero skips. Its native/package job took 5m13s; documentation/types took 54s.
+The critical database group changed between runs. Project fell from 19m52s to 13m18s; runtime rose from 13m41s to 19m13s.
+Runtime spent 6m11s starting Colima, 2m06s pulling images, and 9m15s in its test step.
+The first reset case took 114.921s, only 5.079s below its unchanged 120-second deadline.
+This variability does not support rebalancing the groups from one run or raising deadlines.
+The C2/B2 request offset was 147.786 seconds. Resource-pressure causation remains unproved without host telemetry.
+
+GitHub confirms that B2 exceeded the 30-minute job limit. It has no final TAP summary.
+The log contains 110 passes, two reset-test timeouts, and one `CLEANUP_INCOMPLETE` failure.
+That failure concerns a pending Docker creation whose absence does not prove that it cannot complete.
+Fifty-three of 166 case outcomes are unreported; the exact interrupted phase is unknown. Packaging was skipped.
+Both MCP approval protocol cases passed. The causes of the slow operations and uncertain creation remain unproved.
+Colima startup took 8m12s and image pulls took 2m25s. Verification ran for 19m07s before cancellation.
+The run is an incomplete control and cannot establish a passing baseline.
+
+C3 passed all 166 cases with the same title inventory, checkout, and observed environment.
+Its database jobs took 14m12s and 14m04s; their test steps took 6m31s and 6m32s.
+Native/package took 4m53s and documentation/types took 45s.
+C3 meets the individual 16-minute ceiling and native target. It does not erase C1/C2 budget violations.
+For C1–C3, the execution median was 19m22s. The C3/B3 request offset was 121.185 seconds.
+
+B3 passed all 166 cases and the installed-package check. Its environment and title inventory matched the other runs.
+It spent 5m09s starting Colima, 60s pulling images, and 19m24s in verification, including 18m26.799s of tests.
+One of three controls passed completely. Their observed median execution was 26m48s; median raw runner time was 27m29s.
+The predefined 1.6× resource ceiling is therefore 2,638.4 seconds per candidate.
+This denominator retains failed and incomplete controls. It is not an estimate of successful-control cost or evidence of causal speedup.
+
+C4 and C5 were requested 1.148 seconds apart, on PRs 25 and 27.
+Their merge commit IDs differ, but both trees are `19323973ab1a5413a81a0415271fe151bc0ca6db`.
+Five macOS jobs started; C5 project initially remained queued without a runner.
+It was queued from 14:59:41 to 15:03:40 UTC: 239 seconds.
+The API replaced its provisional start timestamp when it assigned a runner.
+Completed job metadata therefore separates this queue from runner execution; PR completion time retains the delay.
+C5 project then failed before tests: GitHub returned HTTP 504 while Colima resolved its VM-image download URL.
+The job ran for 60 seconds after assignment. Image pulls, test build, and all 19 project cases did not run.
+Colima 0.10.3 [specifies this colima-core 0.10.4 image](https://github.com/abiosoft/colima/blob/v0.10.3/embedded/images/images.txt#L6); the version numbers do not indicate drift.
+This setup failure remains in the cohort without a retry. The other database group continued because matrix fail-fast is disabled.
+C5 finished with 147 passing cases and no project-group summary. Its aggregate received `database.result: failure` and rejected the run.
+The queue did not determine its final critical path, because the queued job failed before tests. Its duration with complete coverage is unknown.
+There is no evidence that queueing caused the HTTP 504.
+
+C4 passed every case but took 18m20.580s from request to completion, exceeding the overlap budget by 20.580s.
+Its runtime job spent 6m33s starting Colima, 1m34s pulling images, and 8m42s running tests.
+The historical MCP approval cases passed in both overlap runs. That does not establish the cause of the original failure.
+
+## Release guard correction after the frozen cohort
+
+Review found that an empty release plan could let the aggregate gate accept a missing package artifact.
+Changesets accepts an absent artifact ID and then invokes publication without its package-directory argument.
+See its [optional artifact input](https://github.com/changesets/action/blob/ae32849d5ba541f9ae29e40e22a623bc13562f51/src/publish/index.ts#L40-L46)
+and [publication fallback](https://github.com/changesets/action/blob/ae32849d5ba541f9ae29e40e22a623bc13562f51/src/run.ts#L193-L200).
+
+The corrected helper receives the event name and release plan directly.
+Only an ordinary PR with no release plan may omit the artifact ID. Other events, supplied plans, and absent event context require it.
+This keeps the PR execution path unchanged and blocks publication when the exact verified artifact is absent.
+The correction is outside the frozen timing cohort and has separate validation.
+
+Focused tests passed all five cases for the corrected guard and workflow contract.
+An independent agent executed the actual aggregate shell with seven context/result fixtures; all had the expected outcome.
+Hosted release execution and publication were not performed.
+The frozen cohort excludes the guard correction. Later final-branch CI is reported in PR 25; it does not replace any cohort result.
+
+After the guard and documentation edits, a fresh local pack remained byte-identical to both previously verified packing outputs (1,230,803 bytes).
 
 ## Measured baseline
 
@@ -35,13 +175,15 @@ The current-main [release attempt](https://github.com/RojhatToptamus/previewhost
 It reported 160 test results without a final summary, so publication was skipped. GitHub's job annotation confirms the timeout.
 The second attempt also hit the 30-minute limit, after 121 test results. Neither attempt qualifies as a passing baseline.
 
-Colima's [Docker startup code](https://github.com/abiosoft/colima/blob/v0.10.3/environment/container/docker/docker.go#L82-L104) explains the second boot.
-It restarts when root can access Docker but the ordinary user's session cannot, to activate Docker-group membership.
+Colima's [Docker startup code](https://github.com/abiosoft/colima/blob/v0.10.3/environment/container/docker/docker.go#L82-L104) restarts after an ordinary-user Docker check fails while root access succeeds.
+Its intended recovery activates Docker-group membership. The logs do not retain the exact ordinary-user error.
 No verified safe configuration switch removes that recovery. Docker provisioning remains unchanged.
 
 ## Coverage and duplication review
 
-- Packing already disables lifecycle scripts. The workflow builds production output once; it does not repeat the full source suite during packaging.
+- Packing already disables lifecycle scripts and does not repeat the source suite.
+- The original serial job built once. The candidate builds independently on three macOS runners; that repeated preparation is included in runner totals.
+  A shared build artifact was not introduced for this small setup cost. Each job retains its own native fixtures and build checks.
 - Production and test Keychain binaries differ intentionally. Both builds remain necessary.
 - The package check installs the tarball outside the repository and first checks runtime behavior without development dependencies.
   Its later compiler installation verifies declarations. Combining these installs would weaken dependency-isolation coverage.
@@ -279,7 +421,7 @@ Later scheduling gaps can include job dependencies and matrix limits. The API do
 The sampled workflows were also checked at the runs' actual source revisions.
 Large projects trade aggregate compute for latency, and still show substantial variance. Their runtime is not our performance promise.
 
-## Proposed smallest scalable implementation
+## Approved plan before implementation
 
 First measure the image-query lead, then benchmark the smallest isolated-job layout. Keep these experiments separate so their effects remain attributable.
 
@@ -443,8 +585,8 @@ The image lookup candidate was rejected after the hosted pilot showed no consist
 Production image lookup remains unchanged. The temporary comparison step was removed before qualification.
 Caching and setup overlap remain deferred.
 
-Local checks and hosted qualification results are recorded below as they become available.
-Implementation does not establish that the runtime targets passed.
+Local checks and completed hosted qualification results are recorded above.
+The candidate did not meet the runtime targets.
 The separate Linux/Windows implementation is untouched by this investigation.
 
 ## Implementation pilot, 21 September
@@ -452,7 +594,7 @@ The separate Linux/Windows implementation is untouched by this investigation.
 Run [35602763344](https://github.com/RojhatToptamus/previewhost/actions/runs/35602763344) failed and is excluded from the qualification cohort.
 It included a temporary image-query comparison that changed the workload and warmed the image store.
 The native group passed all 138 tests. The project database group passed all 19 tests.
-The runtime group passed five cases, failed database authentication once, and canceled three cases at their existing 120-second deadlines.
+The runtime group passed five cases, failed an authenticated PostgreSQL readiness check once, and canceled three cases at their existing 120-second deadlines.
 Its complete TAP summary reported nine tests, one failure, three cancellations, and zero skips.
 The aggregate release gate rejected the run. No package was published.
 

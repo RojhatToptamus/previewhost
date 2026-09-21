@@ -166,9 +166,10 @@ jobs:
       - name: Require every verification job
         env:
           JOB_RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
           RELEASE_PLAN: ${{ inputs.publish-plan-artifact-id }}
         run: |
           node --input-type=module <<'NODE'
           import { checkRequiredJobs } from './scripts/verify-release.mjs';
-          checkRequiredJobs(JSON.parse(process.env.JOB_RESULTS), Boolean(process.env.RELEASE_PLAN));
+          checkRequiredJobs(JSON.parse(process.env.JOB_RESULTS), process.env.EVENT_NAME, process.env.RELEASE_PLAN);
           NODE

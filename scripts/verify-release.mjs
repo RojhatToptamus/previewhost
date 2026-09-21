@@ -24,11 +24,12 @@ export function checkReleaseResult(code, output) {
   return counts.tests;
 }
 
-export function checkRequiredJobs(jobs, release = false) {
+export function checkRequiredJobs(jobs, eventName, releasePlan) {
   for (const name of ['docs', 'database', 'package']) {
     if (jobs?.[name]?.result !== 'success') throw new Error(`Required CI job did not succeed: ${name}`);
   }
-  if (release && !/^[1-9][0-9]*$/.test(jobs.package.outputs?.['pack-dir-artifact-id'] ?? '')) {
+  const requiresArtifact = eventName !== 'pull_request' || Boolean(releasePlan);
+  if (requiresArtifact && !/^[1-9][0-9]*$/.test(jobs.package.outputs?.['pack-dir-artifact-id'] ?? '')) {
     throw new Error('Release verification requires the exact verified package artifact ID.');
   }
 }

@@ -38,7 +38,9 @@ local Docker socket. New database tests must report a skip or error when Docker
 is absent; they must never silently omit cases.
 
 **Verify macOS package** requires all three job types to succeed. Missing, skipped,
-canceled, or failed dependencies block publication. `npm run verify:release`
+canceled, or failed dependencies block publication. Release calls also require
+the artifact ID from the package check, including when the release plan is absent.
+The publisher receives that verified artifact. `npm run verify:release`
 retains the complete serial suite for local verification and comparison.
 
 The runner is `macos-15-intel`, which Colima uses in its own integration workflow.
