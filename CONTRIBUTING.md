@@ -19,7 +19,7 @@ npm pack --dry-run
 ```
 
 `npm test` builds the package and runs the compiled Node tests one at a time.
-POSIX fixtures run on macOS and Linux. Windows runs the portable native and platform suites defined in CI.
+POSIX fixtures run on macOS and Linux. Windows x64 and arm64 run the native, ownership, project, MCP, and package checks defined in CI.
 Windows full-workflow and retained-data qualification remains incomplete. A skipped test does not establish platform support.
 Some sandbox environments require explicit permission for local listeners and
 process inspection.

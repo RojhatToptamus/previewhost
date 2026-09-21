@@ -161,7 +161,7 @@ It does not check every additional listener that application code opens.
 
 Windows uses one non-inheritable Job Object handle owned by the runtime. Assignment precedes application execution.
 Owner termination closes the handle and terminates job members. Normal stop terminates the job and checks its active-process count.
-Windows has no Unix TERM grace period. These Windows behaviors still require execution testing.
+Windows has no Unix TERM grace period. See the [verification results and remaining limits](cross-platform-research.md#results).
 
 ## Recovery
 
@@ -278,8 +278,8 @@ AES-256-GCM authenticates the payload. Each write uses a fresh 12-byte nonce.
 Scrypt derives a 32-byte key from the password and a random 16-byte salt (`N=32768`, `r=8`, `p=1`).
 SQLite stores only the encrypted payload and its salt, nonce, and authentication tag.
 Its transactions serialize writers and recover interrupted commits. POSIX directories use mode 0700 and files use mode 0600.
-Windows validates the current owner and ACL. New private directories grant inherited access only to that user, SYSTEM, and Administrators.
-Existing broad ACLs and reparse points are rejected. Windows execution verification is still pending.
+Windows validates the owner and ACL. Elevated processes can create administrator-owned files; these are accepted only when Administrators is the token's default owner. New private directories grant inherited access only to that user, SYSTEM, and Administrators.
+Existing broad ACLs and reparse points are rejected. See the [platform verification results](cross-platform-research.md#results).
 
 Each owner and dashboard retains only its own unlock key. Each operation reads current stored values.
 Closing the session clears its key buffer. JavaScript strings and application processes prevent a promise of complete memory erasure.

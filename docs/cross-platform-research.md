@@ -1,13 +1,13 @@
 # Linux and Windows implementation decisions
 
 Branch: `codex/cross-platform-support`. Original baseline: `4e46b46`.
-Windows implementation and tests are present, but Windows execution remains unverified.
+Windows native, ownership, and private-storage tests have execution results on x64 and arm64. Full Windows workflow qualification remains incomplete.
 This document distinguishes implementation decisions from verification results.
 
 ## Scope and shared behavior
 
 The target is Node.js 22.23 or later on x64 and arm64.
-CI targets macOS 15, Ubuntu 24.04, and Windows Server 2025.
+CI targets macOS 15, Ubuntu 24.04, Windows Server 2025 x64, and Windows 11 arm64.
 Windows 11 with Docker Desktop is the target for full Windows database verification.
 Only local private storage is in scope. Network filesystems and synchronized storage need separate qualification.
 Linux needs procps `ps` at `/bin/ps` and `lsof` at `/usr/bin/lsof`.
@@ -64,7 +64,7 @@ See [Windows file security](https://learn.microsoft.com/en-us/windows/win32/file
 The threat boundary remains other ordinary accounts. Administrators and same-user application code retain their existing authority.
 POSIX retains UID, mode, file-type, link-count, and no-follow checks.
 The Windows tests exercise new-directory inheritance, a publicly readable token, and a junction.
-No Windows ACL result is verified yet.
+The x64 tests verify inherited ACLs, rejected broad access, rejected junctions, and rejection before token creation in non-inheritable directories.
 
 ## 3. Literal commands and environment names
 
@@ -110,7 +110,7 @@ See [MoveFileExW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf
 
 The process-crash requirement is an old or new complete record, with uncertain external operations retained for recovery.
 A file flush or successful rename alone does not establish equivalent power-loss behavior across filesystems.
-Windows process-crash publication and host/power-loss durability remain unverified.
+Windows x64 process-crash publication passed. Host/power-loss durability remains unverified.
 This implementation makes no stronger durability claim than the evidence supports.
 No second database or journal is added to conceal that qualification gap.
 
@@ -143,30 +143,38 @@ Windows runs kernel-lock, native-process, ACL, named-pipe, and password-keystore
 All CI platforms build and verify an installed npm tarball.
 macOS binary signature checks remain macOS-only. Shared package inventories normalize path separators.
 
-Required Windows follow-up includes full owner/CLI/MCP workflows, actual Docker database retention, publication interruption, handle leaks, and nested-job compatibility.
+Required Windows follow-up includes actual Docker database retention, ordinary-user execution, handle-leak checks, and explicit nested-job compatibility.
 Windows x64 and arm64 both require execution evidence before a general support claim.
 Linux arm64 container results do not establish Linux x64 or Windows behavior.
 
 ### Results
 
-macOS 26.6.2 arm64, Node.js 22.23.1:
+Results apply to the stated commit and environment. Passing a selected group does not qualify the complete Windows workflow.
 
-- The complete source suite passed 162 tests, with no failures or skips, including real PostgreSQL and Redis workflows.
-- Final follow-up runs passed 33 ownership/integration tests, 15 native tests, eight keystore tests, and two Docker transport tests.
-- The installed tarball passed ESM, CLI, MCP, automatic-owner cleanup, and strict TypeScript checks with install scripts disabled.
-- TypeScript, the build, two release-checker tests, and documentation checks passed.
+| Environment | Commit | Verified result |
+| --- | --- | --- |
+| macOS 26.6.2 arm64, Node 22.23.1 | `f07e375` | Release gate: 168 passed, zero skips or failures, including PostgreSQL and Redis. TAP duration 203.7 seconds. |
+| Ubuntu 24.04 x64, Node 22.23.0 | `c30ea2d` | Source suite: 159 passed, four macOS-specific skips, zero failures. Installed ESM, CLI, MCP, cleanup, and strict TypeScript consumer passed with install scripts disabled. |
+| Windows Server 2025 x64, Node 22.23.0 | `41e1934` | 39 passed, 13 explicit skips; one PowerShell ACL-fixture setup timeout. Shutdown race, jobs, CLI, and both MCP protocols passed. |
+| Windows 11 arm64, Node 22.23.0 | `41e1934` | 40 passed, 13 explicit skips, zero failures. Installed ESM, CLI, MCP, cleanup, and strict TypeScript consumer passed with install scripts disabled. |
 
-Linux validation used Debian 12 arm64, Node.js 22.23.0, and an isolated local Docker Engine.
-The initial runs exposed macOS-specific fixture paths and delayed zombie reaping in cleanup assertions.
-Those fixtures now use Linux tool paths and bounded kernel-absence checks.
-The final source suite passed 158 tests, with no failures and four macOS-specific skips.
-The skips cover two Keychain tests, remembered unlock, and a fixture that changes the macOS default Docker socket.
-Real PostgreSQL and Redis retention, recovery, jobs, CLI, MCP, and project ownership ran in the Linux suite.
-The installed Linux tarball also passed ESM, CLI, MCP, automatic-owner cleanup, and strict TypeScript checks with install scripts disabled.
+The [Linux run](https://github.com/RojhatToptamus/previewhost/actions/runs/35656792666) took 4m56s elapsed and 4m53s runner time.
+It exercised real PostgreSQL and Redis retention, recovery, jobs, CLI, MCP, and project ownership.
+Earlier Debian 12 arm64 execution passed the source and installed-package checks against the pre-integration implementation.
 
-Windows-only tests are registered only on Windows; they add no macOS release skips.
-Windows code has passed TypeScript checks, but its OS API calls have not executed on Windows.
-The branch includes the merged CI cancellation and release-artifact checks from `main`.
-The new inheritance regression requires Windows execution before it counts as verified.
-CI configuration is present but has not run from this branch.
-Neither Windows nor Linux x64 has execution evidence from this task.
+The [Windows architecture run](https://github.com/RojhatToptamus/previewhost/actions/runs/35659690054) verified native ownership, process cleanup, ACLs, publication interruption, named pipes, password storage, jobs, project owners, and MCP isolation.
+Its 13 skips cover three POSIX signal cases, Keychain, seven database cases, and two missing-Docker project fixtures.
+The x64 ACL fixture timeout occurred in PowerShell setup. The replacement uses native `icacls` and checks its inheritance entries before product assertions.
+The [focused x64 follow-up](https://github.com/RojhatToptamus/previewhost/actions/runs/35660424325), at `5c57e57`, passed that fixture and every installed-package check in 1m35s elapsed, using 1m32s runner time.
+
+Targeted execution also identified and corrected token-default file ownership, premature SQLite fixture deletion, and a clean-shutdown record race.
+The record fix maps only [Windows errors 2 and 3](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-) to `ENOENT`.
+Permission errors remain failures. A deterministic test deletes a real record between its file-stat and permission checks.
+Package checks now handle temporary directories on another drive and execute the installed Windows `.cmd` launcher instead of asserting Unix execute bits.
+No retries or longer deadlines were added.
+
+Full Windows database retention and recovery still need a Windows machine with Docker Desktop Linux containers.
+The configured hosted Windows jobs do not supply that backend. Named-pipe transport tests do not qualify database behavior.
+The two missing-Docker project fixtures also need a Windows named-pipe fixture and error-contract verification.
+Ordinary-user execution, explicit nested-job compatibility, and host/power-loss behavior remain unverified.
+Windows-only tests register only on Windows, so they add no macOS release skips.
