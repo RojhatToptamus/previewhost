@@ -78,7 +78,9 @@ CLI accepts JSON stdin. Explicit file/stdin input overrides the root default.
 Inspection works offline before an owner exists. It validates the spec and sources, but does not install dependencies, verify health, or grant execution permission.
 Prepare required dependencies through the project's existing commands before startup.
 Verify command, platform, and service prerequisites that inspection cannot prove.
-For native commands, use macOS, Node.js 22.23 or later, `ps`, and `lsof`.
+Native commands require Node.js 22.23 or later on macOS, Linux, or Windows.
+Use x64 on Windows. macOS and Linux support x64 and arm64.
+Linux also requires procps (`/bin/ps`) and `lsof` (`/usr/bin/lsof`).
 
 CLI start/replace waits by default and can return `starting` after its wait budget. MCP start/replace returns before readiness.
 Wait for the returned candidate ID and read the outcome's state and error.

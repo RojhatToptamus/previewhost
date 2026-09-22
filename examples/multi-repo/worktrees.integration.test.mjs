@@ -62,7 +62,12 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
   const backend = join(root, 'backend task');
   const gitEnv = { PATH: process.env.PATH, ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot } : {}), HOME: root, GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
-  const git = async (cwd, ...args) => (await execute('git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout;
+  const git = async (cwd, ...args) => {
+    const start = performance.now();
+    try { return (await execute('git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout; }
+    catch (error) { console.log('git failure', { args, elapsed: performance.now()-start, code: error.code, signal: error.signal, killed: error.killed, stderr: error.stderr }); throw error; }
+    finally { if (args[0] === 'worktree') console.log('git timing', args, performance.now()-start); }
+  };
   let runtime, daemon, mcp;
   try {
     await writeFile(gitEnv.GIT_CONFIG_GLOBAL, '');
@@ -84,6 +89,11 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
       await git(repository, 'worktree', 'add', '-b', `${name}-changes`, directory);
     }
 
+    const control = join(root, 'control worktree');
+    await git(join(root, 'backend repository'), 'worktree', 'add', '-b', 'control', control);
+    await cp(join(project, 'node_modules'), join(control, 'node_modules'), { recursive: true });
+    try { await git(join(root, 'backend repository'), 'worktree', 'remove', '--force', control); }
+    catch (error) { console.log('No-process control removal failed'); }
     const originalPage = await readFile(join(frontend, 'index.html'), 'utf8');
     await writeFile(join(frontend, 'index.html'), originalPage.replace('Shared notes', 'Staged notes'));
     await git(frontend, 'add', 'index.html');

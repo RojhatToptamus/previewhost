@@ -5,8 +5,9 @@ import { PreviewError } from './errors.js';
 import { assertWindowsPrivate, lockWindowsFile, makeWindowsPrivateDirectory } from './windows.js';
 
 export function requireSupportedPlatform(): void {
-  if (!['darwin', 'linux', 'win32'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch)) {
-    throw new PreviewError('UNSUPPORTED_PLATFORM', 'Previewhost requires macOS, Linux, or Windows on x64 or arm64.');
+  if (!['darwin', 'linux', 'win32'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch)
+    || (process.platform === 'win32' && process.arch !== 'x64')) {
+    throw new PreviewError('UNSUPPORTED_PLATFORM', 'Previewhost requires macOS or Linux on x64 or arm64, or Windows on x64.');
   }
 }
 

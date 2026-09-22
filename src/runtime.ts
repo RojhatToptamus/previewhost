@@ -16,6 +16,7 @@ import { createDataOwner, type DataOwner } from './data.js';
 import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
 import { Keystore } from './keystore.js';
 import { savePreviewSpec } from './config.js';
+import { requireSupportedPlatform } from './private-files.js';
 
 interface Attempt {
   summary: AttemptSummary;
@@ -66,6 +67,7 @@ export interface PreparedSecretSetup {
 }
 
 export async function createPreviewRuntime(options: RuntimeOptions): Promise<PreviewRuntime> {
+  requireSupportedPlatform();
   if (!options || !Array.isArray(options.allowedRoots) || options.allowedRoots.length < 1 || options.allowedRoots.length > 32) {
     throw new PreviewError('INVALID_INPUT', 'Supply between 1 and 32 allowed source roots.');
   }

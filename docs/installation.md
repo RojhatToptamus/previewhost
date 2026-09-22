@@ -6,14 +6,17 @@ Install Previewhost with npm. Check the Node.js, operating-system, and Docker re
 
 | Requirement | When you need it |
 | --- | --- |
-| Node.js 22.23 or later, x64 or arm64 | macOS, Linux, and Windows workflows. |
+| Node.js 22.23 or later | All workflows. |
+| macOS or Linux on x64/arm64, or Windows on x64 | Supported platforms. |
 | `ps` and `lsof` | macOS uses system tools. Linux needs procps at `/bin/ps` and lsof at `/usr/bin/lsof`. |
 | macOS 13 or later | Optional automatic keystore unlock through Keychain. |
 | An unlocked keystore | Stored secrets and managed database credentials. See [Secrets](secrets.md). |
 | A local Docker Engine | Managed PostgreSQL and Redis only. See [Databases](databases.md#prepare-docker). |
 | Your application's dependencies | Install these before startup, or declare [setup jobs](jobs.md). |
 
-Windows databases: experimental. Tested on x64 with WSL Docker; Docker Desktop and ARM64 unverified.
+Windows ARM64 is not supported.
+
+Windows databases: experimental. Tested on x64 with WSL Docker; Docker Desktop unverified.
 
 The npm package includes the macOS Keychain helper and uses Koffi platform packages for kernel APIs. Installation needs no compiler or GitHub access.
 

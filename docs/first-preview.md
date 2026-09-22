@@ -4,7 +4,7 @@ Start a frontend and API from your terminal. Open the local URL, read logs, upda
 
 ## Create the example
 
-Use macOS with Node.js 22.23 or later. This example needs no Docker, MCP registration, or application packages.
+Use Node.js 22.23 or later on a [supported platform](installation.md#requirements). This example needs no Docker, MCP registration, or application packages.
 Install the CLI:
 
 ```sh

@@ -8,7 +8,7 @@ Previewhost starts your app and its services on your machine, assigns local URLs
 - [CLI quickstart](first-preview.md): run a frontend and API from your terminal, replace them, and stop them.
 - [Node.js library](library.md): manage previews inside a program, from runtime creation through cleanup.
 
-Previewhost requires Node.js 22.23 or later. Native commands, automatic owners, and managed databases require macOS.
+Previewhost requires Node.js 22.23 or later on macOS, Linux, or Windows.
 See the [installation requirements](installation.md#requirements).
 
 ## When to use Previewhost

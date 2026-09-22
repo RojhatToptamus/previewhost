@@ -5,10 +5,36 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
-import { makePrivateDirectory, openOwnerLock } from './private-files.js';
+import { makePrivateDirectory, openOwnerLock, requireSupportedPlatform } from './private-files.js';
 import { commandEnvironment } from './native.js';
+import { createPreviewRuntime } from './runtime.js';
+import { connectPreviewDaemon } from './client.js';
 
-// These tests exercise kernel locks; no lock or platform mocks.
+test('platform boundary preserves macOS and Linux ARM64 but rejects Windows ARM64 before runtime or client work', async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  const arch = Object.getOwnPropertyDescriptor(process, 'arch')!;
+  try {
+    for (const [os, cpu, supported] of [
+      ['darwin', 'x64', true], ['darwin', 'arm64', true],
+      ['linux', 'x64', true], ['linux', 'arm64', true], ['win32', 'x64', true],
+      ['win32', 'arm64', false], ['win32', 'ia32', false], ['freebsd', 'x64', false],
+    ] as const) {
+      Object.defineProperty(process, 'platform', { value: os });
+      Object.defineProperty(process, 'arch', { value: cpu });
+      if (supported) assert.doesNotThrow(requireSupportedPlatform);
+      else {
+        assert.throws(requireSupportedPlatform, { code: 'UNSUPPORTED_PLATFORM' });
+        assert.throws(() => connectPreviewDaemon(), { code: 'UNSUPPORTED_PLATFORM' });
+        await assert.rejects(createPreviewRuntime({ allowedRoots: [process.cwd()] }), { code: 'UNSUPPORTED_PLATFORM' });
+      }
+    }
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+    Object.defineProperty(process, 'arch', arch);
+  }
+});
+
+// Exercise real kernel locks independently of the platform boundary test.
 test('kernel lock excludes independent handles and processes, allows owner reads, and releases after crash', { timeout: 15000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'previewhost-platform-'));
   t.after(() => rm(root, { recursive: true, force: true }));

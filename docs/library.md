@@ -4,7 +4,7 @@ Serve a local page, check its response, and stop the preview from a Node.js prog
 
 ## Install and prepare a page
 
-Use macOS with Node.js 22.23 or later. This example needs no global CLI, MCP registration, or Docker.
+Use Node.js 22.23 or later on a [supported platform](installation.md#requirements). This example needs no global CLI, MCP registration, or Docker.
 Create an example directory:
 
 ```sh

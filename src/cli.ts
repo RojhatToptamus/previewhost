@@ -12,6 +12,7 @@ import { Keystore } from './keystore.js';
 import { readSecretInput } from './secret-input.js';
 import { connectProject, managementProject, discoverProjectOwners, projectDirectory, type ProjectOptions } from './project.js';
 import { version } from './version.js';
+import { requireSupportedPlatform } from './private-files.js';
 
 const help = `previewhost — local previews and application environments
 
@@ -131,6 +132,7 @@ async function main(): Promise<void> {
   const command = positionals[0];
   if (values.version) { process.stdout.write(`${version}\n`); return; }
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
+  requireSupportedPlatform();
   if (command === 'secrets') { await secretCommand(positionals.slice(1), values); return; }
   const accepted: Record<string, string[]> = {
     dashboard: [], projects: [], remove: ['endpoint', 'token-file'],

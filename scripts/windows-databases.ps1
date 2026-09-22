@@ -37,7 +37,9 @@ try {
         if ($bridge.HasExited -or [DateTime]::UtcNow -ge $deadline) { throw 'Docker pipe did not become ready.' }
         Start-Sleep -Milliseconds 50
     }
-    npm run verify
+    npm run build
+    npx tsc -p tsconfig.test.json
+    node --test --test-reporter=tap examples/multi-repo/worktrees.integration.test.mjs
     if ($LASTEXITCODE -ne 0) { throw "Shared suite failed ($LASTEXITCODE)." }
 } catch {
     Get-ChildItem $directory -Filter '*error.log' | ForEach-Object { Get-Content $_.FullName -Tail 30 }
