@@ -5,6 +5,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import koffi from 'koffi';
 import { pipePermissions } from './testSupport/permissions.js';
 import { Docker, normalizeDockerEndpoint } from './docker.js';
 import { PreviewError } from './errors.js';
@@ -52,11 +53,33 @@ test('Docker HTTP and attach share the local socket or named-pipe transport', as
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   if (process.platform === 'win32') pipePermissions(endpoint, false);
   const docker = await Docker.connect(endpoint);
-  assert.equal(await docker.engineId(), 'fixture-engine');
+  assert.deepEqual(await Promise.all(Array.from({ length: 32 }, () => docker.engineId())), Array(32).fill('fixture-engine'));
   const stream = await docker.attach('fixture');
   stream.send('FAKE_initialization_input\n');
   assert.equal(await attached, 'FAKE_initialization_input\n');
   await stream.close();
+});
+
+if (process.platform === 'win32') test('a busy Docker pipe respects request cancellation and deadlines before sending HTTP', { timeout: 2000 }, async () => {
+  const endpoint = `\\\\.\\pipe\\previewhost-${randomUUID()}`;
+  const kernel = koffi.load('kernel32.dll');
+  const create = kernel.func('void * __stdcall CreateNamedPipeW(const char16_t *, uint32, uint32, uint32, uint32, uint32, uint32, void *)');
+  const open = kernel.func('void * __stdcall CreateFileW(const char16_t *, uint32, uint32, void *, uint32, uint32, void *)');
+  const close = kernel.func('int __stdcall CloseHandle(void *)');
+  const server = create(endpoint, 3 | 0x40000000, 0, 1, 4096, 4096, 0, null);
+  assert.notEqual(koffi.address(server), 0xffffffffffffffffn);
+  try {
+    const occupied = open(endpoint, 0xc0000000, 0, null, 3, 0x40000000 | 0x00100000, null);
+    assert.notEqual(koffi.address(occupied), 0xffffffffffffffffn);
+    try {
+      const docker = await Docker.connect(endpoint);
+      await assert.rejects(docker.request('GET', '/info', undefined, { timeoutMs: 25 }), { code: 'CLEANUP_INCOMPLETE' });
+      const controller = new AbortController();
+      const pending = docker.request('GET', '/info', undefined, { signal: controller.signal });
+      controller.abort();
+      await assert.rejects(pending, { code: 'CLOSED' });
+    } finally { assert.ok(close(occupied)); }
+  } finally { assert.ok(close(server)); }
 });
 
 if (process.platform === 'win32') test('Docker checks each connected pipe before HTTP bodies or attach input', { timeout: 5000 }, async t => {

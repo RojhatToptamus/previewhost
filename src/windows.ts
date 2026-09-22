@@ -43,6 +43,7 @@ function load() {
     ace: security.func('int __stdcall GetAce(void *, uint32, _Out_ void **)'),
     mkdir: kernel.func('__stdcall', 'CreateDirectoryW', 'int', ['str16', koffi.pointer(attributes)]),
     open: kernel.func('void * __stdcall CreateFileW(const char16_t *, uint32, uint32, void *, uint32, uint32, void *)'),
+    waitPipe: kernel.func('int __stdcall WaitNamedPipeW(const char16_t *, uint32)'),
     lock: kernel.func('__stdcall', 'LockFileEx', 'int', ['void *', 'uint32', 'uint32', 'uint32', 'uint32', koffi.inout(koffi.pointer(overlapped))]),
     move: kernel.func('int __stdcall MoveFileExW(const char16_t *, const char16_t *, uint32)'),
     fileAttributes: kernel.func('uint32 __stdcall GetFileAttributesW(const char16_t *)'),
@@ -101,13 +102,28 @@ function restrictedAcl(dacl: unknown, label: string): number {
 }
 
 /** Authenticate the connected pipe's account boundary before giving that same handle to HTTP. */
-export function connectWindowsPipe(path: string): Socket {
+export async function connectWindowsPipe(path: string, signal: AbortSignal): Promise<Socket> {
   const api = win();
   const adopt = api.procedure(api.module(null), 'uv_open_osfhandle');
   if (!adopt) throw new PreviewError('UNSUPPORTED_PLATFORM', 'This Node build cannot adopt a verified Windows pipe.');
   // OVERLAPPED and anonymous SQOS: the pipe server must never impersonate this client.
-  const handle = api.open(path, 0xc0000000, 0, null, 3, 0x40000000 | 0x00100000, null);
-  if (koffi.address(handle) === 0xffffffffffffffffn) throw failure('Docker pipe open');
+  let handle;
+  for (;;) {
+    signal.throwIfAborted();
+    handle = api.open(path, 0xc0000000, 0, null, 3, 0x40000000 | 0x00100000, null);
+    if (koffi.address(handle) !== 0xffffffffffffffffn) break;
+    if (api.error() !== 231) throw failure('Docker pipe open');
+    // ERROR_PIPE_BUSY: wait for a server instance before connecting. No HTTP bytes have been sent.
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      api.waitPipe.async(path, 15_000, (error: Error | null, ready: number) => {
+        signal.removeEventListener('abort', abort);
+        if (error || !ready) reject(error ?? new PreviewError('CLEANUP_INCOMPLETE', 'The local Docker pipe did not become available.'));
+        else resolve();
+      });
+    });
+  }
   let adopted = false;
   try {
     const owner = [null], dacl = [null], descriptor = [null];

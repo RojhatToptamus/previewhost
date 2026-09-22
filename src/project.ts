@@ -429,8 +429,14 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
       await client.shutdown();
       const directory = projectOwnerDirectory(await project);
       const deadline = performance.now() + 5000;
-      while ((await readConnection(directory))?.pid === owner!.pid) {
-        if (performance.now() >= deadline) throw new PreviewError('TIMEOUT', 'Runtime cleanup finished, but the owner has not removed its connection file. Check the original owner before restarting.');
+      for (;;) {
+        const connection = await readConnection(directory);
+        if (connection?.pid !== owner!.pid) {
+          if (connection) break; // A new owner has already acquired the lock.
+          try { const lock = await lockProject(directory); await lock.close(); break; }
+          catch (error) { if (!(error instanceof PreviewError) || error.code !== 'BUSY') throw error; }
+        }
+        if (performance.now() >= deadline) throw new PreviewError('TIMEOUT', 'Runtime cleanup finished, but the owner has not released its project lock. Check the original owner before restarting.');
         await delay(25);
       }
     }),
