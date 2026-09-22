@@ -38,7 +38,7 @@ func main() {
 
 func forward(conn net.Conn) {
 	defer conn.Close()
-	command := exec.Command("wsl.exe", "-d", "PreviewhostBackend", "--exec", "socat", "STDIO", "UNIX-CONNECT:/var/run/docker.sock")
+	command := exec.Command("wsl.exe", "-d", "PreviewhostBackend", "--exec", "/usr/bin/socat", "STDIO", "UNIX-CONNECT:/var/run/docker.sock")
 	command.Stderr = os.Stderr
 	input, err := command.StdinPipe()
 	if err != nil {

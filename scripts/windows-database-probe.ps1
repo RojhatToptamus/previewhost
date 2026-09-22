@@ -5,8 +5,8 @@ $diagnosis = $PWD.Path
 $daemon = $null
 $bridge = $null
 try {
-    & wsl.exe -d PreviewhostBackend --exec apk add --no-cache socat
-    $daemon = Start-Process wsl.exe -ArgumentList @('-d', 'PreviewhostBackend', '--exec', 'dockerd') -PassThru -RedirectStandardOutput "$probe\dockerd.log" -RedirectStandardError "$probe\dockerd-error.log"
+    & wsl.exe -d PreviewhostBackend --exec /sbin/apk add --no-cache socat
+    $daemon = Start-Process wsl.exe -ArgumentList @('-d', 'PreviewhostBackend', '--exec', '/usr/bin/dockerd') -PassThru -RedirectStandardOutput "$probe\dockerd.log" -RedirectStandardError "$probe\dockerd-error.log"
     & wsl.exe -d PreviewhostBackend --exec sh -c 'set -e; remaining=30; while [ ! -S /var/run/docker.sock ]; do remaining=$((remaining-1)); [ "$remaining" -gt 0 ] || exit 1; sleep 1; done; docker version; docker pull postgres:17-alpine; docker pull redis:7-alpine'
 
     New-Item -ItemType Directory -Path "$probe\bridge" | Out-Null
