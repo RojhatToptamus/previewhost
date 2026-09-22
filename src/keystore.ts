@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto';
-import { mkdirSync, lstatSync, openSync, closeSync, constants } from 'node:fs';
+import { lstatSync, openSync, closeSync, constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { limits, secretIdSchema } from './contracts.js';
 import { PreviewError, throwIfAborted } from './errors.js';
 import { keychain } from './keychain.js';
+import { isPrivate, makePrivateDirectory } from './private-files.js';
 
 export type SecretNamespace = 'user' | 'database';
 export interface StoreOptions { signal?: AbortSignal }
@@ -36,14 +37,14 @@ export class Keystore {
     if (this.closed) throw new PreviewError('CLOSED', 'This keystore session is closed.');
     if (this.db) return this.db;
     try {
-      mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+      makePrivateDirectory(this.directory);
       const root = lstatSync(this.directory);
-      if (!root.isDirectory() || (process.platform !== 'win32' && (root.uid !== process.getuid!() || (root.mode & 0o077)))) throw unavailable();
+      if (!root.isDirectory() || !isPrivate(this.directory, root)) throw unavailable();
       const file = join(this.directory, 'secrets.sqlite');
       const fd = openSync(file, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
       closeSync(fd);
       const stat = lstatSync(file);
-      if (!stat.isFile() || stat.nlink !== 1 || (process.platform !== 'win32' && (stat.uid !== process.getuid!() || (stat.mode & 0o077)))) throw unavailable();
+      if (!stat.isFile() || stat.nlink !== 1 || !isPrivate(file, stat)) throw unavailable();
       const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
       const db = new DatabaseSync(file);
       try {

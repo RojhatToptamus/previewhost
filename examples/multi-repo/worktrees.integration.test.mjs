@@ -54,15 +54,15 @@ test('the task recipe rejects missing paths and a different application recipe w
 
 test('CLI and MCP run dirty task worktrees, retain task data, and release every consumer before source removal', {
   // Five sequential attempts have independent 60-second startup deadlines, plus fixture setup and cleanup.
-  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 360_000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 360_000,
 }, async (t) => {
   await testKeystore(t);
   const root = await mkdtemp(join(tmpdir(), 'previewhost-task-worktrees-'));
   const frontend = join(root, 'frontend task');
   const backend = join(root, 'backend task');
-  const gitEnv = { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: '1',
+  const gitEnv = { PATH: process.env.PATH, ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot } : {}), HOME: root, GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
-  const git = async (cwd, ...args) => (await execute('/usr/bin/git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout;
+  const git = async (cwd, ...args) => (await execute('git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout;
   let runtime, daemon, mcp;
   try {
     await writeFile(gitEnv.GIT_CONFIG_GLOBAL, '');

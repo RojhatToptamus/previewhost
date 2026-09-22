@@ -16,9 +16,10 @@ let daemonInfo;
 let automaticProject;
 function record(name, details = {}) { console.log(JSON.stringify({ name, result: 'pass', ...details })); }
 function child(args, absoluteNode = false) {
-  const proc = spawn(absoluteNode ? process.execPath : binary, absoluteNode ? [join(root, 'dist/cli.js'), ...args] : args, {
+  const useNode = absoluteNode || process.platform === 'win32';
+  const proc = spawn(useNode ? process.execPath : binary, useNode ? [join(root, 'dist/cli.js'), ...args] : args, {
     cwd: directory, stdio: ['pipe', 'pipe', 'pipe'],
-    env: absoluteNode ? { ...process.env, PATH: '/usr/bin:/bin' } : process.env,
+    env: absoluteNode ? { ...process.env, PATH: process.platform === 'win32' ? process.env.SystemRoot : '/usr/bin:/bin' } : process.env,
   });
   children.add(proc);
   proc.closed = new Promise((resolve) => proc.once('close', (code, signal) => { children.delete(proc); resolve({ code, signal }); }));
@@ -49,15 +50,17 @@ try {
   assert.equal(manifest.name, 'previewhost');
   const inventory = (await readdir(root, { recursive: true, withFileTypes: true }))
     .filter((entry) => !entry.isDirectory())
-    .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1));
+    .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1).replaceAll('\\', '/'));
   const allowed = /^(?:package\.json|README\.md|LICENSE|NOTICE|dist\/[^/]+\.(?:js|d\.ts)|dist\/native\/keychain|dist\/dashboard\/(?:index\.html|dashboard\.(?:js|css)|LICENSES\.md)|dist\/ui-tokens\.css|dist\/previewhost\.svg|dist\/fonts\/(?:geist(?:-mono)?\.woff2|LICENSE\.txt)|dist\/skills\/previewhost\/(?:SKILL\.md|references\/.+)|examples\/(?:static\.json|command\.json|server\.mjs|site\/index\.html))$/;
   for (const file of inventory) {
     assert(allowed.test(file) && !file.includes('.test.'), `Unexpected packaged file: ${file}`);
   }
-  const keychain = join(root, 'dist/native/keychain');
-  assert((await stat(keychain)).mode & 0o111, 'The packaged Keychain helper must be executable.');
-  assert.deepEqual(execFileSync('/usr/bin/lipo', ['-archs', keychain], { encoding: 'utf8' }).trim().split(/\s+/).sort(), ['arm64', 'x86_64']);
-  execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--all-architectures', keychain]);
+  if (process.platform === 'darwin') {
+    const keychain = join(root, 'dist/native/keychain');
+    assert((await stat(keychain)).mode & 0o111, 'The packaged Keychain helper must be executable.');
+    assert.deepEqual(execFileSync('/usr/bin/lipo', ['-archs', keychain], { encoding: 'utf8' }).trim().split(/\s+/).sort(), ['arm64', 'x86_64']);
+    execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--all-architectures', keychain]);
+  }
   for (const file of ['dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/supervisor.js', 'dist/previewhost.svg', 'examples/static.json', 'examples/command.json', 'examples/server.mjs', 'examples/site/index.html', 'LICENSE', 'NOTICE']) assert(inventory.includes(file), `Missing packaged file: ${file}`);
   assert.match(await readFile(join(root, 'dist/fonts/LICENSE.txt'), 'utf8'), /SIL OPEN FONT LICENSE Version 1.1/);
   const { startDashboard } = await import(pathToFileURL(join(root, 'dist/dashboard.js')).href);
@@ -90,7 +93,13 @@ try {
   assert.deepEqual(manifest.bin, { previewhost: './dist/cli.js' });
   for (const hook of ['preinstall', 'install', 'postinstall']) assert.equal(manifest.scripts[hook], undefined);
   for (const extra of ['typescript', '@types/node', '@modelcontextprotocol/client', 'react', 'react-dom', 'vite', 'tailwindcss', 'radix-ui', 'sonner']) await assert.rejects(stat(join(directory, 'node_modules', extra)));
-  assert((await stat(binary)).mode & 0o111);
+  if (process.platform === 'win32') {
+    assert((await stat(binary + '.cmd')).isFile());
+    const version = execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `""${binary}.cmd" --version"`], {
+      windowsVerbatimArguments: true, encoding: 'utf8', timeout: 10_000,
+    });
+    assert.equal(version.trim(), manifest.version);
+  } else assert((await stat(binary)).mode & 0o111);
   await mkdir(site, { recursive: true });
   await writeFile(join(site, 'index.html'), 'packaged-static');
   await writeFile(join(site, 'server.mjs'), 'import http from "node:http"; http.createServer((_q,r)=>r.end(JSON.stringify({message:"packaged-native",pid:process.pid}))).listen(Number(process.env.PORT),"127.0.0.1");');
@@ -114,7 +123,8 @@ try {
   record('clean-esm-library-static-start-fetch-close');
 
   const tokenFile = join(directory, 'private-control/token');
-  await mkdir(dirname(tokenFile), { recursive: true, mode: 0o700 });
+  const { makePrivateDirectory, isPrivate } = await import(pathToFileURL(join(root, 'dist/private-files.js')).href);
+  makePrivateDirectory(dirname(tokenFile));
   const existingToken = randomBytes(32).toString('hex');
   await writeFile(tokenFile, existingToken, { mode: 0o600 });
   daemon = child(['serve', '--root', site, '--allow-exec', '--port', '0', '--token-file', tokenFile]);
@@ -186,7 +196,7 @@ try {
   record('installed-mcp-absolute-node-minimal-path-discovery-start-disconnect-stop', { tools: tools.tools.length });
   await client.shutdown(); await client.close(); client = undefined;
   assert.equal((await bounded(daemon.closed)).code, 0); assert.equal(daemon.errors, '');
-  assert.equal((await stat(tokenFile)).mode & 0o777, 0o600);
+  assert.equal(isPrivate(tokenFile, await stat(tokenFile)), true);
   await gone(daemonInfo.endpoint);
   await gone(cliNative.url);
   assert.throws(() => process.kill(cliApplication.pid, 0), { code: 'ESRCH' });

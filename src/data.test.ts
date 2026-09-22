@@ -3,27 +3,28 @@ import { testKeystore } from './testSupport/keystore.js';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { Socket } from 'node:net';
-import { mkdtemp, readFile, writeFile, readdir, rm, chmod, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, readdir, rm, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createDataOwner, type DataOwner } from './data.js';
 beforeEach(async (t) => {
   assert.ok('mock' in t, 'The isolated keystore must belong to a test context.');
-  if (process.platform === 'darwin') await testKeystore(t);
+  await testKeystore(t);
 });
 import { createPreviewRuntime } from './runtime.js';
+import { pipePermissions, publicAccess } from './testSupport/permissions.js';
 
-const mac = { skip: process.platform !== 'darwin' };
 const signal = () => new AbortController().signal;
 const pg = { database: { type: 'postgres' as const } };
 const dataModule = new URL('./data.js', import.meta.url).href;
 
-test('the permanent data lock excludes another process and is not inherited by unrelated children', mac, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewhost-lock-'));
+test('the permanent data lock excludes another process and is not inherited by unrelated children', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-lock-'));
+  const directory = join(root, 'data');
   const owner = await createDataOwner({ directory });
   let sleeper: ReturnType<typeof spawn> | undefined;
   try {
@@ -36,12 +37,13 @@ test('the permanent data lock excludes another process and is not inherited by u
     await next.close();
   } finally {
     if (sleeper && sleeper.exitCode === null && sleeper.signalCode === null) { sleeper.kill('SIGKILL'); await once(sleeper, 'close'); }
-    await owner.close(); await rm(directory, { recursive: true, force: true });
+    await owner.close(); await rm(root, { recursive: true, force: true });
   }
 });
 
-test('unsafe or corrupt retained records fail closed before Docker access', mac, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewhost-record-'));
+test('unsafe or corrupt retained records fail closed before Docker access', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-record-'));
+  const directory = join(root, 'data');
   const outside = join(directory, 'outside');
   try {
     const owner = await createDataOwner({ directory }); await owner.close();
@@ -55,15 +57,16 @@ test('unsafe or corrupt retained records fail closed before Docker access', mac,
     await assert.rejects(createDataOwner({ directory, dockerSocket: '/unavailable.sock' }));
     assert.equal(await readFile(outside, 'utf8'), 'keep');
     await rm(join(directory, 'sample.json')); await rm(outside);
-    await chmod(directory, 0o755);
+    await publicAccess(directory, true);
     await assert.rejects(createDataOwner({ directory }), { code: 'CLEANUP_INCOMPLETE' });
-    await chmod(directory, 0o700);
+    await publicAccess(directory, false);
     const next = await createDataOwner({ directory }); await next.close();
-  } finally { await chmod(directory, 0o700); await rm(directory, { recursive: true, force: true }); }
+  } finally { await publicAccess(directory, false); await rm(root, { recursive: true, force: true }); }
 });
 
-test('a FIFO retained record cannot block owner startup while holding the kernel lock', mac, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewhost-record-fifo-'));
+test('a FIFO retained record cannot block owner startup while holding the kernel lock', { skip: process.platform === 'win32' && 'Requires POSIX filesystem FIFOs' }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-record-fifo-'));
+  const directory = join(root, 'data');
   try {
     const owner = await createDataOwner({ directory }); await owner.close();
     await promisify(execFile)('/usr/bin/mkfifo', ['-m', '600', join(directory, 'sample.json')]);
@@ -72,10 +75,10 @@ test('a FIFO retained record cannot block owner startup while holding the kernel
     assert.equal(result.stdout.trim(), 'CLEANUP_INCOMPLETE');
     await rm(join(directory, 'sample.json'));
     const next = await createDataOwner({ directory }); await next.close();
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('older retained records require an explicit reset without changing files or Docker resources', mac, async () => {
+test('older retained records require an explicit reset without changing files or Docker resources', async () => {
   const fixture = await faultEngine('volume-lost-absent');
   try {
     const owner = await createDataOwner({ directory: fixture.data });
@@ -93,7 +96,7 @@ test('older retained records require an explicit reset without changing files or
   } finally { await fixture.close(); }
 });
 
-test('absent lost creation remains owned until positively observed; failed close retains the lock', mac, async () => {
+test('absent lost creation remains owned until positively observed; failed close retains the lock', async () => {
   const fixture = await faultEngine('volume-lost-absent');
   const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
   try {
@@ -112,7 +115,7 @@ test('absent lost creation remains owned until positively observed; failed close
   } finally { fixture.completeVolume(); await finish(owner, fixture); }
 });
 
-test('an operator acknowledgment clears only an absent pending create on the same engine', mac, async () => {
+test('an operator acknowledgment clears only an absent pending create on the same engine', async () => {
   const fixture = await faultEngine('volume-lost-absent');
   const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
   try {
@@ -128,7 +131,7 @@ test('an operator acknowledgment clears only an absent pending create on the sam
   } finally { fixture.engineId = 'fixture-engine'; await finish(owner, fixture, true); }
 });
 
-test('public recovery remains available after failed runtime close and releases data ownership', mac, async () => {
+test('public recovery remains available after failed runtime close and releases data ownership', async () => {
   const fixture = await faultEngine('volume-lost-absent');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], dataDirectory: fixture.data,
     dockerSocket: fixture.socket, authorize: () => true });
@@ -155,7 +158,7 @@ test('public recovery remains available after failed runtime close and releases 
   }
 });
 
-test('the runtime counts unresolved database ownership against its total live-node limit', mac, async () => {
+test('the runtime counts unresolved database ownership against its total live-node limit', async () => {
   const fixture = await faultEngine('volume-lost-absent');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], dataDirectory: fixture.data, dockerSocket: fixture.socket,
     authorize: (request) => request.operation !== 'start' || request.spec.name === 'sample' ? true : new Promise<boolean>((resolve) => {
@@ -184,7 +187,7 @@ test('the runtime counts unresolved database ownership against its total live-no
   }
 });
 
-test('full ownership labels prevent adoption or deletion of a foreign same-name volume', mac, async () => {
+test('full ownership labels prevent adoption or deletion of a foreign same-name volume', async () => {
   const fixture = await faultEngine('volume-lost-absent');
   const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
   try {
@@ -198,7 +201,7 @@ test('full ownership labels prevent adoption or deletion of a foreign same-name 
 });
 
 for (const mode of ['container-lost-created', 'start-lost-created'] as const) {
-  test(`${mode} recovers the exact container identity and removes it while retaining data`, mac, async () => {
+  test(`${mode} recovers the exact container identity and removes it while retaining data`, async () => {
     const fixture = await faultEngine(mode);
     const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
     try {
@@ -215,7 +218,7 @@ for (const mode of ['container-lost-created', 'start-lost-created'] as const) {
   });
 }
 
-test('cancellation joins a dispatched creation; failed removal keeps the exact ID for retry', mac, async () => {
+test('cancellation joins a dispatched creation; failed removal keeps the exact ID for retry', async () => {
   const fixture = await faultEngine('container-remove-lost');
   const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
   const controller = new AbortController();
@@ -234,7 +237,7 @@ test('cancellation joins a dispatched creation; failed removal keeps the exact I
   } finally { await finish(owner, fixture); }
 });
 
-test('partial volume deletion is recoverable and recreated data uses a fresh random volume name', mac, async () => {
+test('partial volume deletion is recoverable and recreated data uses a fresh random volume name', async () => {
   const fixture = await faultEngine('container-lost-created');
   const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
   try {
@@ -250,7 +253,7 @@ test('partial volume deletion is recoverable and recreated data uses a fresh ran
   } finally { await finish(owner, fixture); }
 });
 
-test('concurrent new names cannot exceed the retained-data limit', mac, async () => {
+test('concurrent new names cannot exceed the retained-data limit', async () => {
   const fixture = await faultEngine('volume-lost-absent');
   let owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
   await owner.close();
@@ -274,20 +277,29 @@ test('concurrent new names cannot exceed the retained-data limit', mac, async ()
   } finally { await finish(owner, fixture); }
 });
 
-test('failed intent publication and missing cached images dispatch no Docker mutation', mac, async () => {
+test('failed intent publication and missing cached images dispatch no Docker mutation', async () => {
   for (const blocked of ['publication', 'image'] as const) {
     const fixture = await faultEngine('volume-lost-absent');
     const owner = await createDataOwner({ directory: fixture.data, dockerSocket: fixture.socket });
+    const recordPath = join(fixture.data, 'sample.json');
+    let record: string | undefined;
     if (blocked === 'image') fixture.imagesMissing = true;
     else fixture.onInfo = async () => {
-      if ((await readdir(fixture.data)).includes('sample.json')) await chmod(fixture.data, 0o500);
+      if (record === undefined && (await readdir(fixture.data)).includes('sample.json')) {
+        record = await readFile(recordPath, 'utf8');
+        await rm(recordPath); await mkdir(recordPath);
+      }
     };
     try {
       await assert.rejects(owner.open('sample', pg, { signal: signal(), onFailure() {} }));
       assert.equal(fixture.mutationRequests, 0);
       assert.equal(fixture.volumes.size, 0);
       assert.equal(fixture.containers.size, 0);
-    } finally { fixture.onInfo = async () => {}; await chmod(fixture.data, 0o700); await finish(owner, fixture); }
+    } finally {
+      fixture.onInfo = async () => {};
+      if (record !== undefined) { await rm(recordPath, { recursive: true }); await writeFile(recordPath, record, { mode: 0o600 }); }
+      await finish(owner, fixture);
+    }
   }
 });
 
@@ -295,7 +307,7 @@ type FaultMode = 'volume-lost-absent' | 'container-lost-created' | 'start-lost-c
 async function faultEngine(mode: FaultMode) {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-engine-'));
   const data = join(directory, 'data');
-  const socket = join(directory, 'engine.sock');
+  const socket = process.platform === 'win32' ? `\\\\.\\pipe\\previewhost-${randomUUID()}` : join(directory, 'engine.sock');
   const volumes = new Map<string, Record<string, any>>();
   const containers = new Map<string, Record<string, any>>();
   const sockets = new Set<Socket>();
@@ -365,6 +377,7 @@ async function faultEngine(mode: FaultMode) {
   server.on('connection', (socket) => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
   server.on('upgrade', (_req, socket) => { socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n'); socket.on('data', () => {}); });
   await new Promise<void>((resolve) => server.listen(socket, resolve));
+  if (process.platform === 'win32') pipePermissions(socket, false);
   return fixture;
 }
 

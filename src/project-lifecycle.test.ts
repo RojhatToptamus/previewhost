@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { makePrivateDirectory } from './private-files.js';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { createPreviewRuntime } from './runtime.js';
@@ -14,13 +16,11 @@ import { reviewStaleProject, removeStaleProject, writeProjectRecord, connectProj
 import { createDataOwner } from './data.js';
 import { SecretSetup } from './secrets-setup.js';
 import { testKeystore } from './testSupport/keystore.js';
-import { traceStep } from './testSupport/diagnosis.js';
 import type { PreviewSpec } from './contracts.js';
 
 const execute = promisify(execFile);
-const mac = { skip: process.platform !== 'darwin' };
 
-test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', mac, async t => {
+test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', async t => {
   const fixture = await testKeystore(t);
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
   const tokenFile = join(fixture.directory, 'control/token');
@@ -56,7 +56,7 @@ test('entry removal preserves neighbors and refuses active, stale, and private-s
   } finally { await client.close(); await daemon.close(); }
 });
 
-test('an empty owner can clear canceled secret editing without deleting the saved reference', mac, async t => {
+test('an empty owner can clear canceled secret editing without deleting the saved reference', async t => {
   const fixture = await testKeystore(t);
   await fixture.store.add('user', 'disposable/shared', 'FAKE');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['disposable/shared'], authorize: () => true });
@@ -77,7 +77,7 @@ test('an empty owner can clear canceled secret editing without deleting the save
   } finally { await client.close(); await daemon.close(); }
 });
 
-test('CLI manages a deleted source and removing the last entry retires only its idle owner', mac, async () => {
+test('CLI manages a deleted source and removing the last entry retires only its idle owner', async () => {
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-deleted-source-')));
   const client = connectProject({ projectDirectory: project, allowExec: true });
   const cli = resolve('dist/cli.js');
@@ -86,8 +86,14 @@ test('CLI manages a deleted source and removing the last entry retires only its 
       command: [process.execPath, '-e', "require('http').createServer((q,r)=>r.end('alive')).listen(+process.env.PORT,process.env.HOST)"] });
     const ready = await client.wait('app', started.candidate!.id);
     assert.equal(ready.state, 'ready');
+    if (process.platform === 'win32') {
+      // Windows locks a running process's cwd. Management must still work after stop and deletion.
+      await assert.rejects(rm(project, { recursive: true }), { code: 'EBUSY' });
+      assert.equal(await (await fetch(ready.url!)).text(), 'alive');
+      await client.stop('app');
+    }
     await rm(project, { recursive: true });
-    assert.equal(await (await fetch(ready.url!)).text(), 'alive');
+    if (process.platform !== 'win32') assert.equal(await (await fetch(ready.url!)).text(), 'alive');
     await execute(process.execPath, [cli, 'stop', 'app', '--project', project]);
     const stopped = (await client.get('app')).latest!;
     assert.equal(stopped.state, 'stopped');
@@ -107,18 +113,16 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
     for (let i = 0; i < 145; i++) {
       const projectDirectory = join(directory, 'source-' + i);
       const id = createHash('sha256').update(projectDirectory).digest('hex');
-      await mkdir(join(directory, id), { mode: 0o700 });
+      makePrivateDirectory(join(directory, id));
       await writeFile(join(directory, id, 'connection.json'), JSON.stringify({ projectDirectory, pid: process.pid, endpoint: 'http://127.0.0.1:1' }), { mode: 0o600 });
       await writeFile(join(directory, id, 'token'), 'a'.repeat(64), { mode: 0o600 });
     }
     const records = await discoverProjectOwners(directory);
     assert.equal(records.length, 145);
-    if (process.platform === 'darwin') {
-      const unavailable = join(directory, records[0].id);
-      await assert.rejects(removeOfflineProject(unavailable), { code: 'STALE_ATTEMPT' });
-      await assert.rejects(deleteOfflineData(unavailable, 'app', {}), { code: 'STALE_ATTEMPT' });
-      assert.ok((await readProjectRecord(unavailable))?.endpoint);
-    }
+    const unavailable = join(directory, records[0].id);
+    await assert.rejects(removeOfflineProject(unavailable), { code: 'STALE_ATTEMPT' });
+    await assert.rejects(deleteOfflineData(unavailable, 'app', {}), { code: 'STALE_ATTEMPT' });
+    assert.ok((await readProjectRecord(unavailable))?.endpoint);
     let launch = '';
     dashboard = await startDashboard({ discover: () => discoverProjectOwners(directory), openBrowser: async url => { launch = url; } });
     await dashboard.open();
@@ -139,9 +143,9 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 test('offline projects keep real PostgreSQL data discoverable and delete only explicitly confirmed resources', {
-  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 60_000,
 }, async t => {
-  const fixture = await traceStep('offline.fixture', () => testKeystore(t));
+  const fixture = await testKeystore(t);
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-offline-project-')));
   const ownerDirectory = projectOwnerDirectory(project);
   const dataDirectory = join(fixture.directory, 'retained');
@@ -161,36 +165,34 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
   const authorized = connectProject({ projectDirectory: project, allowExec: true });
   try {
     const args = [resolve('dist/cli.js'), 'start', '--project', project, '--file', file, '--allow-exec'];
-    const first = JSON.parse((await traceStep('offline.first-start', () => execute(process.execPath, [...args, '--data-dir', dataDirectory, '--docker-socket', dockerSocket!], {
-      env: { ...process.env, NODE_OPTIONS: `--import=${hook} --import=${JSON.stringify(resolve('scripts/diagnose-operations.mjs'))}` }, timeout: 30_000,
-    }))).stdout);
-    await traceStep('offline.first-query', async () => { assert.equal(await (await fetch(first.url)).text(), '1'); });
-    await traceStep('offline.active-remove-denial', () => assert.rejects(client.remove('app', first.id), { code: 'BUSY' }));
-    await traceStep('offline.first-stop', () => client.stop('app'));
-    await traceStep('offline.retained-remove-denial', () => assert.rejects(client.remove('app', first.id), { code: 'BUSY' }));
-    await traceStep('offline.first-shutdown', () => client.shutdown());
+    const first = JSON.parse((await execute(process.execPath, [...args, '--data-dir', dataDirectory, '--docker-socket', dockerSocket!], {
+      env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, timeout: 30_000,
+    })).stdout);
+    assert.equal(await (await fetch(first.url)).text(), '1');
+    await assert.rejects(client.remove('app', first.id), { code: 'BUSY' });
+    await client.stop('app');
+    await assert.rejects(client.remove('app', first.id), { code: 'BUSY' });
+    await client.shutdown();
     let record = (await readProjectRecord(ownerDirectory))!;
     assert.equal(record.endpoint, undefined); assert.equal(record.dataDirectory, dataDirectory);
     assert.deepEqual((await offlinePreviews(record)).map(p => p.name), ['app']);
-    const second = JSON.parse((await traceStep('offline.second-start', () => execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${hook} --import=${JSON.stringify(resolve('scripts/diagnose-operations.mjs'))}` }, timeout: 30_000 }))).stdout);
-    await traceStep('offline.second-query', async () => { assert.equal(await (await fetch(second.url)).text(), '1'); });
-    await traceStep('offline.second-shutdown', () => client.shutdown()); await rm(project, { recursive: true });
+    const second = JSON.parse((await execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, timeout: 30_000 })).stdout);
+    assert.equal(await (await fetch(second.url)).text(), '1');
+    await client.shutdown(); await rm(project, { recursive: true });
     record = (await readProjectRecord(ownerDirectory))!;
     const data = (await offlinePreviews(record))[0].data!;
-    await traceStep('offline.deletion-denials', async () => {
-      await assert.rejects(removeOfflineProject(ownerDirectory), { code: 'BUSY' });
-      await assert.rejects(reviewStaleProject(ownerDirectory), { code: 'CLEANUP_INCOMPLETE' });
-      await assert.rejects(client.deleteData('app'), { code: 'EXECUTION_DENIED' });
-      await assert.rejects(deleteOfflineData(ownerDirectory, 'app', { expected: { attemptId: null, resources: [{ name: 'other', type: 'postgres' }] } }), { code: 'STALE_ATTEMPT' });
-      const lock = await lockProject(ownerDirectory);
-      try { await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}), { code: 'BUSY' }); }
-      finally { await lock.close(); }
-      const canceled = new AbortController(); canceled.abort();
-      await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}, canceled.signal), { code: 'CLOSED' });
-      await fixture.control('lock');
-      await assert.rejects(authorized.deleteData('app', { expected: { attemptId: null, resources: data.resources } }), { code: 'SECRET_STORE_UNAVAILABLE' });
-      assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined, 'A locked store must block deletion before Docker changes.');
-    });
+    await assert.rejects(removeOfflineProject(ownerDirectory), { code: 'BUSY' });
+    await assert.rejects(reviewStaleProject(ownerDirectory), { code: 'CLEANUP_INCOMPLETE' });
+    await assert.rejects(client.deleteData('app'), { code: 'EXECUTION_DENIED' });
+    await assert.rejects(deleteOfflineData(ownerDirectory, 'app', { expected: { attemptId: null, resources: [{ name: 'other', type: 'postgres' }] } }), { code: 'STALE_ATTEMPT' });
+    const lock = await lockProject(ownerDirectory);
+    try { await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}), { code: 'BUSY' }); }
+    finally { await lock.close(); }
+    const canceled = new AbortController(); canceled.abort();
+    await assert.rejects(deleteOfflineData(ownerDirectory, 'app', {}, canceled.signal), { code: 'CLOSED' });
+    await fixture.control('lock');
+    await assert.rejects(authorized.deleteData('app', { expected: { attemptId: null, resources: data.resources } }), { code: 'SECRET_STORE_UNAVAILABLE' });
+    assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined, 'A locked store must block deletion before Docker changes.');
     const id = createHash('sha256').update(project).digest('hex');
     let launch = '';
     const dashboard = await startDashboard({
@@ -207,34 +209,32 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
         return response.json();
       };
       const deletion = { action: 'deleteData', owner: id, name: 'app', expected: { attemptId: null, resources: data.resources } };
-      await traceStep('offline.dashboard-locked-denial', async () => { assert.equal((await post(deletion, 400)).error.code, 'SECRET_STORE_UNAVAILABLE'); });
+      assert.equal((await post(deletion, 400)).error.code, 'SECRET_STORE_UNAVAILABLE');
       assert.equal((await offlinePreviews(record))[0].data!.cleanup, undefined);
-      await traceStep('offline.dashboard-unlock', async () => { assert.equal((await post({ action: 'unlockKeystore', password: 'FAKE_fixture_password' })).result.state, 'unlocked'); });
-      await traceStep('offline.dashboard-delete', async () => { assert.equal((await post(deletion)).error, undefined); });
-    } finally { await traceStep('offline.dashboard-close', () => dashboard.close()); }
-    await traceStep('offline.fixture-unlock', () => fixture.control('unlock'));
+      assert.equal((await post({ action: 'unlockKeystore', password: 'FAKE_fixture_password' })).result.state, 'unlocked');
+      assert.equal((await post(deletion)).error, undefined);
+    } finally { await dashboard.close(); }
+    await fixture.control('unlock');
     assert.deepEqual(await client.list(), []);
     assert.equal(await fixture.store.has('user', 'disposable/shared/api'), true);
     await client.remove();
     assert.equal(await readProjectRecord(ownerDirectory), undefined);
   } finally {
-    await traceStep('offline.cleanup', async () => {
-      await fixture.control('unlock');
-      await client.shutdown().catch(() => {});
-      const record = await readProjectRecord(ownerDirectory).catch(() => undefined);
-      if (record && !record.endpoint) for (const p of await offlinePreviews(record)) await deleteOfflineData(ownerDirectory, p.name, {});
-      await client.close(); await authorized.close();
-      await rm(ownerDirectory, { recursive: true, force: true }); await rm(project, { recursive: true, force: true });
-    });
+    await fixture.control('unlock');
+    await client.shutdown().catch(() => {});
+    const record = await readProjectRecord(ownerDirectory).catch(() => undefined);
+    if (record && !record.endpoint) for (const p of await offlinePreviews(record)) await deleteOfflineData(ownerDirectory, p.name, {});
+    await client.close(); await authorized.close();
+    await rm(ownerDirectory, { recursive: true, force: true }); await rm(project, { recursive: true, force: true });
   }
 });
 
 
-test('stale removal checks process liveness, locks, exact records, and data metadata without stopping anything', mac, async () => {
+test('stale removal checks process liveness, locks, exact records, and data metadata without stopping anything', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-stale-record-'));
   const projectDirectory = join(directory, 'removed-source');
   const recordDirectory = join(directory, createHash('sha256').update(projectDirectory).digest('hex'));
-  await mkdir(recordDirectory, { mode: 0o700 });
+  makePrivateDirectory(recordDirectory);
   const dataDirectory = join(directory, 'data');
   const data = await createDataOwner({ directory: dataDirectory }); await data.close();
   const exitedPid = Number((await execute(process.execPath, ['-e', 'console.log(process.pid)'])).stdout);

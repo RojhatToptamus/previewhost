@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, realpath, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { makePrivateDirectory } from './private-files.js';
 import { request } from 'node:http';
 import { startDashboard } from './dashboard.js';
 import { startDaemon } from './daemon.js';
@@ -138,7 +139,7 @@ test('discovery rejects unsafe records without following them or hiding other ow
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-discovery-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const id = 'a'.repeat(64);
-  await symlink('/tmp', join(directory, id));
+  await symlink(tmpdir(), join(directory, id), 'junction');
   const owners = await discoverProjectOwners(directory);
   assert.equal(owners.length, 1);
   assert.equal(owners[0].error?.code, 'UNAUTHORIZED');
@@ -149,7 +150,8 @@ test('a hung owner is bounded without blocking healthy-owner results', { timeout
   const { createServer } = await import('node:http');
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-hung-owner-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const tokenFile = join(directory, 'token');
+  makePrivateDirectory(join(directory, 'private'));
+  const tokenFile = join(directory, 'private', 'token');
   await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
   const hung = createServer(() => {});
   await new Promise<void>(resolve => hung.listen(0, '127.0.0.1', resolve));
@@ -174,7 +176,7 @@ test('a hung owner is bounded without blocking healthy-owner results', { timeout
   assert.ok(performance.now() - start < 6000);
 });
 
-test('Secret Manager updates existing references through the authenticated dashboard without returning values or changing approvals', { skip: process.platform !== 'darwin', timeout: 15_000 }, async t => {
+test('Secret Manager updates existing references through the authenticated dashboard without returning values or changing approvals', { timeout: 15_000 }, async t => {
   const { testKeystore } = await import('./testSupport/keystore.js');
   const fixture = await testKeystore(t);
   const opened: string[] = [];

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -12,6 +12,8 @@ import { limits, type RuntimeOptions } from './contracts.js';
 import { startDaemon } from './daemon.js';
 import { PreviewError } from './errors.js';
 import { createPreviewRuntime } from './runtime.js';
+import { makePrivateDirectory } from './private-files.js';
+import { publicAccess } from './testSupport/permissions.js';
 
 async function fixture(t: TestContext, authorize?: RuntimeOptions['authorize']) {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost transport '));
@@ -99,24 +101,27 @@ test('control authority, content, strict schemas, and body bounds are enforced b
 
 test('private token files reject symlinks, broad permissions, and unsafe directories', async (t) => {
   const f = await fixture(t);
-  const fifo = join(f.directory, 'private', 'fifo');
-  await promisify(execFile)('/usr/bin/mkfifo', [fifo]);
-  const fifoClient = connectPreviewDaemon({ endpoint: f.daemon.endpoint, tokenFile: fifo });
-  t.after(() => fifoClient.close());
-  await assert.rejects(fifoClient.list(), { code: 'UNAUTHORIZED' });
+  if (process.platform !== 'win32') { // Windows has no filesystem FIFOs.
+    const fifo = join(f.directory, 'private', 'fifo');
+    await promisify(execFile)('/usr/bin/mkfifo', [fifo]);
+    const fifoClient = connectPreviewDaemon({ endpoint: f.daemon.endpoint, tokenFile: fifo });
+    t.after(() => fifoClient.close());
+    await assert.rejects(fifoClient.list(), { code: 'UNAUTHORIZED' });
+  }
   const linked = join(f.directory, 'private', 'linked-token');
   await symlink(f.tokenFile, linked);
   const linkedClient = connectPreviewDaemon({ endpoint: f.daemon.endpoint, tokenFile: linked });
   t.after(() => linkedClient.close());
   await assert.rejects(linkedClient.list(), { code: 'UNAUTHORIZED' });
-  await chmod(f.tokenFile, 0o644);
+  await publicAccess(f.tokenFile, true);
   await assert.rejects(f.client.list(), { code: 'UNAUTHORIZED' });
-  await chmod(f.tokenFile, 0o600);
-  await chmod(join(f.directory, 'private'), 0o755);
+  await publicAccess(f.tokenFile, false);
+  await publicAccess(join(f.directory, 'private'), true);
   await assert.rejects(f.client.list(), { code: 'UNAUTHORIZED' });
-  await chmod(join(f.directory, 'private'), 0o700);
+  await publicAccess(join(f.directory, 'private'), false);
   const badDirectory = join(f.directory, 'broad');
-  await mkdir(badDirectory, { mode: 0o755 });
+  makePrivateDirectory(badDirectory);
+  await publicAccess(badDirectory, true);
   await assert.rejects(startDaemon({ runtime: f.runtime, tokenFile: join(badDirectory, 'token'), port: 0 }), { code: 'UNAUTHORIZED' });
   assert.throws(() => connectPreviewDaemon({ endpoint: 'http://example.com:9400' }), { code: 'INVALID_INPUT' });
   assert.throws(() => connectPreviewDaemon({ endpoint: 'http://token@127.0.0.1:9400' }), { code: 'INVALID_INPUT' });
@@ -127,7 +132,7 @@ test('private token files reject symlinks, broad permissions, and unsafe directo
 test('daemon token directories are excluded from existing and future static previews, including aliases', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost private source '));
   const privateDirectory = join(directory, 'private');
-  await mkdir(privateDirectory, { mode: 0o700 });
+  makePrivateDirectory(privateDirectory);
   await writeFile(join(directory, 'index.html'), 'public');
   await writeFile(join(privateDirectory, 'index.html'), 'private');
   const runtime = await createPreviewRuntime({ allowedRoots: [directory] });

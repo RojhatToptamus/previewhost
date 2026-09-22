@@ -27,27 +27,17 @@ During prerelease mode, consumed changesets stay under `.changeset/pre/` until p
 ## What runs
 
 `.github/workflows/ci.yml` runs for PRs targeting `main`. Release also calls it
-before publication. Documentation and type checks run on Ubuntu. Native tests and
-package checks run on macOS. Two macOS database jobs each start a separate Colima
-engine and run their assigned files serially.
-
-`scripts/test-groups.mjs` lists database files and discovers the native remainder.
-Every discovered file runs once. Each group requires a complete TAP summary with
-zero skipped, failed, canceled, or TODO tests. Database groups require an explicit
-local Docker socket. New database tests must report a skip or error when Docker
-is absent; they must never silently omit cases.
-
-**Verify macOS package** requires all three job types to succeed. Missing, skipped,
-canceled, or failed dependencies block publication. Release calls also require
-the artifact ID from the package check, including when the release plan is absent.
-The publisher receives that verified artifact. `npm run verify:release`
-retains the complete serial suite for local verification and comparison.
+before publication. It installs dependencies, starts local Docker through Colima,
+pulls the two database fixture images, and runs `npm run verify:release`.
+That gate requires macOS, an explicit local Unix socket, and zero skipped,
+failed, canceled, or TODO tests. It rejects incomplete or duplicate TAP summaries.
+Release calls must return the uploaded, verified package artifact ID before publication.
+PR updates cancel superseded CI runs. Release runs retain their existing serialization.
 
 The runner is `macos-15-intel`, which Colima uses in its own integration workflow.
-Colima uses the native macOS VZ backend with four virtual CPUs. Docker tool installation,
+Colima uses the native macOS VZ backend with two virtual CPUs. Docker tool installation,
 VM startup, and image pulls have separate CI steps so their durations are visible.
 The full suite retains its normal timeouts and the zero-skip release gate.
-PR updates cancel superseded CI runs. Release runs retain their existing serialization and are not canceled by this rule.
 Native compilation requires Xcode Command Line Tools. The build produces one
 ad-hoc signed Keychain helper with `arm64` and `x86_64` slices. Consumers do not
 compile it during installation. CI uses Node.js 24; the package minimum remains

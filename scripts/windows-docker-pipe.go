@@ -1,5 +1,5 @@
-// Disposable CI transport: Windows message pipe -> WSL stdio -> Docker Unix socket.
-// No HTTP handling, TCP API listener, or product code is replaced by this fixture.
+// CI transport: Windows message pipe -> WSL stdio -> Docker Unix socket.
+// Previewhost runs natively on Windows; only the Linux Engine runs inside WSL.
 package main
 
 import (
@@ -9,11 +9,28 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"unsafe"
 
 	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 )
 
 func main() {
+	// Closing the bridge (including forced CI cleanup) kills every wsl.exe child.
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer windows.CloseHandle(job)
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		log.Fatal(err)
+	}
+	if err := windows.AssignProcessToJobObject(job, windows.CurrentProcess()); err != nil {
+		log.Fatal(err)
+	}
+
 	account, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
@@ -26,7 +43,10 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
-	log.Print("ready: authenticated local message pipe")
+	if err := os.WriteFile(os.Args[2], []byte("ready"), 0600); err != nil {
+		log.Fatal(err)
+	}
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -45,11 +65,13 @@ func forward(conn net.Conn) {
 		log.Print(err)
 		return
 	}
+	defer input.Close()
 	output, err := command.StdoutPipe()
 	if err != nil {
 		log.Print(err)
 		return
 	}
+	defer output.Close()
 	if err := command.Start(); err != nil {
 		log.Print(err)
 		return

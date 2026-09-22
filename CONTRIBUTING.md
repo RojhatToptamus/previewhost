@@ -2,9 +2,10 @@
 
 ## Set up development
 
-Use Node.js 22.23 or later. Native tests need macOS with `ps` and `lsof`.
+Use Node.js 22.23 or later. POSIX native tests need `ps` and `lsof`.
+On Debian or Ubuntu, install `procps` and `lsof` before the suite.
 The tests use temporary source directories, loopback ports, and real child processes.
-The native Keychain build requires Xcode Command Line Tools (`clang` and `codesign`).
+On macOS, the native Keychain build requires Xcode Command Line Tools (`clang` and `codesign`).
 Terminal input tests use `/usr/bin/python3` to create and close temporary pseudo-terminals.
 
 From the repository directory, run:
@@ -18,7 +19,13 @@ npm pack --dry-run
 ```
 
 `npm test` builds the package and runs the compiled Node tests one at a time.
-Native tests skip on unsupported platforms. A skipped test does not establish platform support.
+CI runs this same automatically discovered suite on Linux, macOS, Windows x64, and Windows ARM64.
+Keychain tests require macOS. FIFO, pseudo-terminal, and process-group tests require POSIX.
+Windows uses real ACL and Job Object tests for its platform boundaries.
+Windows x64 CI uses WSL Docker through a private named pipe; Previewhost runs on Windows.
+The CI helper removes its WSL distribution and terminates its transport children after verification.
+Windows ARM64 database coverage is blocked: the hosted runner cannot start WSL2 because nested virtualization is unavailable.
+A skipped database test does not establish support.
 Some sandbox environments require explicit permission for local listeners and
 process inspection.
 
@@ -30,14 +37,21 @@ docker pull postgres:17-alpine
 docker pull redis:7-alpine
 ```
 
-Select your local Docker Unix socket. The command below uses the Docker Desktop default:
+Select your local Docker Unix socket (`/var/run/docker.sock` on standard Linux installations). The command below uses the Docker Desktop default:
 
 ```sh
 PREVIEWHOST_TEST_DOCKER_SOCKET="$HOME/.docker/run/docker.sock" npm run verify
 ```
 
+On Windows, set the local pipe before running the same command:
+
+```powershell
+$env:PREVIEWHOST_TEST_DOCKER_SOCKET = '\\.\pipe\docker_engine'
+npm run verify
+```
+
 Without that variable, the real database suites skip. The remaining data tests
-use isolated Unix sockets to exercise interrupted database operations and ownership checks.
+use isolated Unix sockets or authenticated Windows pipes to exercise interrupted operations and ownership checks.
 Each real test creates its own containers and volumes, then removes only those
 objects. Do not point verification at a shared or remote database.
 

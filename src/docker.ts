@@ -1,7 +1,27 @@
 import http from 'node:http';
 import type { Socket } from 'node:net';
 import { realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join, posix } from 'node:path';
 import { PreviewError, throwIfAborted } from './errors.js';
+import { connectWindowsPipe } from './windows.js';
+
+export function defaultDockerEndpoint(): string {
+  if (process.platform === 'win32') return String.raw`\\.\pipe\docker_engine`;
+  return process.platform === 'darwin' ? join(homedir(), '.docker/run/docker.sock') : '/var/run/docker.sock';
+}
+
+/** Only local transports. Explicit paths win; ambient Docker contexts never retarget retained data. */
+export function normalizeDockerEndpoint(value: string, platform = process.platform): string {
+  if (platform === 'win32') {
+    const pipe = value.replace(/^npipe:\/\/\/\/\.\/pipe\//i, '\\\\.\\pipe\\');
+    if (/^\\\\\.\\pipe\\[a-z0-9_.-]+$/i.test(pipe)) return pipe.toLowerCase();
+  } else {
+    const path = value.startsWith('unix://') ? value.slice(7) : value;
+    if (!path.includes('://') && !path.startsWith('\\') && (!value.startsWith('unix://') || posix.isAbsolute(path))) return posix.resolve(path);
+  }
+  throw new PreviewError('INVALID_INPUT', 'Select a local Docker Unix socket or Windows named pipe. Remote Docker endpoints are not supported.');
+}
 
 export interface DockerResponse { status: number; body: unknown }
 export interface DockerAttach { send(value: string): void; close(): Promise<void> }
@@ -10,9 +30,16 @@ export interface DockerAttach { send(value: string): void; close(): Promise<void
 export class Docker {
   constructor(readonly socket: string) {}
 
+  private connectionOptions(): http.RequestOptions {
+    // agent:false would override createConnection with Node's default, unverified pipe connection.
+    return process.platform === 'win32' ? { createConnection: () => connectWindowsPipe(this.socket) } : { agent: false };
+  }
+
   static async connect(socket: string): Promise<Docker> {
+    const endpoint = normalizeDockerEndpoint(socket);
+    if (process.platform === 'win32') return new Docker(endpoint);
     try {
-      const canonical = await realpath(socket);
+      const canonical = await realpath(endpoint);
       if (!(await stat(canonical)).isSocket()) throw new Error();
       return new Docker(canonical);
     } catch {
@@ -27,7 +54,7 @@ export class Docker {
       let result: DockerResponse | undefined;
       let error: Error | undefined;
       let ended = false;
-      const req = http.request({ socketPath: this.socket, path: `/v1.40${path}`, method, agent: false,
+      const req = http.request({ ...this.connectionOptions(), socketPath: this.socket, path: `/v1.40${path}`, method,
         headers: encoded ? { 'content-type': 'application/json', 'content-length': encoded.length } : {} }, (res) => {
         const chunks: Buffer[] = []; let size = 0;
         res.on('data', (chunk: Buffer) => {
@@ -43,8 +70,8 @@ export class Docker {
         });
         res.once('close', () => { if (!ended) fail(); });
       });
-      const fail = () => {
-        error ??= new PreviewError('CLEANUP_INCOMPLETE', 'The local Docker request did not complete.');
+      const fail = (cause?: Error) => {
+        error ??= cause instanceof PreviewError ? cause : new PreviewError('CLEANUP_INCOMPLETE', 'The local Docker request did not complete.');
         req.destroy();
       };
       const abort = () => {
@@ -53,14 +80,19 @@ export class Docker {
       };
       const timer = options.timeoutMs === 0 ? undefined : setTimeout(fail, options.timeoutMs ?? 15_000);
       options.signal?.addEventListener('abort', abort, { once: true });
-      req.once('error', fail);
+      req.once('error', cause => {
+        fail(cause);
+        // A rejected createConnection emits error without assigning a socket or emitting close.
+        if (!req.socket) finish();
+      });
       req.once('upgrade', (_res, socket) => { socket.destroy(); fail(); });
-      req.once('close', () => {
+      const finish = () => {
         clearTimeout(timer);
         options.signal?.removeEventListener('abort', abort);
         if (error || !result) reject(error ?? new PreviewError('CLEANUP_INCOMPLETE', 'The local Docker response was incomplete.'));
         else resolve(result);
-      });
+      };
+      req.once('close', finish);
       req.end(encoded);
     });
   }
@@ -91,12 +123,12 @@ export class Docker {
     return new Promise((resolve, reject) => {
       let socket: Socket | undefined;
       let delivered = false;
-      const req = http.request({ socketPath: this.socket,
+      const req = http.request({ ...this.connectionOptions(), socketPath: this.socket,
         path: `/v1.40/containers/${encodeURIComponent(id)}/attach?stream=1&stdin=1&stdout=1&stderr=1`,
-        method: 'POST', agent: false, headers: { connection: 'Upgrade', upgrade: 'tcp' } });
-      const fail = () => {
+        method: 'POST', headers: { connection: 'Upgrade', upgrade: 'tcp' } });
+      const fail = (cause?: Error) => {
         clearTimeout(timer); req.destroy(); socket?.destroy();
-        if (!delivered) reject(new PreviewError('START_FAILED', 'Docker could not open the database initialization stream.'));
+        if (!delivered) reject(cause instanceof PreviewError ? cause : new PreviewError('START_FAILED', 'Docker could not open the database initialization stream.'));
       };
       const timer = setTimeout(fail, 15_000);
       req.once('error', fail);

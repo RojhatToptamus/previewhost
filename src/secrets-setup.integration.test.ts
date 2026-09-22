@@ -17,7 +17,7 @@ import { PreviewError } from './errors.js';
 import { testKeystore } from './testSupport/keystore.js';
 import type { AttemptResult, PreviewSpec, PreviewStatus, SecretSetupStatus } from './contracts.js';
 
-const enabled = { skip: process.platform !== 'darwin', timeout: 60_000 };
+const enabled = { timeout: 60_000 };
 const app = `import http from 'node:http'; import fs from 'node:fs'; fs.writeFileSync('started','yes');
   console.log(process.env.ONE,process.env.TWO);
   http.createServer((req,res)=>res.end(process.env.ONE+'|'+process.env.TWO)).listen(Number(process.env.PORT),process.env.HOST);`;
@@ -295,10 +295,10 @@ test('browser launch passes only the private URL and normal OS environment, with
   const old = process.env.PREVIEWHOST_UNSELECTED_TEST;
   process.env.PREVIEWHOST_UNSELECTED_TEST = 'FAKE_do_not_inherit';
   const intercepted = t.mock.method(childProcess, 'spawn', ((command: string, args: string[], options: childProcess.SpawnOptions) => {
-    assert.equal(command, '/usr/bin/open');
-    assert.deepEqual(args, ['http://127.0.0.1:9999/secrets#FAKE_private_capability']);
+    assert.equal(command, process.platform === 'darwin' ? '/usr/bin/open' : process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open');
+    assert.deepEqual(args, [...(process.platform === 'win32' ? ['url.dll,FileProtocolHandler'] : []), 'http://127.0.0.1:9999/secrets#FAKE_private_capability']);
     assert.ok(!JSON.stringify(options).includes('FAKE_do_not_inherit'));
-    assert.deepEqual(Object.keys(options.env!).sort(), ['HOME', 'LANG', 'LC_ALL', 'PATH', 'TMPDIR'].filter((key) => process.env[key] !== undefined).sort());
+    assert.deepEqual(Object.keys(options.env!).sort(), ['HOME', 'LANG', 'LC_ALL', 'PATH', 'TMPDIR', 'DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'SystemRoot'].filter((key) => process.env[key] !== undefined).sort());
     return spawn(process.execPath, ['-e', 'process.exit(0)'], options);
   }) as typeof childProcess.spawn);
   syncBuiltinESMExports();

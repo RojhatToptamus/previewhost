@@ -224,7 +224,7 @@ test('terminal history stays bounded while attempts remain separately addressabl
   assert.equal((await runtime.get(`denied-${limits.terminalRecords + 2}`)).url, undefined);
 });
 
-test('native library flow verifies readiness, preserves a working server on replacement failure, and releases source untouched', { skip: process.platform !== 'darwin' }, async (t) => {
+test('native library flow verifies readiness, preserves a working server on replacement failure, and releases source untouched', async (t) => {
   const { runtime, directory } = await fixture(t, () => true);
   await fs.writeFile(path.join(directory, 'server.mjs'), `import http from 'node:http'; http.createServer((req,res)=>res.end(process.env.VALUE)).listen(Number(process.env.PORT),process.env.HOST);`);
   const command = (value: string): PreviewSpec => ({ name: 'native', type: 'command', cwd: directory, command: [process.execPath, 'server.mjs'], env: { VALUE: value } });

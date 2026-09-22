@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import test, { type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { connectProject, projectOwnerDirectory } from './project.js';
+import { isPrivate } from './private-files.js';
 import type { AttemptResult, PreviewSpec, PreviewStatus, SecretSetupStatus } from './contracts.js';
 import { testKeystore } from './testSupport/keystore.js';
 
@@ -19,7 +22,7 @@ function execute(file: string, args: string[], options: { cwd?: string; env?: No
   result.child.stdin?.end();
   return result;
 }
-const enabled = { skip: process.platform !== 'darwin', timeout: 60_000 };
+const enabled = { timeout: 60_000 };
 
 async function fixture(t: TestContext) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-project-')));
@@ -55,7 +58,7 @@ test('CLI and real stdio MCP share an automatically started owner, optional root
   await assert.rejects(client.list(), { code: 'DAEMON_UNAVAILABLE' });
   const mcp = new Client({ name: 'project-workflow', version: '1' });
   const transport = new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', '--project', directory, '--allow-exec'], stderr: 'pipe',
-    env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } });
+    env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` } });
   let stderr = ''; transport.stderr?.on('data', data => { stderr += data; });
   t.after(() => mcp.close());
   await mcp.connect(transport);
@@ -82,7 +85,9 @@ test('CLI and real stdio MCP share an automatically started owner, optional root
   await assert.rejects(readFile(join(directory, 'preview.yaml')), { code: 'ENOENT' });
   const info = await client.info(); assert.equal(info?.allowExec, true); assert.equal(info?.projectDirectory, directory);
   assert.equal(info?.dataDirectory, join(projectOwnerDirectory(directory), 'data'));
-  assert.equal((await stat(info!.dataDirectory!)).mode & 0o777, 0o700);
+  const permissions = await stat(info!.dataDirectory!);
+  if (process.platform === 'win32') assert.ok(isPrivate(info!.dataDirectory!, permissions));
+  else assert.equal(permissions.mode & 0o777, 0o700);
   const listed = JSON.parse((await execute(process.execPath, [cli, 'list', '--project', directory])).stdout);
   assert.equal(listed[0].active.id, ready.result.id);
   const saved = (await mcp.callTool({ name: 'preview_save_config', arguments: { spec } })).structuredContent as { result: { file: string } };
@@ -150,7 +155,7 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
     import {appendFile} from 'node:fs/promises';
     SecretSetup.prototype.openBrowser = async url => { await appendFile(${JSON.stringify(capture)}, url + '\\n', {mode: 0o600}); };
   `, { mode: 0o600 });
-  const shared = `disposable/worktrees/${directory.split('/').at(-1)}`;
+  const shared = `disposable/worktrees/${basename(directory)}`;
   const distinct = `${shared}/variant`;
   await keystore.store.add('user', shared, 'FAKE_SHARED');
   const yaml = (id: string) => `name: tree\ntype: command\ncwd: .\ncommand: [${JSON.stringify(process.execPath)}, app.mjs]\nenv:\n  TOKEN: {secret: ${id}}\n`;
@@ -171,7 +176,7 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
     const mcp = new Client({ name: 'worktree-secret-test', version: '1' }); adapters.push(mcp);
     await mcp.connect(new StdioClientTransport({ command: process.execPath,
       args: [cli, 'mcp', '--project', root, '--allow-exec', ...(root === directory ? ['--data-dir', dataDirectory] : [])],
-      env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } as Record<string, string>, stderr: 'pipe' }));
+      env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` } as Record<string, string>, stderr: 'pipe' }));
     return async <T>(name: string, args: Record<string, unknown> = {}): Promise<T> => {
       const response = await mcp.callTool({ name, arguments: args }); wire.push(JSON.stringify(response));
       assert.equal(response.isError, undefined, JSON.stringify(response.structuredContent));
@@ -203,7 +208,7 @@ test('real Git worktrees and an unrelated project share exact keystore names wit
         try { assert.equal((await owner.info())?.dataDirectory, dataDirectory); }
         finally { await owner.close(); }
         const conflict = await execute(process.execPath, [cli, 'start', '--project', worktree, '--allow-exec', '--data-dir', dataDirectory,
-          '--file', join(worktree, 'preview.yaml')], { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } }).catch(error => error);
+          '--file', join(worktree, 'preview.yaml')], { env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` } }).catch(error => error);
         assert.equal(JSON.parse(conflict.stderr).error.code, 'BUSY');
       }
     }
@@ -293,7 +298,7 @@ test('Git worktree roots are distinct and command wait timeout preserves continu
 });
 
 test('one shared MCP connection routes Git worktrees to separate owners and managed data', {
-  ...enabled, skip: process.platform !== 'darwin' || !process.env.PREVIEWHOST_TEST_DOCKER_SOCKET,
+  ...enabled, skip: !process.env.PREVIEWHOST_TEST_DOCKER_SOCKET && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET',
 }, async t => {
   const { directory, projects } = await fixture(t);
   const keystore = await testKeystore(t);
@@ -314,7 +319,7 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   t.after(() => client.close());
   await client.connect(new StdioClientTransport({ command: process.execPath,
     args: [cli, 'mcp', '--root', directory, '--allow-exec', '--docker-socket', process.env.PREVIEWHOST_TEST_DOCKER_SOCKET!],
-    env: { ...process.env, NODE_OPTIONS: `--import=${hook}` } as Record<string, string>, stderr: 'pipe' }));
+    env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` } as Record<string, string>, stderr: 'pipe' }));
   const tools = (await client.listTools()).tools;
   assert.ok(tools.every(tool => tool.inputSchema.required?.includes('project')));
   assert.equal((await client.callTool({ name: 'preview_list', arguments: {} })).isError, true);
@@ -358,7 +363,7 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
 for (const customData of [false, true]) test(`automatic storage keeps explicit options and static previews usable without Docker (custom data: ${customData})`, enabled, async t => {
   const { directory, client } = await fixture(t);
   const dataDirectory = customData ? join(projectOwnerDirectory(directory), 'custom-data') : undefined;
-  const dockerSocket = join(directory, 'absent.sock');
+  const dockerSocket = process.platform === 'win32' ? `\\\\.\\pipe\\previewhost-absent-${randomUUID()}` : join(directory, 'absent.sock');
   const owner = connectProject({ projectDirectory: directory, allowExec: true, dataDirectory, dockerSocket });
   t.after(() => owner.close());
   const site: PreviewSpec = { name: 'site', type: 'environment', primary: 'web', services: { web: { type: 'static', directory } } };
@@ -369,7 +374,7 @@ for (const customData of [false, true]) test(`automatic storage keeps explicit o
   assert.equal(info.dataDirectory, dataDirectory ?? join(projectOwnerDirectory(directory), 'data'));
   assert.equal(info.dockerSocket, dockerSocket);
   assert.equal((await client.info())?.pid, info.pid, 'omitted launch options must reuse the existing owner');
-  for (const override of [{ dataDirectory: join(directory, 'different') }, { dockerSocket: join(directory, 'other.sock') }]) {
+  for (const override of [{ dataDirectory: join(directory, 'different') }, { dockerSocket: `${dockerSocket}-other` }]) {
     const mismatch = connectProject({ projectDirectory: directory, ...override });
     try { await assert.rejects(mismatch.start(site), { code: 'INVALID_INPUT' }); }
     finally { await mismatch.close(); }
@@ -377,8 +382,8 @@ for (const customData of [false, true]) test(`automatic storage keeps explicit o
   const update = await owner.replace('site', { name: 'site', type: 'environment', primary: 'web',
     services: { web: { type: 'static', directory }, db: { type: 'postgres' } } });
   const failed = await owner.wait('site', update.candidate!.id);
-  assert.equal(failed.error?.code, 'START_FAILED');
-  assert.match(failed.error!.message, /Docker socket is unavailable/);
+  assert.equal(failed.error?.code, process.platform === 'win32' ? 'CLEANUP_INCOMPLETE' : 'START_FAILED');
+  assert.match(failed.error!.message, process.platform === 'win32' ? /Docker pipe open/ : /Docker socket is unavailable/);
   assert.equal(await (await fetch(ready.url!)).text(), 'project preview');
   assert.deepEqual(await owner.info(), info, 'failed updates and conflicting options must not reconfigure or restart the owner');
   assert.equal((await client.get('site')).active?.id, ready.id);

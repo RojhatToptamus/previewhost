@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, open, readFile } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import { dirname, resolve } from 'node:path';
@@ -9,12 +9,13 @@ import { limits, requestSchemas, secretRequestSchemas } from './contracts.js';
 import type { PreviewRuntime } from './runtime.js';
 import { checkTokenDirectory, defaultTokenFile, readToken } from './client.js';
 import { failure, PreviewError } from './errors.js';
+import { makePrivateDirectory } from './private-files.js';
 import { SecretSetup } from './secrets-setup.js';
 import { secretsPage, secretsScript, secretsStyle } from './secrets-page.js';
 import type { ProjectOwnerInfo } from './project.js';
 
 async function createToken(path: string, runtime: PreviewRuntime): Promise<string> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  makePrivateDirectory(dirname(path));
   await checkTokenDirectory(path);
   await runtime.protectDirectory(dirname(path));
   try {

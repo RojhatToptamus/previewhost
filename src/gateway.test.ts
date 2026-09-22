@@ -37,7 +37,9 @@ async function backend(t: TestContext, handler?: http.RequestListener) {
 }
 
 async function gateway(t: TestContext, target?: HttpTarget): Promise<Gateway> {
-  const result = await createGateway();
+  const errors: Error[] = [];
+  const result = await createGateway({ onError: error => errors.push(error) });
+  t.after(() => assert.deepEqual(errors, [], 'The gateway must not fail during the test.'));
   t.after(() => result.close());
   result.setTarget(target);
   return result;
@@ -349,8 +351,11 @@ test('enforces the gateway connection limit and recovers capacity after clients 
   const upstream = await backend(t, (_request, response) => response.end('ok'));
   const proxy = await gateway(t, upstream.target);
   const clients = await Promise.all(Array.from({ length: limits.gatewayConnections }, () => rawClient(t, proxy.url)));
-  const excess = await rawClient(t, proxy.url);
-  await eventually(() => excess.socket.destroyed, 'excess connection is rejected');
+  const excess = await rawClient(t, proxy.url).catch((error: NodeJS.ErrnoException) => {
+    assert.ok(error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED', String(error));
+    return undefined;
+  });
+  if (excess) await eventually(() => excess.socket.destroyed, 'excess connection is rejected');
   clients[0].socket.destroy();
   await pause(30);
   assert.equal((await request(proxy.url)).body, 'ok');
@@ -364,7 +369,8 @@ test('a pipelined client cannot bypass the in-flight proxy request bound', async
   const proxy = await gateway(t, upstream.target);
   const client = await rawClient(t, proxy.url);
   client.socket.write(`GET / HTTP/1.1\r\nHost: ${new URL(proxy.url).host}\r\n\r\n`.repeat(limits.gatewayConnections + 64));
-  await eventually(() => accepted >= limits.gatewayConnections, 'upstream requests reach the configured bound');
+  await eventually(() => accepted >= limits.gatewayConnections, 'upstream requests reach the configured bound')
+    .catch(error => assert.equal(accepted, limits.gatewayConnections, error.message));
   await pause(50);
   assert.equal(accepted, limits.gatewayConnections);
   await proxy.close();

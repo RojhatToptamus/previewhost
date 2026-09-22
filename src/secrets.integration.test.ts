@@ -10,7 +10,7 @@ import { removeSecret, setSecret } from './testSupport/keystore.js';
 import { testKeystore } from './testSupport/keystore.js';
 import type { PreviewSpec, PreviewStatus } from './contracts.js';
 
-const enabled = { skip: process.platform !== 'darwin', timeout: 60_000 };
+const enabled = { timeout: 60_000 };
 const app = `import http from 'node:http'; import fs from 'node:fs';
   fs.appendFileSync('starts', process.pid + '\\n');
   console.log(process.env.VALUE, encodeURIComponent(process.env.VALUE || ''));

@@ -12,7 +12,7 @@ import { startDaemon } from './daemon.js';
 import type { LogResult, PreviewSpec, PreviewStatus } from './contracts.js';
 
 const execute = promisify(execFile);
-test('CLI and MCP share real job results, rerun guards, authorization and cancellation', { skip: process.platform !== 'darwin', timeout: 30_000 }, async () => {
+test('CLI and MCP share real job results, rerun guards, authorization and cancellation', { timeout: 30_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-job-transports-'));
   let approved = true;
   let rerunAuthorized = false;
