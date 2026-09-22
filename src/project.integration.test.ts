@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import test, { type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { connectProject, projectOwnerDirectory } from './project.js';
+import { connectProject, lockProject, projectOwnerDirectory } from './project.js';
 import { isPrivate } from './private-files.js';
 import type { AttemptResult, PreviewSpec, PreviewStatus, SecretSetupStatus } from './contracts.js';
 import { testKeystore } from './testSupport/keystore.js';
@@ -136,6 +136,8 @@ test('CLI and real stdio MCP share an automatically started owner, optional root
   await writeFile(alternative, 'name: alternate\ntype: static\ndirectory: .\n');
   assert.equal(JSON.parse((await execute(process.execPath, [cli, 'start', '--project', directory, '--file', alternative])).stdout).state, 'ready');
   await client.shutdown();
+  const released = await lockProject(projectOwnerDirectory(directory));
+  await released.close();
   await assert.rejects(client.secretsStatus('00000000-0000-4000-8000-000000000000'), { code: 'DAEMON_UNAVAILABLE' });
   const restarted = await client.start(spec);
   assert.equal((await client.wait('site', restarted.candidate!.id)).state, 'ready');

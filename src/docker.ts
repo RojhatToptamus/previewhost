@@ -30,9 +30,12 @@ export interface DockerAttach { send(value: string): void; close(): Promise<void
 export class Docker {
   constructor(readonly socket: string) {}
 
-  private connectionOptions(): http.RequestOptions {
+  private connectionOptions(signal: AbortSignal): http.RequestOptions {
     // agent:false would override createConnection with Node's default, unverified pipe connection.
-    return process.platform === 'win32' ? { createConnection: () => connectWindowsPipe(this.socket) } : { agent: false };
+    return process.platform === 'win32' ? { createConnection: (_options, callback) => {
+      void connectWindowsPipe(this.socket, signal).then(socket => callback!(null, socket), error => callback!(error, undefined!));
+      return undefined;
+    } } : { agent: false };
   }
 
   static async connect(socket: string): Promise<Docker> {
@@ -54,7 +57,8 @@ export class Docker {
       let result: DockerResponse | undefined;
       let error: Error | undefined;
       let ended = false;
-      const req = http.request({ ...this.connectionOptions(), socketPath: this.socket, path: `/v1.40${path}`, method,
+      const connecting = new AbortController();
+      const req = http.request({ ...this.connectionOptions(connecting.signal), socketPath: this.socket, path: `/v1.40${path}`, method,
         headers: encoded ? { 'content-type': 'application/json', 'content-length': encoded.length } : {} }, (res) => {
         const chunks: Buffer[] = []; let size = 0;
         res.on('data', (chunk: Buffer) => {
@@ -72,10 +76,12 @@ export class Docker {
       });
       const fail = (cause?: Error) => {
         error ??= cause instanceof PreviewError ? cause : new PreviewError('CLEANUP_INCOMPLETE', 'The local Docker request did not complete.');
+        connecting.abort(error);
         req.destroy();
       };
       const abort = () => {
         error = new PreviewError('CLOSED', 'The Docker observation was canceled.');
+        connecting.abort(error);
         req.destroy();
       };
       const timer = options.timeoutMs === 0 ? undefined : setTimeout(fail, options.timeoutMs ?? 15_000);
@@ -123,10 +129,12 @@ export class Docker {
     return new Promise((resolve, reject) => {
       let socket: Socket | undefined;
       let delivered = false;
-      const req = http.request({ ...this.connectionOptions(), socketPath: this.socket,
+      const connecting = new AbortController();
+      const req = http.request({ ...this.connectionOptions(connecting.signal), socketPath: this.socket,
         path: `/v1.40/containers/${encodeURIComponent(id)}/attach?stream=1&stdin=1&stdout=1&stderr=1`,
         method: 'POST', headers: { connection: 'Upgrade', upgrade: 'tcp' } });
       const fail = (cause?: Error) => {
+        connecting.abort(cause);
         clearTimeout(timer); req.destroy(); socket?.destroy();
         if (!delivered) reject(cause instanceof PreviewError ? cause : new PreviewError('START_FAILED', 'Docker could not open the database initialization stream.'));
       };
