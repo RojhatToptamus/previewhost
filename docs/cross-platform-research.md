@@ -223,8 +223,8 @@ Package checks now handle temporary directories on another drive and execute the
 No retries or longer deadlines were added.
 
 Windows managed databases remain disabled until connected-pipe authentication and database lifecycle checks pass on both architectures.
-Full retention and recovery then need a Windows machine with Docker Desktop Linux containers.
-The configured hosted Windows jobs do not supply that backend. Named-pipe transport tests do not qualify database behavior.
+Hosted x64 runners can start Docker Engine inside WSL2, as the setup experiments below demonstrate.
+Docker Desktop compatibility and ARM64 database lifecycle behavior still require execution evidence.
 Ordinary-user native/keystore execution, explicit nested-job compatibility, and host/power-loss behavior remain unverified.
 Windows-only tests register only on Windows, so they add no macOS release skips.
 
@@ -254,22 +254,60 @@ Their retention, mutation-failure, offline deletion, and ownership cases must jo
 
 ### Windows Docker qualification infrastructure
 
-The repository runner API returned zero registered self-hosted runners on 2026-09-22.
-The configured x64 runner uses Windows Server 2025. [Docker Desktop does not support Windows Server](https://docs.docker.com/desktop/setup/install/windows-install/).
-The ARM64 runner uses Windows 11. Its availability alone does not establish a working Linux-container backend.
-[GitHub does not officially support nested virtualization](https://docs.github.com/en/actions/concepts/runners/github-hosted-runners).
+Earlier inventories showed missing distributions on x64 and missing WSL and Docker packages on ARM64.
+They did not establish whether those dependencies could be installed. The following experiments supersede that infrastructure assessment.
 
-The measured x64 image had Docker Engine 29.7.2 in Windows-container mode and no installed WSL distributions.
-Its `docker info` inventory command exceeded the diagnostic's 10-second bound; this was not a database test.
-The ARM64 image reported WSL not installed, no `docker.exe`, and `VirtualizationFirmwareEnabled: false`.
-Neither configured image supplied a Linux-container backend. These observations do not prove that every custom Windows VM configuration is impossible.
+The [first setup run](https://github.com/RojhatToptamus/previewhost/actions/runs/35712512891) used diagnostic commit `a8b0d2f` on 2026-09-22.
+Each job imported Alpine 3.22.6 with `wsl --import ... --version 2` and attempted an actual kernel boot.
+Missing WSL packages were installed from Microsoft's signed 2.7.14 MSI. Both required Windows features were already enabled.
+After boot, the script installed Docker Engine 28.3.3 and ran `docker run --rm alpine:3.22 uname -a`.
+No Docker Desktop installation, test retry, or deadline increase was used. Each job retained the existing ten-minute limit.
 
-Required access is a disposable Windows 11 machine for each architecture, with native Node.js and Docker Desktop Linux containers.
-Each needs WSL 2, enabled hardware virtualization, local NTFS storage, and PostgreSQL 17 Alpine plus Redis 7 Alpine images.
-Docker currently labels the ARM installer Early Access. Record the installed Windows, WSL, Docker, Node, and architecture versions with each result.
-Use an ordinary account for Previewhost and Docker Desktop. Administrative setup must permit a second disposable account for counterfeit-pipe tests.
-Tests must be able to terminate only their own owners and containers, preserve their volumes across restarts, and explicitly delete their own data.
-Do not expose production data or reuse a development keystore. Restarting Docker requires a dedicated host without unrelated workloads.
+| Runner label | Actual image version | Setup result | Job time |
+| --- | --- | --- | ---: |
+| `windows-2022` | `win22`, `20260913.307.1` | Installed WSL; WSL2 boot and Linux container passed. | 50s |
+| `windows-2025` | `win25-vs2026`, `20260907.229.1` | Existing WSL; WSL2 boot and Linux container passed. | 35s |
+| `windows-11-arm` | `win11-arm64`, `20260914.169.1` | WSL installation passed; VM creation failed. | 47s |
+| `windows-11-vs2026-arm` | `win11-vs2026-arm64`, `20260914.159.1` | WSL installation passed; VM creation failed. | 50s |
+
+The [separate VS2026 ARM run](https://github.com/RojhatToptamus/previewhost/actions/runs/35713081243) used diagnostic commit `fad4146`.
+Both ARM images ran Windows 11 Enterprise build 26200 on Cobalt 100 virtual machines.
+The MSI returned zero, without requesting a reboot. WSL and Virtual Machine Platform were enabled; `hypervisorlaunchtype` was `Auto`.
+Both actual imports failed at `RegisterDistro/CreateVm/HCS` with `HCS_E_HYPERV_NOT_INSTALLED` and a message that virtualization was unavailable.
+Both reported `VirtualizationFirmwareEnabled: false` and no second-level address translation.
+This is a demonstrated VM-start limitation on these hosted ARM configurations, beyond a missing package. No ARM Linux container or database test ran.
+
+[Docker Desktop does not support Windows Server](https://docs.docker.com/desktop/setup/install/windows-install/), but that does not prevent the measured WSL Docker Engine setup.
+The setup result establishes backend availability. It does not, by itself, test Previewhost running on Windows or Docker Desktop's named pipe.
+
+The [native Windows x64 lifecycle run](https://github.com/RojhatToptamus/previewhost/actions/runs/35713647093) then passed all three existing `data.integration.test.ts` tests, with zero skips or failures.
+It used product commit `5d8c420`, diagnostic commit `de90d19`, native Windows Node 22.23.0, and the same Server 2025 image.
+Only Docker Engine ran inside WSL. A disposable Microsoft `go-winio` message-pipe listener forwarded bytes through WSL stdio to the engine's Unix socket.
+The fixture exposed no Docker TCP API. Its pipe owner and DACL were checked through the unchanged production transport before requests or credentials were sent.
+This validates the tested bridge configuration; it does not establish Docker Desktop pipe ACL or transport compatibility.
+
+The user approved disabling the guard only in the disposable compiled test copy. Checked-in source retained its guard and its Windows test skip.
+The compiled fixture used the existing Windows ACL check instead of the POSIX mode assertion; all other assertions and deadlines remained.
+The tests verified authenticated PostgreSQL and Redis writes, stop/reopen retention, forced owner termination, recovery, neighboring data isolation, and explicit volume deletion.
+They also verified wrong-password rejection, missing-credential refusal, durable deletion debt, and preservation of a replacement credential during late cleanup.
+Test durations were 15.55s, 19.28s, and 11.33s; total TAP time was 46.74s. The complete job took 2m43s.
+An [earlier setup attempt](https://github.com/RojhatToptamus/previewhost/actions/runs/35713368036) failed before any tests: direct `wsl --exec apk` omitted Alpine's `/sbin` directory.
+Using absolute executable paths corrected that fixture error. No failed database test was retried or relaxed.
+The four experiment runs consumed 6m43s of total runner time, including that 58-second setup failure. No paid infrastructure was used.
+
+[GitHub's standard image list](https://github.com/actions/runner-images/blob/main/README.md) has Windows 11 ARM options but no Windows 11 x64 label.
+The [Base Windows 11 Desktop partner image](https://docs.github.com/en/actions/reference/runners/larger-runners) is a paid larger-runner option.
+[Current prices](https://docs.github.com/en/billing/reference/actions-runner-pricing) are $0.022/minute for four-core Windows x64 and $0.014/minute for four-core Windows ARM64.
+A ten-minute job would cost $0.22 or $0.14 respectively, excluding any required plan or custom-image storage costs.
+Larger runners require an organization on GitHub Team or Enterprise Cloud; this repository has a personal-account owner.
+They are not free for public repositories. Neither price nor core count proves that nested virtualization will work.
+No paid runner was provisioned or used. Obtain a concrete virtualization capability confirmation before proposing one for ARM qualification.
+
+Remaining ARM execution requires access to a disposable Windows 11 ARM64 host that can actually boot WSL2 and run Linux containers.
+It needs native Windows Node 22.23.0 or later, local NTFS storage, and PostgreSQL 17 Alpine plus Redis 7 Alpine images.
+Access must permit backend setup and execution of the existing tests, including termination of their own owner process and deletion of their own containers and volumes.
+Use a dedicated test account and keystore without production data. Docker Desktop compatibility remains a separate requirement on both architectures.
+The repository runner API returned zero registered self-hosted runners on 2026-09-22; no suitable ARM host is currently accessible.
 
 Keep the product guard until both architectures pass connected-server rejection before writes, authenticated initialization, retention, owner-crash recovery, and explicit deletion.
 Qualification must also prove that neighboring containers, volumes, and user-secret references survive those operations.
