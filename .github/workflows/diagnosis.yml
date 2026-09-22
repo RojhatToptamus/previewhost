@@ -8,50 +8,25 @@ permissions:
   contents: read
 
 jobs:
-  platform:
-    name: Platform check (${{ matrix.os }})
+  backend:
+    name: Linux backend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, windows-11-arm]
+        os: [windows-2022, windows-2025, windows-11-arm]
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: c7711837f8d0fd00c2ac4e0c3e17be5bc62dc0ec
           persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.0
-          package-manager-cache: false
-      - run: node -p "process.platform + ' ' + process.arch"
-      - run: npm ci --ignore-scripts
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npx tsc -p tsconfig.test.json
-      - name: Connected pipe authentication and private-storage regressions
-        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/docker.test.js .local/test-build/platform.test.js
-      - name: Installed package
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/platform-package"
-          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/platform-package"
-          npm run check:package -- "$RUNNER_TEMP"/platform-package/*.tgz
-      - uses: actions/checkout@v7
-        with:
-          ref: codex/ci-diagnosis
-          path: diagnosis
-          persist-credentials: false
-      - name: Two ordinary accounts and foreign pipe ownership
-        run: ./diagnosis/scripts/windows-accounts-probe.ps1 -ProductRoot $PWD
-      - name: Disposable account experiment diagnostics
-        if: always()
+      - name: Configure WSL2 and run a Linux container
         shell: pwsh
-        run: |
-          Get-ChildItem $env:PUBLIC -Directory -Filter 'previewhost-accounts-*' | ForEach-Object {
-            Get-ChildItem $_.FullName -File | Where-Object Name -Match 'result.json$|stderr$|stdout$' | ForEach-Object {
-              Write-Output $_.Name
-              Get-Content -LiteralPath $_.FullName
-            }
-          }
+        run: ./scripts/windows-backend-probe.ps1
+      - name: Preserve setup logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.os }}
+          path: ${{ runner.temp }}/previewhost-backend/*.log
+          if-no-files-found: error
