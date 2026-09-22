@@ -114,15 +114,12 @@ export class Docker {
 
   async image(type: 'postgres' | 'redis'): Promise<string> {
     const tag = type === 'postgres' ? 'postgres:17-alpine' : 'redis:7-alpine';
-    const listed = await this.request('GET', '/images/json');
-    if (listed.status !== 200 || !Array.isArray(listed.body)) throw new PreviewError('START_FAILED', 'The local Docker images could not be checked.');
-    const image = listed.body.map(object).find((item) => Array.isArray(item.RepoTags) && item.RepoTags.includes(tag));
-    if (typeof image?.Id !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(image.Id)) {
+    const inspected = await this.request('GET', `/images/docker.io/library/${tag}/json`);
+    const id = object(inspected.body).Id;
+    if (inspected.status !== 200 || typeof id !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(id)) {
       throw new PreviewError('START_FAILED', `Install the local Docker image ${tag} before starting this environment.`);
     }
-    const inspected = await this.request('GET', `/images/${image.Id}/json`);
-    if (inspected.status !== 200 || object(inspected.body).Id !== image.Id) throw new PreviewError('START_FAILED', 'The local Docker image changed during inspection.');
-    return image.Id;
+    return id;
   }
 
   attach(id: string): Promise<DockerAttach> {
