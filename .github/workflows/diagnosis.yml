@@ -5,17 +5,36 @@ on:
 permissions:
   contents: read
 jobs:
-  windows:
-    runs-on: windows-2025
-    timeout-minutes: 10
+  macos:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.23.0
+          node-version: 24
           package-manager-cache: false
-      - run: npm ci --ignore-scripts
-      - shell: pwsh
-        run: ./scripts/windows-databases.ps1
+      - run: npm ci
+      - run: brew install colima docker
+      - run: |
+          colima start --runtime docker --vm-type vz --cpus 2 --memory 4
+          docker info
+          echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+          docker pull postgres:17-alpine
+          docker pull redis:7-alpine
+      - run: |
+          time docker info >/dev/null
+          time docker run --rm redis:7-alpine true
+          colima ssh -- cat /proc/loadavg /proc/meminfo /proc/pressure/cpu /proc/pressure/io
+      - run: npm run build && npx tsc -p tsconfig.test.json
+      - run: |
+          export PREVIEWHOST_DIAG_FILE="$RUNNER_TEMP/docker-operations.jsonl"
+          export NODE_OPTIONS="--import=$PWD/scripts/diagnostic-docker.mjs"
+          node --test --test-reporter=tap --test-concurrency=1 --test-name-pattern='^(real owned PostgreSQL|real owner SIGKILL|offline projects keep real PostgreSQL|one shared MCP connection routes)' .local/test-build/data.integration.test.js .local/test-build/project-lifecycle.test.js .local/test-build/project.integration.test.js
+      - if: always()
+        run: |
+          cat "$RUNNER_TEMP/docker-operations.jsonl" || true
+          colima ssh -- cat /proc/loadavg /proc/meminfo /proc/pressure/cpu /proc/pressure/io
+          colima stop
