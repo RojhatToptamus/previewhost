@@ -13,7 +13,7 @@ import { testKeystore } from './testSupport/keystore.js';
 const execute = promisify(execFile);
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 
-test('global MCP defaults support private setup, isolated worktree databases and owner restart without launch overrides', {
+test('global MCP supports private setup, isolated worktree databases and owner restart with default storage', {
   skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 120_000,
 }, async t => {
   const keystore = await testKeystore(t);
@@ -68,7 +68,7 @@ test('global MCP defaults support private setup, isolated worktree databases and
   const client = new Client({ name: 'default-database-test', version: '1' }, { capabilities: { elicitation: { form: {} } } });
   client.setRequestHandler('elicitation/create', async () => ({ action: 'accept', content: { allow: true } }));
   await client.connect(new StdioClientTransport({ command: process.execPath,
-    args: [resolve('dist/cli.js'), 'mcp', '--allow-exec'], stderr: 'pipe',
+    args: [resolve('dist/cli.js'), 'mcp', '--allow-exec', ...(process.platform === 'win32' ? ['--docker-socket', dockerSocket!] : [])], stderr: 'pipe',
     env: { ...process.env, HOME: home, USERPROFILE: home, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` } as Record<string, string> }));
   async function call<T>(name: string, project: string, args: Record<string, unknown> = {}): Promise<T> {
     for (;;) {

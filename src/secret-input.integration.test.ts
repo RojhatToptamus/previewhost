@@ -28,7 +28,7 @@ test('CLI creates, unlocks, edits and removes encrypted entries through private 
   assert.equal(result.stderr, '');
 });
 
-test('CLI stdin preserves exact UTF-8 bytes in the shared store and rejects invalid bytes, value arguments, and oversize input', enabled, async (t) => {
+test('CLI stdin preserves exact UTF-8 bytes in the shared store and rejects invalid bytes, value arguments, and oversize input', { timeout: 30_000 }, async (t) => {
   const fixture = await testKeystore(t);
   const driver = join(fixture.directory, 'cli-fixture.mjs');
   await writeFile(driver, `${fixture.installSource}\nawait import(${JSON.stringify(new URL('./cli.js', import.meta.url).href)});`);

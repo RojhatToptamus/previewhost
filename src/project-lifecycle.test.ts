@@ -86,8 +86,14 @@ test('CLI manages a deleted source and removing the last entry retires only its 
       command: [process.execPath, '-e', "require('http').createServer((q,r)=>r.end('alive')).listen(+process.env.PORT,process.env.HOST)"] });
     const ready = await client.wait('app', started.candidate!.id);
     assert.equal(ready.state, 'ready');
+    if (process.platform === 'win32') {
+      // Windows locks a running process's cwd. Management must still work after stop and deletion.
+      await assert.rejects(rm(project, { recursive: true }), { code: 'EBUSY' });
+      assert.equal(await (await fetch(ready.url!)).text(), 'alive');
+      await client.stop('app');
+    }
     await rm(project, { recursive: true });
-    assert.equal(await (await fetch(ready.url!)).text(), 'alive');
+    if (process.platform !== 'win32') assert.equal(await (await fetch(ready.url!)).text(), 'alive');
     await execute(process.execPath, [cli, 'stop', 'app', '--project', project]);
     const stopped = (await client.get('app')).latest!;
     assert.equal(stopped.state, 'stopped');

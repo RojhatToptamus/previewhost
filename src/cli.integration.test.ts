@@ -172,12 +172,12 @@ test('interrupting CLI wait closes its request but leaves the daemon candidate c
   t.after(async () => { if (child.exitCode === null) { child.kill('SIGKILL'); await exit; } });
   await waiting;
   child.kill('SIGINT');
-  assert.equal((await exit)[0], 130);
+  assert.deepEqual(await exit, process.platform === 'win32' ? [null, 'SIGINT'] : [130, null]);
   assert.equal((await client.get('waiting')).candidate?.id, status.candidate!.id);
   await client.cancel('waiting', status.candidate!.id);
 });
 
-test('interrupting an incomplete stdin spec exits without waiting for the producer to close its pipe', { timeout: 5_000 }, async (t) => {
+test('interrupting an incomplete stdin spec exits without waiting for the producer to close its pipe', { timeout: 5_000, skip: process.platform === 'win32' && 'Requires POSIX signal delivery; Windows kill terminates without running handlers' }, async (t) => {
   // Synchronize at the real stdin read, so the test never signals before CLI handlers exist.
   const hook = `const iterate = process.stdin[Symbol.asyncIterator];
 process.stdin[Symbol.asyncIterator] = function () { process.send('reading-spec'); return iterate.call(this); };`;

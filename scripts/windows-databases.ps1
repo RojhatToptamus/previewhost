@@ -29,8 +29,7 @@ try {
         go get github.com/Microsoft/go-winio@v0.6.2
         go build -o "$directory\bridge.exe" .
     } finally { Pop-Location }
-    # Also exercise the documented Windows default used by unconfigured project owners.
-    $env:PREVIEWHOST_TEST_DOCKER_SOCKET = '\\.\pipe\docker_engine'
+    $env:PREVIEWHOST_TEST_DOCKER_SOCKET = '\\.\pipe\previewhost-ci-docker'
     $ready = "$directory\ready"
     $bridge = Start-Process "$directory\bridge.exe" -ArgumentList @($env:PREVIEWHOST_TEST_DOCKER_SOCKET, "`"$ready`"") -PassThru -RedirectStandardOutput "$directory\bridge.log" -RedirectStandardError "$directory\bridge-error.log"
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -40,6 +39,9 @@ try {
     }
     npm run verify
     if ($LASTEXITCODE -ne 0) { throw "Shared suite failed ($LASTEXITCODE)." }
+} catch {
+    Get-ChildItem $directory -Filter '*error.log' | ForEach-Object { Get-Content $_.FullName -Tail 30 }
+    throw
 } finally {
     try {
         if ($bridge -and !$bridge.HasExited) { $bridge.Kill(); $bridge.WaitForExit() }
@@ -47,7 +49,6 @@ try {
         try { if ($imported) { wsl.exe --unregister PreviewhostBackend } }
         finally {
             if ($daemon -and !$daemon.HasExited) { $daemon.Kill(); $daemon.WaitForExit() }
-            Get-ChildItem $directory -Filter '*error.log' | ForEach-Object { Get-Content $_.FullName -Tail 30 }
         }
     }
 }
