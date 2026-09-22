@@ -82,7 +82,7 @@ jobs:
     name: Verify macOS package
     # Colima uses this Intel runner in its own macOS integration suite.
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    timeout-minutes: 40
     outputs:
       pack-dir-artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
