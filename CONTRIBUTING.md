@@ -19,14 +19,12 @@ npm pack --dry-run
 ```
 
 `npm test` builds the package and runs the compiled Node tests one at a time.
-CI runs this same automatically discovered suite on Linux, macOS, Windows x64, and Windows ARM64.
+CI runs this same automatically discovered suite on Linux, macOS, and Windows x64.
 Keychain tests require macOS. FIFO, pseudo-terminal, signal-handler, and process-group tests require POSIX.
 The pseudo-terminal tests do not verify Windows interactive consoles. Stdin secret tests run on every OS.
 Windows uses real ACL and Job Object tests for its platform boundaries.
 Windows x64 CI uses WSL Docker through a private named pipe; Previewhost runs on Windows.
 The CI helper removes its WSL distribution and terminates its transport children after verification.
-Windows ARM64 database coverage is blocked: the hosted runner cannot start WSL2 because nested virtualization is unavailable.
-A skipped database test does not establish support.
 Some sandbox environments require explicit permission for local listeners and
 process inspection.
 

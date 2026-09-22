@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { limits, type ErrorCode, type PreviewApi, type SecretSetupApi, type PreviewManagementApi } from './contracts.js';
 import { PreviewError } from './errors.js';
-import { isPrivate } from './private-files.js';
+import { isPrivate, requireSupportedPlatform } from './private-files.js';
 import type { ProjectOwnerInfo } from './project.js';
 
 export interface ClientOptions { endpoint?: string; tokenFile?: string }
@@ -51,6 +51,7 @@ export function connectPreviewDaemon(options: ClientOptions = {}): PreviewApi & 
   allowSources(directories: string[], signal?: AbortSignal): Promise<void>;
   close(): Promise<void>; shutdown(): Promise<void>; info(): Promise<ProjectOwnerInfo | null>;
 } {
+  requireSupportedPlatform();
   let endpoint: URL;
   const endpointText = options.endpoint ?? defaultEndpoint;
   try { endpoint = new URL(endpointText); }
