@@ -25,7 +25,7 @@ jobs:
         run: ./scripts/windows-backend-probe.ps1
       - uses: actions/checkout@v7
         with:
-          ref: 5d8c4208fb2251aa6f74af65906d4001f40d511f
+          ref: 4c50b6a5ba4d9caa9a21979e90e4e85473bccba6
           path: product
           persist-credentials: false
       - uses: actions/setup-node@v7

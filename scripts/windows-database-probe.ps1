@@ -24,9 +24,6 @@ try {
     try {
         npm ci --ignore-scripts
         npx tsc -p tsconfig.test.json
-        # The user approved only this disposable, unpublished compiled test copy.
-        # Source guard, pipe authentication, assertions and deadlines stay intact.
-        node "$diagnosis\scripts\prepare-windows-database-probe.mjs"
         node -p "JSON.stringify({platform:process.platform,arch:process.arch,node:process.version})"
         node --test --test-reporter=tap --test-concurrency=1 .local/test-build/data.integration.test.js
     } finally { Pop-Location }
