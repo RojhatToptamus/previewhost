@@ -62,7 +62,13 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
   const backend = join(root, 'backend task');
   const gitEnv = { PATH: process.env.PATH, ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot } : {}), HOME: root, GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
-  const git = async (cwd, ...args) => (await execute('git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout;
+  const git = async (cwd, ...args) => {
+    const start = performance.now();
+    let error;
+    try { return (await execute('git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout; }
+    catch (cause) { error = cause; throw cause; }
+    finally { if (args[0] === 'worktree' && args[1] === 'remove') t.diagnostic(JSON.stringify({ operation: 'git worktree remove', directory: args.at(-1), ms: performance.now()-start, code:error?.code, signal:error?.signal, killed:error?.killed, stderr:error?.stderr })); }
+  };
   let runtime, daemon, mcp;
   try {
     await writeFile(gitEnv.GIT_CONFIG_GLOBAL, '');
