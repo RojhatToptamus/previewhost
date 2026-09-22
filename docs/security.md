@@ -161,7 +161,7 @@ It does not check every additional listener that application code opens.
 
 Windows uses one non-inheritable Job Object handle owned by the runtime. Assignment precedes application execution.
 Owner termination closes the handle and terminates job members. Normal stop terminates the job and checks its active-process count.
-Windows has no Unix TERM grace period. See the [verification results and remaining limits](cross-platform-research.md#results).
+Windows has no Unix TERM grace period.
 
 ## Recovery
 
@@ -187,8 +187,10 @@ Managed PostgreSQL and Redis require an unlocked keystore, a local Docker Engine
 Automatic project owners create their own storage directories. Manual daemons and embedded runtimes require an explicit data directory.
 See [database prerequisites](databases.md#prepare-docker).
 previewhost does not pull images, create networks, use remote Engines, or change Docker contexts.
+On Windows, each connection checks the connected pipe's owner and ACL before sending requests or credentials.
+Only the current user, SYSTEM, and Administrators are trusted. This does not authenticate a Docker executable or isolate same-user code.
 
-The data directory uses mode 0700 and records use mode 0600.
+On POSIX, the data directory uses mode 0700 and records use mode 0600. Windows uses restricted ACLs.
 Schema 3 records retain resource identities, credential references, and pending mutations.
 Generated passwords use the internal database namespace in the encrypted keystore.
 User-secret commands cannot read or edit those items.
@@ -278,11 +280,10 @@ AES-256-GCM authenticates the payload. Each write uses a fresh 12-byte nonce.
 Scrypt derives a 32-byte key from the password and a random 16-byte salt (`N=32768`, `r=8`, `p=1`).
 SQLite stores only the encrypted payload and its salt, nonce, and authentication tag.
 Its transactions serialize writers and recover interrupted commits. POSIX directories use mode 0700 and files use mode 0600.
-Windows Docker-backed database startup and access remain disabled until connected-pipe authentication and real database lifecycle checks pass on both architectures.
-Local record reads and credential-only deletion recovery remain available.
-
-Windows validates the owner and ACL. Elevated processes can create administrator-owned files; these are accepted only when Administrators is the token's default owner. New private directories grant inherited access only to that user, SYSTEM, and Administrators.
-Existing broad ACLs and reparse points are rejected. See the [platform verification results](cross-platform-research.md#results).
+Windows validates the owner and ACL. Elevated processes can create administrator-owned files.
+These are accepted only when Administrators is the token's default owner.
+New private directories grant inherited access only to that user, SYSTEM, and Administrators.
+Existing broad ACLs and reparse points are rejected.
 
 Each owner and dashboard retains only its own unlock key. Each operation reads current stored values.
 Closing the session clears its key buffer. JavaScript strings and application processes prevent a promise of complete memory erasure.

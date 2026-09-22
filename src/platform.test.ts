@@ -42,41 +42,6 @@ if (process.platform === 'win32') test('Windows environment merging is case-inse
   assert.equal(commandEnvironment({}, 1234, 'http://example.test').PORT, '1234');
 });
 
-if (process.platform === 'win32') test('Windows managed databases fail before connecting to a pipe or storing credentials', async t => {
-  const { createServer } = await import('node:net');
-  const { randomUUID } = await import('node:crypto');
-  const { readdir } = await import('node:fs/promises');
-  const { createDataOwner } = await import('./data.js');
-  const { Keystore } = await import('./keystore.js');
-  const root = await mkdtemp(join(tmpdir(), 'previewhost-database-denied-'));
-  const directory = join(root, 'data');
-  const store = new Keystore(join(root, 'vault'));
-  const add = t.mock.method(store, 'add', async () => assert.fail('Database credentials must not be written.'));
-  const pipe = String.raw`\\.\pipe\previewhost-${randomUUID()}`;
-  let connections = 0;
-  const server = createServer(socket => { connections++; socket.destroy(); });
-  let owner: Awaited<ReturnType<typeof createDataOwner>> | undefined;
-  try {
-    const listening = once(server, 'listening');
-    server.listen(pipe); await listening;
-    await store.unlock({ password: 'FAKE_fixture_password', create: true, confirmation: 'FAKE_fixture_password' });
-    owner = await createDataOwner({ directory, dockerSocket: pipe, keystore: store });
-    await assert.rejects(owner.open('sample', { database: { type: 'postgres' } }, {
-      signal: t.signal, onFailure(error) { assert.fail(error.message); },
-    }), { code: 'UNSUPPORTED_PLATFORM' });
-    assert.equal(connections, 0);
-    assert.equal(add.mock.callCount(), 0);
-    assert.deepEqual(owner.names(), []);
-    assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.json')), []);
-  } finally {
-    try { await owner?.close(); }
-    finally {
-      try { if (server.listening) await new Promise<void>(resolve => server.close(() => resolve())); }
-      finally { store.close(); await rm(root, { recursive: true, force: true }); }
-    }
-  }
-});
-
 if (process.platform === 'win32') test('Windows private creation, inherited ACLs, broad token access and junctions', async t => {
   const { execFileSync } = await import('node:child_process');
   const { symlink } = await import('node:fs/promises');

@@ -9,7 +9,6 @@ import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { startNative, type NativeResource, type NativeCommandSpec as CommandSpec } from './native.js';
 
-const nativeTest = test;
 const posixTest = process.platform !== 'win32' ? test : test.skip;
 const server = `
 import http from 'node:http';
@@ -22,7 +21,7 @@ http.createServer((request, response) => response.end(JSON.stringify({
 }))).listen(Number(process.env.PORT), process.env.HOST);
 `;
 
-nativeTest('native argv/env and listener ownership work from a directory with spaces; stop removes the group', async () => {
+test('native argv/env and listener ownership work from a directory with spaces; stop removes the group', async () => {
   const root = await fixture(server);
   const previous = process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET;
   process.env.PREVIEWHOST_TEST_UNDECLARED_SECRET = 'must-not-inherit';
@@ -47,7 +46,7 @@ nativeTest('native argv/env and listener ownership work from a directory with sp
   }
 });
 
-nativeTest('cancellation before supervisor spawn creates no command and preserves its cleanup handle', async () => {
+test('cancellation before supervisor spawn creates no command and preserves its cleanup handle', async () => {
   const root = await fixture(server);
   const controller = new AbortController();
   let resource: NativeResource | undefined;
@@ -105,7 +104,7 @@ posixTest('cancellation stops a paused supervisor even when configure backpressu
   }
 });
 
-nativeTest('missing executable fails and joins supervisor cleanup', async () => {
+test('missing executable fails and joins supervisor cleanup', async () => {
   const root = await fixture(server);
   let resource: NativeResource | undefined;
   try {
@@ -119,7 +118,7 @@ nativeTest('missing executable fails and joins supervisor cleanup', async () => 
   } finally { await resource?.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
-nativeTest('logs redact split and URL-encoded secrets and preserve split UTF-8', async () => {
+test('logs redact split and URL-encoded secrets and preserve split UTF-8', async () => {
   const root = await fixture(`
 import http from 'node:http';
 const secret = process.env.SECRET;
@@ -148,7 +147,7 @@ setTimeout(() => {
   } finally { await resource?.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
-nativeTest('short and malformed Unicode environment values are redacted without rewriting markers', async () => {
+test('short and malformed Unicode environment values are redacted without rewriting markers', async () => {
   const root = await fixture(`
 import http from 'node:http';
 process.stdout.write(process.env.MALFORMED + ' x');
@@ -163,7 +162,7 @@ http.createServer((request, response) => response.end('ok')).listen(Number(proce
   } finally { await resource?.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
-nativeTest('log chunks preserve UTF-8 across IPC and redaction carry boundaries', async () => {
+test('log chunks preserve UTF-8 across IPC and redaction carry boundaries', async () => {
   const prefix = 'a'.repeat(16_383) + '🌿';
   const root = await fixture(`
 import http from 'node:http';
@@ -181,7 +180,7 @@ http.createServer((request, response) => response.end('ok')).listen(Number(proce
   } finally { await resource?.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
-nativeTest('listener validation rejects wildcard binding and leaves unrelated listeners untouched', async () => {
+test('listener validation rejects wildcard binding and leaves unrelated listeners untouched', async () => {
   const root = await fixture(server.replace('process.env.HOST);', "'0.0.0.0');"));
   let resource: NativeResource | undefined;
   const unrelated = http.createServer((_request, response) => response.end('unrelated'));
@@ -201,7 +200,7 @@ nativeTest('listener validation rejects wildcard binding and leaves unrelated li
   }
 });
 
-nativeTest('a listener outside the command group is never accepted or stopped', async () => {
+test('a listener outside the command group is never accepted or stopped', async () => {
   const root = await fixture(`
 import fs from 'node:fs';
 fs.writeFileSync('port.txt', process.env.PORT);
@@ -218,7 +217,7 @@ setInterval(() => {}, 1000);
   } finally { await resource?.stop(); await closeServer(unrelated); await rm(root, { recursive: true, force: true }); }
 });
 
-nativeTest('stop kills stubborn descendants even when the command leader exits and pipes remain inherited', async () => {
+test('stop kills stubborn descendants even when the command leader exits and pipes remain inherited', async () => {
   const root = await fixture(`
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -245,7 +244,7 @@ const timer = setInterval(() => { if (fs.existsSync('exit-now')) process.exit(0)
   }
 });
 
-nativeTest('owner SIGKILL closes supervisor IPC and stops the command group', async () => {
+test('owner SIGKILL closes supervisor IPC and stops the command group', async () => {
   const root = await fixture(server);
   let owner: ChildProcess | undefined;
   let identity: { pid: number; group: number } | undefined;
@@ -271,7 +270,7 @@ await import('node:fs/promises').then(fs => fs.writeFile(${JSON.stringify(path.j
   }
 });
 
-nativeTest('unexpected supervisor death uses the recorded live command identity for exact cleanup', async () => {
+test('unexpected supervisor death uses the recorded live command identity for exact cleanup', async () => {
   const root = await fixture(server);
   let resource: NativeResource | undefined;
   let identity: { pid: number; group: number } | undefined;
@@ -365,7 +364,7 @@ setInterval(() => {
   }
 });
 
-nativeTest('pre-commit owner disconnect never executes the configured command', async () => {
+test('pre-commit owner disconnect never executes the configured command', async () => {
   const root = await fixture(server);
   let child: ChildProcess | undefined;
   try {

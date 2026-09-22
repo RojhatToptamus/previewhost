@@ -13,9 +13,10 @@ import { Docker } from './docker.js';
 import { probeDatabase } from './database-connections.js';
 import { testKeystore } from './testSupport/keystore.js';
 import { createPreviewRuntime } from './runtime.js';
+import { isPrivate } from './private-files.js';
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
-const enabled = { skip: process.platform === 'win32' || !dockerSocket, timeout: 90_000 };
+const enabled = { skip: !dockerSocket, timeout: 90_000 };
 const specs = { database: { type: 'postgres' as const }, cache: { type: 'redis' as const } };
 const signal = () => new AbortController().signal;
 
@@ -30,7 +31,10 @@ test('real owned PostgreSQL and Redis retain authenticated data across stop/reop
     const bindings = await owner.open('sample', specs, { signal: signal(), onFailure(error) { assert.fail(error); } });
     t.diagnostic(`Authenticated initial startup: ${Math.round(performance.now() - started)} ms`);
     const initial = JSON.parse(await readFile(join(directory, 'sample.json'), 'utf8'));
-    assert.equal((await stat(join(directory, 'sample.json'))).mode & 0o777, 0o600);
+    const recordPath = join(directory, 'sample.json');
+    const permissions = await stat(recordPath);
+    if (process.platform === 'win32') assert.ok(isPrivate(recordPath, permissions));
+    else assert.equal(permissions.mode & 0o777, 0o600);
     for (const resource of initial.resources) {
       assert.match(resource.volume, /^previewhost-[a-f0-9]{32}-data$/);
       assert.match(resource.container.name, /^previewhost-[a-f0-9]{32}-db$/);

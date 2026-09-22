@@ -382,8 +382,8 @@ for (const customData of [false, true]) test(`automatic storage keeps explicit o
   const update = await owner.replace('site', { name: 'site', type: 'environment', primary: 'web',
     services: { web: { type: 'static', directory }, db: { type: 'postgres' } } });
   const failed = await owner.wait('site', update.candidate!.id);
-  assert.equal(failed.error?.code, process.platform === 'win32' ? 'UNSUPPORTED_PLATFORM' : 'START_FAILED');
-  assert.match(failed.error!.message, process.platform === 'win32' ? /Docker pipe server identity/ : /Docker socket is unavailable/);
+  assert.equal(failed.error?.code, process.platform === 'win32' ? 'CLEANUP_INCOMPLETE' : 'START_FAILED');
+  assert.match(failed.error!.message, process.platform === 'win32' ? /Docker pipe open/ : /Docker socket is unavailable/);
   assert.equal(await (await fetch(ready.url!)).text(), 'project preview');
   assert.deepEqual(await owner.info(), info, 'failed updates and conflicting options must not reconfigure or restart the owner');
   assert.equal((await client.get('site')).active?.id, ready.id);

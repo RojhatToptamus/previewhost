@@ -17,7 +17,7 @@ function load() {
   const basicLimits = koffi.struct({ processTime: 'int64', jobTime: 'int64', flags: 'uint32', minimum: 'size_t', maximum: 'size_t', active: 'uint32', affinity: 'uintptr_t', priority: 'uint32', scheduling: 'uint32' });
   const limits = koffi.struct({ basic: basicLimits, io: koffi.array('uint64', 6), processMemory: 'size_t', jobMemory: 'size_t', peakProcess: 'size_t', peakJob: 'size_t' });
   return {
-    attributes, overlapped, limits,
+    attributes, limits,
     error: kernel.func('uint32 __stdcall GetLastError()'),
     close: kernel.func('int __stdcall CloseHandle(void *)'),
     free: kernel.func('void * __stdcall LocalFree(void *)'),

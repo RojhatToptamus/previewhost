@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +9,8 @@ import { execFileSync } from 'node:child_process';
 import koffi from 'koffi';
 import { Docker, normalizeDockerEndpoint } from './docker.js';
 import { PreviewError } from './errors.js';
+import { createDataOwner } from './data.js';
+import { testKeystore } from './testSupport/keystore.js';
 
 test('Docker connection rejection settles even when HTTP never assigns a socket', { timeout: 2000 }, async t => {
   const request = http.request;
@@ -75,6 +77,20 @@ if (process.platform === 'win32') test('Docker checks each connected pipe before
   await assert.rejects(docker.attach('fixture'), { code: 'UNAUTHORIZED' });
   assert.equal(requests, 1, 'The changed pipe must receive no HTTP request or upgrade.');
   assert.equal(bytes, 0, 'Rejected connections must send no bytes.');
+
+  const fixture = await testKeystore(t);
+  const directory = join(fixture.directory, 'data');
+  const add = t.mock.method(fixture.store, 'add', async () => assert.fail('Untrusted pipes must not cause credential writes.'));
+  const owner = await createDataOwner({ directory, dockerSocket: endpoint, keystore: fixture.store });
+  try {
+    await assert.rejects(owner.open('sample', { database: { type: 'postgres' } }, {
+      signal: t.signal, onFailure(error) { assert.fail(error.message); },
+    }), { code: 'UNAUTHORIZED' });
+    assert.equal(add.mock.callCount(), 0);
+    assert.deepEqual(owner.names(), []);
+    assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.json')), []);
+    assert.equal(bytes, 0, 'The untrusted pipe must receive no database request.');
+  } finally { await owner.close(); }
 });
 
 // Set permissions only on this test's own pipe. Opening this handle sends no HTTP bytes.

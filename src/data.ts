@@ -116,7 +116,6 @@ export async function createDataOwner(options: { directory: string; dockerSocket
   };
   const save = async (record: RecordData) => { await root.write(`${record.name}.json`, `${JSON.stringify(record)}\n`); };
   const engine = async (record?: RecordData) => {
-    if (process.platform === 'win32') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Windows managed databases are unavailable until Docker pipe server identity can be verified.');
     const docker = await Docker.connect(socketPath);
     const id = await docker.engineId();
     if (record && (record.engine.id !== id || record.engine.socket !== docker.socket)) {
