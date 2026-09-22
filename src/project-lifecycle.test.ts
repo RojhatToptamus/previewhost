@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, fork } from 'node:child_process';
+import { once } from 'node:events';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { makePrivateDirectory } from './private-files.js';
 import { tmpdir } from 'node:os';
@@ -16,9 +17,65 @@ import { reviewStaleProject, removeStaleProject, writeProjectRecord, connectProj
 import { createDataOwner } from './data.js';
 import { SecretSetup } from './secrets-setup.js';
 import { testKeystore } from './testSupport/keystore.js';
+import { publicAccess } from './testSupport/permissions.js';
 import type { PreviewSpec } from './contracts.js';
 
 const execute = promisify(execFile);
+
+test('project records reject unsafe permissions and preserve readers during replacement and removal', { timeout: 15000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-record-race-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, basename(projectOwnerDirectory(root)));
+  makePrivateDirectory(directory);
+  const record = { projectDirectory: root, dataDirectory: join(root, 'data') };
+  await writeProjectRecord(directory, record);
+  const path = join(directory, 'connection.json');
+  await publicAccess(path, true);
+  await assert.rejects(readProjectRecord(directory), { code: 'UNAUTHORIZED' });
+  await publicAccess(path, false);
+  assert.deepEqual(await readProjectRecord(directory), record);
+  await writeFile(path, '{}');
+  await assert.rejects(readProjectRecord(directory), { code: 'UNAUTHORIZED' });
+  await writeProjectRecord(directory, record);
+  const reader = await open(path, 'r');
+  try {
+    const replacement = { ...record, dataDirectory: join(root, 'replacement') };
+    await writeProjectRecord(directory, replacement);
+    assert.deepEqual(JSON.parse(await reader.readFile('utf8')), record);
+    assert.deepEqual(await readProjectRecord(directory), replacement);
+  } finally { await reader.close(); }
+  await writeProjectRecord(directory, record);
+
+  const writer = join(root, 'owner.mjs');
+  await writeFile(writer, `import { unlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { lockProject, writeProjectRecord } from ${JSON.stringify(new URL('./project.js', import.meta.url).href)};
+const directory = process.argv[2], record = JSON.parse(process.argv[3]);
+const lock = await lockProject(directory);
+try {
+  process.send('ready');
+  for (let i = 0; i < 500; i++) {
+    await writeProjectRecord(directory, record);
+    await unlink(join(directory, 'connection.json'));
+  }
+} finally { await lock.close(); process.disconnect(); }
+`);
+  const child = fork(writer, [directory, JSON.stringify(record)], { execArgv: [], silent: true });
+  let stderr = ''; child.stderr!.on('data', data => { stderr += data; });
+  const exited = once(child, 'exit');
+  try {
+    await once(child, 'message');
+    while (child.exitCode === null && child.signalCode === null) {
+      const current = await readProjectRecord(directory);
+      if (current) assert.deepEqual(current, record);
+    }
+    assert.equal((await exited)[0], 0, stderr);
+    assert.equal(await readProjectRecord(directory), undefined);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exited;
+  }
+});
 
 test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', async t => {
   const fixture = await testKeystore(t);

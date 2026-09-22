@@ -46,6 +46,7 @@ function load() {
     waitPipe: kernel.func('int __stdcall WaitNamedPipeW(const char16_t *, uint32)'),
     lock: kernel.func('__stdcall', 'LockFileEx', 'int', ['void *', 'uint32', 'uint32', 'uint32', 'uint32', koffi.inout(koffi.pointer(overlapped))]),
     move: kernel.func('int __stdcall MoveFileExW(const char16_t *, const char16_t *, uint32)'),
+    setFileInfo: kernel.func('int __stdcall SetFileInformationByHandle(void *, int, const void *, uint32)'),
     fileAttributes: kernel.func('uint32 __stdcall GetFileAttributesW(const char16_t *)'),
   };
 }
@@ -208,6 +209,21 @@ export function publishWindowsFile(from: string, to: string): void {
   // Same-directory replacement only. File data was flushed by the caller before this operation.
   if (dirname(from) !== dirname(to)) throw new PreviewError('CLEANUP_INCOMPLETE', 'Record publication must stay in its directory.');
   if (!win().move(from, to, 0x1 | 0x8)) throw failure('record publication');
+}
+
+/** Project readers do not hold the owner lock; replacement must preserve their open handles. */
+export function replaceWindowsProjectRecord(from: string, to: string): void {
+  const name = Buffer.from(to + '\0', 'utf16le');
+  // FILE_RENAME_INFO on Windows x64: flags at 0, null RootDirectory at 8, name length at 16.
+  const info = Buffer.alloc(20 + name.length);
+  info.writeUInt32LE(0x1 | 0x2, 0); // REPLACE_IF_EXISTS | POSIX_SEMANTICS.
+  info.writeUInt32LE(name.length - 2, 16);
+  name.copy(info, 20);
+  const handle = win().open(from, 0x00010000, 7, null, 3, 0x00200000, null); // DELETE, share all, no reparse.
+  if (koffi.address(handle) === 0xffffffffffffffffn) throw failure('project record open');
+  try {
+    if (!win().setFileInfo(handle, 22, info, info.length)) throw failure('project record replacement'); // FileRenameInfoEx.
+  } finally { win().close(handle); }
 }
 
 export function windowsProcessStart(handle = win().current()): string {

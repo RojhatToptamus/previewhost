@@ -16,6 +16,7 @@ import { createDataOwner, withRetainedData } from './data.js';
 import { Keystore } from './keystore.js';
 import { isPrivate, makePrivateDirectory, openOwnerLock, requireSupportedPlatform } from './private-files.js';
 import { normalizeDockerEndpoint } from './docker.js';
+import { replaceWindowsProjectRecord } from './windows.js';
 
 export interface ProjectOptions extends ClientOptions {
   projectDirectory?: string;
@@ -116,7 +117,8 @@ export async function writeProjectRecord(directory: string, record: ProjectRecor
   const file = await open(temporary, 'wx', 0o600);
   try { await file.writeFile(JSON.stringify(projectRecordSchema.parse(record))); await file.sync(); }
   finally { await file.close(); }
-  await rename(temporary, join(directory, 'connection.json'));
+  if (process.platform === 'win32') replaceWindowsProjectRecord(temporary, join(directory, 'connection.json'));
+  else await rename(temporary, join(directory, 'connection.json'));
 }
 
 /** Discover records only; reading them never launches an owner or grants authority. */
@@ -155,6 +157,10 @@ export async function readProjectRecord(directory: string): Promise<ProjectRecor
     return record;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    // Windows can deny opening or inspecting a record while its owner unlinks it.
+    if (file && await file.stat().then(info => info.nlink === 0, () => false)) return undefined;
+    if (!file && (error as NodeJS.ErrnoException).code === 'EPERM'
+      && await lstat(join(directory, 'connection.json')).then(() => false, missing => missing.code === 'ENOENT')) return undefined;
     throw new PreviewError('UNAUTHORIZED', 'The project connection file or its directory is unsafe or invalid.');
   } finally { await file?.close(); }
 }
