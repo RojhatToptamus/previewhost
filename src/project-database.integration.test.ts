@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, readdir, realpath, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/client';
@@ -13,13 +14,13 @@ const execute = promisify(execFile);
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 
 test('global MCP defaults support private setup, isolated worktree databases and owner restart without launch overrides', {
-  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 120_000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 120_000,
 }, async t => {
   const keystore = await testKeystore(t);
-  // Give the child a disposable home with the documented default socket, including on Colima CI.
+  // Isolate owner records. macOS also discovers its default socket inside this home.
   const home = join(keystore.directory, 'home');
   await mkdir(join(home, '.docker/run'), { recursive: true });
-  await symlink(await realpath(dockerSocket!), join(home, '.docker/run/docker.sock'));
+  if (process.platform === 'darwin') await symlink(await realpath(dockerSocket!), join(home, '.docker/run/docker.sock'));
   const capture = join(keystore.directory, 'private-url');
   const hook = join(keystore.directory, 'preload.mjs');
   await writeFile(hook, keystore.installSource.replaceAll('/.local/test-build/', '/dist/') + `
@@ -68,7 +69,7 @@ test('global MCP defaults support private setup, isolated worktree databases and
   client.setRequestHandler('elicitation/create', async () => ({ action: 'accept', content: { allow: true } }));
   await client.connect(new StdioClientTransport({ command: process.execPath,
     args: [resolve('dist/cli.js'), 'mcp', '--allow-exec'], stderr: 'pipe',
-    env: { ...process.env, HOME: home, NODE_OPTIONS: `--import=${hook}` } as Record<string, string> }));
+    env: { ...process.env, HOME: home, USERPROFILE: home, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` } as Record<string, string> }));
   async function call<T>(name: string, project: string, args: Record<string, unknown> = {}): Promise<T> {
     for (;;) {
       const signal = name === 'preview_wait' ? t.signal : undefined;
@@ -111,12 +112,14 @@ test('global MCP defaults support private setup, isolated worktree databases and
         assert.deepEqual(approved.alreadyPresent, [reference]);
       }
     }
-    await unlink(join(home, '.docker/run/docker.sock'));
-    const unavailable = await call<PreviewStatus>('preview_start', projects[0], { spec: spec(projects[0]) });
-    const failed = await call<AttemptResult>('preview_wait', projects[0], { name: 'notes', attemptId: unavailable.candidate!.id });
-    assert.equal(failed.error?.code, 'START_FAILED');
-    assert.match(failed.error!.message, /Docker socket is unavailable/);
-    await symlink(await realpath(dockerSocket!), join(home, '.docker/run/docker.sock'));
+    if (process.platform === 'darwin') { // Only this home-local default socket is safe to disconnect.
+      await unlink(join(home, '.docker/run/docker.sock'));
+      const unavailable = await call<PreviewStatus>('preview_start', projects[0], { spec: spec(projects[0]) });
+      const failed = await call<AttemptResult>('preview_wait', projects[0], { name: 'notes', attemptId: unavailable.candidate!.id });
+      assert.equal(failed.error?.code, 'START_FAILED');
+      assert.match(failed.error!.message, /Docker socket is unavailable/);
+      await symlink(await realpath(dockerSocket!), join(home, '.docker/run/docker.sock'));
+    }
     await call('preview_save_config', projects[1], { spec: spec(projects[1]) });
     const [first, second] = await Promise.all([start(projects[0], { spec: spec(projects[0]) }), start(projects[1], {})]);
     assert.notEqual(first.url, second.url);

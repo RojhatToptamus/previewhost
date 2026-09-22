@@ -7,7 +7,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { testKeystore } from './testSupport/keystore.js';
 
-const enabled = { skip: process.platform === 'win32', timeout: 30_000 };
+const enabled = { skip: process.platform === 'win32' && 'Requires Python POSIX pseudo-terminals', timeout: 30_000 };
 const execute = promisify(execFile);
 
 test('hidden terminal entry, cancellation, paste overflow, and TTY misuse never echo input and restore the terminal', enabled, async () => {

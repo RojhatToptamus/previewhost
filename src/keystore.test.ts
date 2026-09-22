@@ -133,7 +133,7 @@ test('unavailable automatic storage leaves password unlock usable and reports re
   assert.equal(await store.get('user','usable'),'FAKE_value');
 });
 
-test('macOS remembers one unlock key; forgetting affects new sessions, not active owners', { skip: process.platform !== 'darwin' }, async t => {
+test('macOS remembers one unlock key; forgetting affects new sessions, not active owners', { skip: process.platform !== 'darwin' && 'Requires macOS Keychain' }, async t => {
   const { store, session } = await fixture(t);
   const native = await testKeychain(t);
   t.mock.method(keychain, 'get', (...args: Parameters<Keychain['get']>) => Keychain.prototype.get.call(native.store, ...args));

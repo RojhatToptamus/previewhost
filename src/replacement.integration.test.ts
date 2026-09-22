@@ -10,9 +10,8 @@ import { promisify } from 'node:util';
 import { createPreviewRuntime } from './index.js';
 
 const execute = promisify(execFile);
-const nativeTest = process.platform !== 'win32' ? test : test.skip;
 
-nativeTest('cleanup failure after replacement cutover preserves the new route and retains old debt until stop can verify absence', { timeout: 20_000 }, async () => {
+test('cleanup failure after replacement cutover preserves the new route and retains old debt until stop can verify absence', { timeout: 20_000, skip: process.platform === 'win32' && 'Requires POSIX leaderless process groups; Windows Job Objects kill surviving members' }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost replacement '));
   const site = join(directory, 'site');
   const baselinePorts = await ownedListenerPorts();

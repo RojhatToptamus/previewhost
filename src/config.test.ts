@@ -216,12 +216,14 @@ test('the file loader preserves legacy relative specs and honors cancellation', 
   await assert.rejects(loadPreviewSpec(join(directory, 'missing.json')), { code: 'INVALID_INPUT' });
 });
 
-test('file input rejects special files without waiting for a producer and still follows regular-file links', { timeout: 5000, skip: process.platform === 'win32' }, async t => {
+test('file input rejects special files without waiting for a producer and still follows regular-file links', { timeout: 5000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost file input '));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const fifo = join(directory, 'preview.yaml');
-  await promisify(execFile)('mkfifo', [fifo]);
-  await assert.rejects(loadPreviewSpec(fifo), { code: 'INVALID_INPUT' });
+  if (process.platform !== 'win32') { // Windows has no filesystem FIFOs.
+    const fifo = join(directory, 'preview.yaml');
+    await promisify(execFile)('mkfifo', [fifo]);
+    await assert.rejects(loadPreviewSpec(fifo), { code: 'INVALID_INPUT' });
+  }
   await assert.rejects(loadPreviewSpec(directory), { code: 'INVALID_INPUT' });
   await writeFile(join(directory, 'spec.json'), JSON.stringify({ name: 'site', type: 'static', directory: '.' }));
   const file = join(directory, 'linked.json'); await symlink(join(directory, 'spec.json'), file);

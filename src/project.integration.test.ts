@@ -298,7 +298,7 @@ test('Git worktree roots are distinct and command wait timeout preserves continu
 });
 
 test('one shared MCP connection routes Git worktrees to separate owners and managed data', {
-  ...enabled, skip: process.platform === 'win32' || !process.env.PREVIEWHOST_TEST_DOCKER_SOCKET,
+  ...enabled, skip: !process.env.PREVIEWHOST_TEST_DOCKER_SOCKET && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET',
 }, async t => {
   const { directory, projects } = await fixture(t);
   const keystore = await testKeystore(t);

@@ -16,7 +16,7 @@ import { createPreviewRuntime } from './runtime.js';
 import { isPrivate } from './private-files.js';
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
-const enabled = { skip: !dockerSocket, timeout: 90_000 };
+const enabled = { skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 90_000 };
 const specs = { database: { type: 'postgres' as const }, cache: { type: 'redis' as const } };
 const signal = () => new AbortController().signal;
 

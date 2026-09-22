@@ -9,7 +9,7 @@ import { Keychain } from './keychain.js';
 import { testKeychain } from './testSupport/keychain.js';
 import { failure } from './errors.js';
 
-const enabled = { skip: process.platform !== 'darwin', timeout: 60_000 };
+const enabled = { skip: process.platform !== 'darwin' && 'Requires macOS Keychain', timeout: 60_000 };
 const invoke = Keychain.prototype.invoke;
 const execute = promisify(execFile);
 

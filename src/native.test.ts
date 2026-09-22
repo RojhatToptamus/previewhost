@@ -9,7 +9,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { startNative, type NativeResource, type NativeCommandSpec as CommandSpec } from './native.js';
 
-const posixTest = process.platform !== 'win32' ? test : test.skip;
+const posix = { skip: process.platform === 'win32' && 'Requires POSIX signals, process groups, and ps inspection' };
 const server = `
 import http from 'node:http';
 import fs from 'node:fs';
@@ -61,7 +61,7 @@ test('cancellation before supervisor spawn creates no command and preserves its 
   } finally { await resource?.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
-posixTest('cancellation stops a paused supervisor even when configure backpressures its IPC channel', async () => {
+test('cancellation stops a paused supervisor even when configure backpressures its IPC channel', posix, async () => {
   const root = await fixture(server);
   const controller = new AbortController();
   const originalFork = childProcess.fork;
@@ -288,7 +288,7 @@ test('unexpected supervisor death uses the recorded live command identity for ex
   }
 });
 
-posixTest('supervisor loss with unavailable target identity retains cleanup debt and permits a later absence check', async () => {
+test('supervisor loss with unavailable target identity retains cleanup debt and permits a later absence check', posix, async () => {
   const root = await fixture(`
 import fs from 'node:fs';
 fs.writeFileSync('identity.json', JSON.stringify({ pid: process.pid, group: process.ppid }));
@@ -332,7 +332,7 @@ setInterval(() => {}, 1000);
   }
 });
 
-posixTest('leaderless survivors after guardian loss are refused rather than killed by a remembered group number', async () => {
+test('leaderless survivors after guardian loss are refused rather than killed by a remembered group number', posix, async () => {
   const root = await fixture(`
 import { spawn } from 'node:child_process';
 ${server}

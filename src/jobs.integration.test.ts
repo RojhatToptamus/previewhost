@@ -16,7 +16,7 @@ import { testKeystore } from './testSupport/keystore.js';
 type Spec = Extract<PreviewSpec, { type: 'environment' }>;
 const native = { timeout: 30_000 };
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
-const database = { skip: process.platform === 'win32' || !dockerSocket, timeout: 120_000 };
+const database = { skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 120_000 };
 async function outcome(runtime: PreviewRuntime, started: PreviewStatus, signal: AbortSignal) {
   for (;;) {
     try {
