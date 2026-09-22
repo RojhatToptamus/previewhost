@@ -29,4 +29,4 @@ jobs:
       - if: matrix.os == 'windows-11-arm'
         run: npx tsc -p tsconfig.test.json
       - if: matrix.os == 'windows-11-arm'
-        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/gateway.test.js .local/test-build/cli.integration.test.js .local/test-build/project-lifecycle.test.js .local/test-build/secret-input.integration.test.js
+        run: node --test --test-reporter=tap --test-concurrency=1 .local/test-build/gateway.test.js .local/test-build/cli.integration.test.js .local/test-build/project-lifecycle.test.js .local/test-build/secret-input.integration.test.js .local/test-build/docker.test.js .local/test-build/mcp-access.integration.test.js .local/test-build/project.integration.test.js
