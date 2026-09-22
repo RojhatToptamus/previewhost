@@ -25,8 +25,6 @@ jobs:
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
       - run: |
-          time docker info >/dev/null
-          time docker run --rm redis:7-alpine true
           colima ssh -- cat /proc/loadavg /proc/meminfo /proc/pressure/cpu /proc/pressure/io
           colima ssh -- top -b -n 1
       - run: npm run build && npx tsc -p tsconfig.test.json
@@ -37,35 +35,16 @@ jobs:
           import { resolve } from 'node:path';
           import { pathToFileURL } from 'node:url';
           const observer = pathToFileURL(resolve('scripts/diagnostic-docker.mjs')).href;
-          for (const file of ['dist/docker.js', '.local/test-build/docker.js']) appendFileSync(file, `\nimport { observe } from ${JSON.stringify(observer)}; observe(Docker);\n`);
+          for (const directory of ['dist', '.local/test-build']) {
+            appendFileSync(`${directory}/docker.js`, `\nimport { observe } from ${JSON.stringify(observer)}; observe(Docker);\n`);
+            appendFileSync(`${directory}/runtime.js`, `\nimport { trace } from ${JSON.stringify(observer)}; for(const method of ['runCandidate','stop','deleteData','cancel','close']) Runtime.prototype[method]=trace('runtime.'+method,Runtime.prototype[method]);\n`);
+            appendFileSync(`${directory}/native.js`, `\nimport { trace } from ${JSON.stringify(observer)}; launchNative=trace('native.launch',launchNative);runNativeJob=trace('native.job',runNativeJob);\n`);
+          }
           NODE
-          node scripts/diagnostic-image.mjs
-          node --test --test-reporter=tap --test-concurrency=1 --test-name-pattern='^(real owned PostgreSQL|real owner SIGKILL|offline projects keep real PostgreSQL|one shared MCP connection routes)' .local/test-build/data.integration.test.js .local/test-build/project-lifecycle.test.js .local/test-build/project.integration.test.js
+          node --test --test-reporter=tap --test-concurrency=1 --test-name-pattern='^(real PostgreSQL jobs:|failed and canceled seeds|dashboard reset enforces|offline projects keep real PostgreSQL|one shared MCP connection routes)' .local/test-build/jobs.integration.test.js .local/test-build/project-lifecycle.test.js .local/test-build/project.integration.test.js
       - if: always()
         run: |
           cat "$RUNNER_TEMP/docker-operations.jsonl" || true
           colima ssh -- cat /proc/loadavg /proc/meminfo /proc/pressure/cpu /proc/pressure/io
           colima ssh -- top -b -n 1
           colima stop
-  windows:
-    runs-on: windows-2025
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.23.0
-          package-manager-cache: false
-      - run: npm ci --ignore-scripts
-      - shell: bash
-        run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const p = JSON.parse(readFileSync('package.json'));
-          p.scripts.verify = 'npm run build && npx tsc -p tsconfig.test.json && node --test --test-reporter=tap --test-concurrency=1 .local/test-build/data.test.js .local/test-build/data.integration.test.js examples/multi-repo/worktrees.integration.test.mjs';
-          writeFileSync('package.json', JSON.stringify(p));
-          NODE
-      - shell: pwsh
-        run: ./scripts/windows-databases.ps1

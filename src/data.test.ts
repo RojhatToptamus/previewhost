@@ -229,6 +229,7 @@ test('cancellation joins a dispatched creation; failed removal keeps the exact I
     const record = JSON.parse(await readFile(join(fixture.data, 'sample.json'), 'utf8'));
     const container = record.resources[0].container;
     assert.match(container.id, /^[a-f0-9]{64}$/);
+    assert.equal(fixture.containers.get(container.id)?.Config.Image, fixture.imageId, 'Containers must use the inspected immutable image ID, never a mutable tag.');
     assert.equal(record.pending.operation, 'remove-container');
     await owner.stop('sample');
     assert.equal(fixture.containers.size, 0);
@@ -350,7 +351,6 @@ async function faultEngine(mode: FaultMode) {
         const value = volumes.get(path.slice('/volumes/'.length)); send(value ? 200 : 404, value); return;
       }
       if (req.method === 'POST' && path === '/containers/create') {
-        assert.equal(body.Image, imageId, 'Containers must use the inspected immutable image ID, never a mutable tag.');
         const id = randomBytes(32).toString('hex');
         const value = { Id: id, Name: `/${url.searchParams.get('name')}`, Config: body };
         containers.set(id, value); fixture.afterContainerCreate();

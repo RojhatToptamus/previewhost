@@ -18,7 +18,15 @@ import { SecretSetup } from './secrets-setup.js';
 import { testKeystore } from './testSupport/keystore.js';
 import type { PreviewSpec } from './contracts.js';
 
-const execute = promisify(execFile);
+const execute = new Proxy(promisify(execFile), {
+  apply(target, receiver, args) {
+    const start = performance.now();
+    return Reflect.apply(target, receiver, args).catch((e: Error & {code?:unknown;signal?:unknown;killed?:unknown;stderr?:unknown}) => {
+      console.error(JSON.stringify({operation:'CLI child failure',ms:performance.now()-start,code:e.code,signal:e.signal,killed:e.killed,stderr:e.stderr}));
+      throw e;
+    });
+  },
+});
 
 test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', async t => {
   const fixture = await testKeystore(t);
