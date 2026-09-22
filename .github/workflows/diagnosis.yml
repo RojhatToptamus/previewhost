@@ -28,6 +28,7 @@ jobs:
           time docker info >/dev/null
           time docker run --rm redis:7-alpine true
           colima ssh -- cat /proc/loadavg /proc/meminfo /proc/pressure/cpu /proc/pressure/io
+          colima ssh -- top -b -n 1
       - run: npm run build && npx tsc -p tsconfig.test.json
       - run: |
           export PREVIEWHOST_DIAG_FILE="$RUNNER_TEMP/docker-operations.jsonl"
@@ -44,6 +45,7 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/docker-operations.jsonl" || true
           colima ssh -- cat /proc/loadavg /proc/meminfo /proc/pressure/cpu /proc/pressure/io
+          colima ssh -- top -b -n 1
           colima stop
   windows:
     runs-on: windows-2025
@@ -62,7 +64,7 @@ jobs:
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
           const p = JSON.parse(readFileSync('package.json'));
-          p.scripts.verify = 'npm run build && npx tsc -p tsconfig.test.json && node --test --test-reporter=tap examples/multi-repo/worktrees.integration.test.mjs';
+          p.scripts.verify = 'npm run build && npx tsc -p tsconfig.test.json && node --test --test-reporter=tap --test-concurrency=1 .local/test-build/data.test.js .local/test-build/data.integration.test.js examples/multi-repo/worktrees.integration.test.mjs';
           writeFileSync('package.json', JSON.stringify(p));
           NODE
       - shell: pwsh
