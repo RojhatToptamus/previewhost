@@ -327,9 +327,17 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   assert.equal((await client.callTool({ name: 'preview_list', arguments: {} })).isError, true);
   function adapter(project: string) {
     return async <T>(name: string, args: Record<string, unknown> = {}): Promise<T> => {
-      const response = await client.callTool({ name, arguments: { ...args, project } });
-      assert.equal(response.isError, undefined, JSON.stringify(response.structuredContent));
-      return (response.structuredContent as { result: T }).result;
+      for (;;) {
+        t.signal.throwIfAborted();
+        const response = await client.callTool({ name, arguments: { ...args, project } }, { signal: t.signal });
+        // Wait windows can expire before startup finishes; observe the same attempt without restarting it.
+        if (name === 'preview_wait' && response.isError && (response.structuredContent as { error: { code: string } }).error.code === 'TIMEOUT') {
+          assert.deepEqual(response.structuredContent, { error: { code: 'TIMEOUT', message: 'The attempt is still pending. Inspect status or wait again.' } });
+          continue;
+        }
+        assert.equal(response.isError, undefined, JSON.stringify(response.structuredContent));
+        return (response.structuredContent as { result: T }).result;
+      }
     };
   }
   const first = adapter(directory); const second = adapter(worktree);

@@ -145,6 +145,10 @@ test('SDK cancellation aborts only a wait and EOF releases pending requests with
   t.after(async () => { await mcp.close(); await other.close(); await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   await mcp.connect(transport);
   const status = await other.start({ name: 'pending', type: 'command', cwd: directory, command: [process.execPath, '-e', 'process.exit(99)'] });
+  const observation = await mcp.callTool({ name: 'preview_wait', arguments: { name: 'pending', attemptId: status.candidate!.id, timeoutMs: 1 } });
+  assert.equal(observation.isError, true);
+  assert.equal((observation.structuredContent as { error: { code: string } }).error.code, 'TIMEOUT');
+  assert.equal((await other.get('pending')).candidate?.id, status.candidate!.id);
   let entered!: () => void;
   const waiting = new Promise<void>((done) => { entered = done; });
   const original = runtime.wait.bind(runtime);
