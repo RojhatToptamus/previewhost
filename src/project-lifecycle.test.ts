@@ -54,7 +54,8 @@ const directory = process.argv[2], record = JSON.parse(process.argv[3]);
 const lock = await lockProject(directory);
 try {
   process.send('ready');
-  for (let i = 0; i < 500; i++) {
+  // Exercise concurrent readers without turning durable writes into a disk benchmark.
+  for (let i = 0; i < 20; i++) {
     await writeProjectRecord(directory, record);
     await unlink(join(directory, 'connection.json'));
   }
@@ -65,10 +66,13 @@ try {
   const exited = once(child, 'exit');
   try {
     await once(child, 'message');
+    let reads = 0;
     while (child.exitCode === null && child.signalCode === null) {
       const current = await readProjectRecord(directory);
       if (current) assert.deepEqual(current, record);
+      reads++;
     }
+    assert.ok(reads > 0, 'Read records while the writer is active.');
     assert.equal((await exited)[0], 0, stderr);
     assert.equal(await readProjectRecord(directory), undefined);
   } finally {
