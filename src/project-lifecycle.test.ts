@@ -18,7 +18,7 @@ import { createDataOwner } from './data.js';
 import { SecretSetup } from './secrets-setup.js';
 import { testKeystore } from './testSupport/keystore.js';
 import { publicAccess } from './testSupport/permissions.js';
-import type { PreviewSpec } from './contracts.js';
+import type { AttemptResult, PreviewSpec, PreviewStatus } from './contracts.js';
 
 const execute = promisify(execFile);
 
@@ -225,11 +225,22 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
   const client = connectProject({ projectDirectory: project });
   const authorized = connectProject({ projectDirectory: project, allowExec: true });
   try {
-    const args = [resolve('dist/cli.js'), 'start', '--project', project, '--file', file, '--allow-exec'];
-    const first = JSON.parse((await execute(process.execPath, [...args, '--data-dir', dataDirectory, '--docker-socket', dockerSocket!], {
-      env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, timeout: 30_000,
-    })).stdout);
-    assert.equal(await (await fetch(first.url)).text(), '1');
+    const args = [resolve('dist/cli.js'), 'start', '--project', project, '--file', file, '--allow-exec', '--no-wait'];
+    async function start(options: string[] = []) {
+      const started: PreviewStatus = JSON.parse((await execute(process.execPath, [...args, ...options], {
+        env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, signal: t.signal,
+      })).stdout);
+      // The CLI launches once; observation windows must not kill a continuing startup.
+      let result: AttemptResult;
+      for (;;) {
+        try { result = await client.wait('app', started.candidate!.id, { signal: t.signal }); break; }
+        catch (error) { if ((error as { code?: string }).code !== 'TIMEOUT') throw error; }
+      }
+      assert.equal(result.state, 'ready', JSON.stringify(result));
+      return result;
+    }
+    const first = await start(['--data-dir', dataDirectory, '--docker-socket', dockerSocket!]);
+    assert.equal(await (await fetch(first.url!)).text(), '1');
     await assert.rejects(client.remove('app', first.id), { code: 'BUSY' });
     await client.stop('app');
     await assert.rejects(client.remove('app', first.id), { code: 'BUSY' });
@@ -237,8 +248,8 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
     let record = (await readProjectRecord(ownerDirectory))!;
     assert.equal(record.endpoint, undefined); assert.equal(record.dataDirectory, dataDirectory);
     assert.deepEqual((await offlinePreviews(record)).map(p => p.name), ['app']);
-    const second = JSON.parse((await execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, timeout: 30_000 })).stdout);
-    assert.equal(await (await fetch(second.url)).text(), '1');
+    const second = await start();
+    assert.equal(await (await fetch(second.url!)).text(), '1');
     await client.shutdown(); await rm(project, { recursive: true });
     record = (await readProjectRecord(ownerDirectory))!;
     const data = (await offlinePreviews(record))[0].data!;
