@@ -346,7 +346,7 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
     return call<AttemptResult>('preview_wait', { name: 'notes', attemptId: started.candidate!.id });
   }));
   for (const [i, project] of projects.entries()) {
-    assert.equal(ready[i].state, 'ready');
+    assert.equal(ready[i].state, 'ready', JSON.stringify(ready[i]));
     assert.equal(ready[i].services?.db.state, 'ready');
     assert.deepEqual(ready[i].sources, [project]);
     const owner = connectProject({ projectDirectory: project });
@@ -367,7 +367,8 @@ test('one shared MCP connection routes Git worktrees to separate owners and mana
   assert.equal((await second<PreviewStatus>('preview_get', { name: 'notes' })).active!.id, ready[1].id);
   assert.equal(await (await fetch(ready[1].url!)).text(), 'other worktree');
   const restarted = await first<PreviewStatus>('preview_start');
-  assert.equal((await first<AttemptResult>('preview_wait', { name: 'notes', attemptId: restarted.candidate!.id })).state, 'ready');
+  const restartedReady = await first<AttemptResult>('preview_wait', { name: 'notes', attemptId: restarted.candidate!.id });
+  assert.equal(restartedReady.state, 'ready', JSON.stringify(restartedReady));
 });
 
 for (const customData of [false, true]) test(`automatic storage keeps explicit options and static previews usable without Docker (custom data: ${customData})`, enabled, async t => {

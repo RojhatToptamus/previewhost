@@ -1,5 +1,18 @@
 # previewhost
 
+## 0.3.0
+
+### Minor Changes
+
+- 66a4bdf: Add Linux and Windows x64 support for native previews and automatic project owners, with platform-specific ownership locks, private storage, and process cleanup.
+
+  Windows databases are experimental and tested with WSL Docker. Docker Desktop remains unverified. macOS and Linux retain x64 and ARM64 support; Windows ARM64 is unsupported.
+- d295b72: Clarify failed updates and link failed resources to their logs. Add read-only prerequisite checks, secret search and pagination, log refresh with Clear view, and clearer reset and deletion results.
+
+### Patch Changes
+
+- d295b72: Show the current private setup request without stale cancellation messages from earlier requests.
+
 ## 0.2.0
 
 ### Minor Changes

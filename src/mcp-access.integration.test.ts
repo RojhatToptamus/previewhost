@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, realpath, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -33,7 +34,24 @@ for (const version of ['2025-11-25', '2026-07-28'] as const) test(`global projec
   }
   const c = await adapter();
   async function call(name: string, project = front, args: object = {}, client = c): Promise<any> {
-    const r = await client.callTool({ name, arguments: { project, ...args } });
+    const input = { name, arguments: { project, ...args } };
+    let r = await client.callTool(input, { signal: t.signal });
+    const result = r.structuredContent as { error?: { code: string; message: string } };
+    if (name === 'preview_access' && result.error?.code === 'TIMEOUT') {
+      assert.match(result.error.message, /[Pp]roject owner.*(?:startup|connection)/);
+      t.diagnostic('Owner launch is pending; inspect its connection before requesting access again.');
+      // A launch observation timeout is not a failed owner. Never launch another one here.
+      const owner = connectProject({ projectDirectory: project });
+      try {
+        for (;;) {
+          t.signal.throwIfAborted();
+          try { await owner.info(); break; }
+          catch (error) { if ((error as { code?: string }).code !== 'DAEMON_UNAVAILABLE') throw error; }
+          await delay(100, undefined, { signal: t.signal });
+        }
+      } finally { await owner.close(); }
+      r = await client.callTool(input, { signal: t.signal });
+    }
     return r.structuredContent;
   }
   assert.equal((await call('preview_list')).error.code, 'SOURCE_DENIED');
