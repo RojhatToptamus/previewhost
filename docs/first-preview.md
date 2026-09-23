@@ -109,6 +109,9 @@ Check the configuration:
 previewhost inspect
 ```
 
+Inspection reports missing or unverified local prerequisites without starting anything.
+An earlier setup job may prepare a missing executable; inspection never runs it.
+
 Start the preview:
 
 ```sh

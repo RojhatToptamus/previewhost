@@ -132,25 +132,33 @@ export function App() {
     };
   }, [revision]);
   const mutate: Mutate = useCallback(
-    async <T,>(body: object, success: string | ((result: T) => string)) => {
-      if (mutation.current) return;
+    async <T,>(body: object, success?: string | ((result: T) => string)) => {
+      if (mutation.current)
+        return {
+          ok: false,
+          error:
+            "Another action is in progress. Recheck status before trying again.",
+        };
       mutation.current = true;
       setActing(true);
-      const id = toast.loading("Working…");
+      // Confirmations own their feedback. Other actions use the shared toast.
+      const id = success === undefined ? undefined : toast.loading("Working…");
       try {
         const result = await call<T>(body);
-        toast.success(
-          typeof success === "function" ? success(result) : success,
-          {
-            id,
-          },
-        );
+        if (success !== undefined)
+          toast.success(
+            typeof success === "function" ? success(result) : success,
+            { id },
+          );
+        return { ok: true, result };
       } catch (error) {
-        toast.error(errorMessage(error), {
-          id,
-          duration: Infinity,
-          closeButton: true,
-        });
+        const message =
+          error instanceof Error && error.cause
+            ? errorMessage(error)
+            : "No response was received. The action may have completed. Recheck status before trying again.";
+        if (success !== undefined)
+          toast.error(message, { id, duration: Infinity, closeButton: true });
+        return { ok: false, error: message };
       } finally {
         mutation.current = false;
         setActing(false);
@@ -247,6 +255,8 @@ export function App() {
                 }}
                 mutate={mutate}
                 acting={acting}
+                revision={revision}
+                refresh={() => setRevision((value) => value + 1)}
               />
             ) : (
               <div className="page">

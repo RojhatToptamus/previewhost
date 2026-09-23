@@ -50,6 +50,10 @@ type Props = {
   setWrapLogs: (wrap: boolean) => void;
   mutate: Mutate;
   acting: boolean;
+  revision: number;
+  refresh: () => void;
+  clearAfter?: number;
+  setClearAfter: (after: number | undefined) => void;
 };
 type Result = {
   key: string;
@@ -72,12 +76,22 @@ export function Diagnostics({
   setWrapLogs,
   mutate,
   acting,
+  revision,
+  refresh,
+  clearAfter,
+  setClearAfter,
 }: Props) {
   const [result, setResult] = useState<Result>();
   const [loading, setLoading] = useState(true);
-  const [revision, setRevision] = useState(0);
   const body = useRef<HTMLDivElement>(null);
-  const key = [entry.owner.id, entry.name, selected.id, tab, source].join("/");
+  const key = [
+    entry.owner.id,
+    entry.name,
+    selected.id,
+    tab,
+    source,
+    clearAfter,
+  ].join("/");
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -87,7 +101,9 @@ export function Diagnostics({
         owner: entry.owner.id,
         name: entry.name,
         attemptId: selected.id,
-        ...(tab === "logs" && source ? { source } : {}),
+        ...(tab === "logs"
+          ? { source: source || undefined, after: clearAfter }
+          : {}),
       },
       controller.signal,
     )
@@ -107,7 +123,16 @@ export function Diagnostics({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [entry.owner.id, entry.name, selected.id, tab, source, key, revision]);
+  }, [
+    entry.owner.id,
+    entry.name,
+    selected.id,
+    tab,
+    source,
+    key,
+    revision,
+    clearAfter,
+  ]);
   const current = result?.key === key ? result : undefined;
   const logs = current?.logs;
   const description = current?.description;
@@ -120,7 +145,10 @@ export function Diagnostics({
   const output = logs
     ? query
       ? matches.join("\n") || "No matching lines in captured output."
-      : logs.text || "No output captured."
+      : logs.text ||
+        (clearAfter === undefined
+          ? "No output captured."
+          : "No new output. Refresh to check again.")
     : "";
   function search(value: string) {
     setQuery(value);
@@ -190,7 +218,7 @@ export function Diagnostics({
           className="refresh-details"
           aria-label={loading ? "Refreshing…" : "Refresh"}
           disabled={loading || acting}
-          onClick={() => setRevision((value) => value + 1)}
+          onClick={refresh}
         >
           {loading ? <Spinner /> : <RefreshCwIcon className="refresh-icon" />}
           <span className="refresh-label">
@@ -203,16 +231,45 @@ export function Diagnostics({
               {logs
                 ? query
                   ? `${matches.length} matching ${matches.length === 1 ? "line" : "lines"}`
-                  : "Captured output"
+                  : clearAfter === undefined
+                    ? "Captured output"
+                    : "Earlier output hidden in this view"
                 : loading
                   ? "Loading output…"
                   : "Output unavailable"}
               {logs?.truncated ? " · Earlier output omitted" : ""}
             </p>
-            <Toggle size="sm" pressed={wrapLogs} onPressedChange={setWrapLogs}>
-              <WrapTextIcon data-icon="inline-start" />
-              Wrap lines
-            </Toggle>
+            <div className="flex flex-wrap items-center gap-1">
+              {clearAfter !== undefined && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setClearAfter(undefined)}
+                >
+                  Show earlier logs
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={loading || !logs?.text}
+                onClick={() => {
+                  setClearAfter(logs!.cursor);
+                  body.current?.scrollTo(0, 0);
+                }}
+                title="Hide captured output in this view only"
+              >
+                Clear view
+              </Button>
+              <Toggle
+                size="sm"
+                pressed={wrapLogs}
+                onPressedChange={setWrapLogs}
+              >
+                <WrapTextIcon data-icon="inline-start" />
+                Wrap lines
+              </Toggle>
+            </div>
           </div>
         )}
       </div>

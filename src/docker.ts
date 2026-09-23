@@ -103,8 +103,8 @@ export class Docker {
     });
   }
 
-  async engineId(): Promise<string> {
-    const result = await this.request('GET', '/info');
+  async engineId(options: { signal?: AbortSignal } = {}): Promise<string> {
+    const result = await this.request('GET', '/info', undefined, options);
     const id = object(result.body).ID;
     if (result.status !== 200 || typeof id !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(id)) {
       throw new PreviewError('CLEANUP_INCOMPLETE', 'The local Docker engine identity could not be verified.');
@@ -112,9 +112,9 @@ export class Docker {
     return id;
   }
 
-  async image(type: 'postgres' | 'redis'): Promise<string> {
+  async image(type: 'postgres' | 'redis', options: { signal?: AbortSignal } = {}): Promise<string> {
     const tag = type === 'postgres' ? 'postgres:17-alpine' : 'redis:7-alpine';
-    const inspected = await this.request('GET', `/images/docker.io/library/${tag}/json`);
+    const inspected = await this.request('GET', `/images/docker.io/library/${tag}/json`, undefined, options);
     const id = object(inspected.body).Id;
     if (inspected.status !== 200 || typeof id !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(id)) {
       throw new PreviewError('START_FAILED', `Install the local Docker image ${tag} before starting this environment.`);

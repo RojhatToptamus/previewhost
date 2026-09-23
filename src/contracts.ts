@@ -177,7 +177,15 @@ export interface PreviewStatus {
   cleanup?: Array<{ attemptId: string; error: Failure; sources: string[] }>;
   data?: DataStatus;
 }
+export interface PrerequisiteFinding {
+  requirement: 'executable' | 'native-helper' | 'data-directory' | 'docker' | 'image';
+  status: 'missing' | 'unverified';
+  service?: string;
+  message: string;
+}
 export interface PreviewDescription {
+  /** Read-only observations, not startup validation or permission grants. */
+  prerequisites?: PrerequisiteFinding[];
   spec: Omit<CommandSpec, 'env'> | Exclude<EffectiveSpec, CommandSpec | EnvironmentSpec> | {
     name: string; type: 'environment'; primary: string; timeoutMs: number;
     services: Record<string, {

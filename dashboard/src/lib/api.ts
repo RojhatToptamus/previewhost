@@ -37,7 +37,10 @@ export function errorMessage(error: unknown) {
     : "The action failed. Check current status before retrying.";
 }
 
+export type MutationResult<T> =
+  { ok: true; result: T } | { ok: false; error: string };
+
 export type Mutate = <T = unknown>(
   body: object,
-  success: string | ((result: T) => string),
-) => Promise<void>;
+  success?: string | ((result: T) => string),
+) => Promise<MutationResult<T>>;

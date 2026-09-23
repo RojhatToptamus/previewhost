@@ -583,6 +583,7 @@
 }
 .log-options {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -692,6 +693,7 @@
   border-radius: 8px;
 }
 .attempt-split > div {
+  min-width: 0;
   padding: 14px 16px;
 }
 .attempt-split > div + div {
@@ -700,6 +702,13 @@
 .attempt-split code {
   display: inline-block;
   margin: 6px 12px 0 0;
+}
+.attempt-failure {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .data-table,
 .definitions {
@@ -842,6 +851,7 @@
 .secret-section {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
   margin-top: 24px;
   gap: 12px;
@@ -861,7 +871,8 @@
   font-size: 12px;
 }
 .secret-scroll {
-  height: min(520px, calc(100dvh - 310px));
+  flex: 1;
+  max-height: 520px;
   min-height: 160px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -977,9 +988,6 @@
   }
   .activity-row > div {
     width: 100%;
-  }
-  .secret-scroll {
-    height: calc(100dvh - 340px);
   }
   .secret-row {
     padding: 10px 12px;

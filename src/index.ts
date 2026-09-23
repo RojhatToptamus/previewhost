@@ -1,5 +1,5 @@
 export type {
-  PreviewSpec, PreviewStatus, PreviewDescription, PreviewApi, RuntimeOptions,
+  PreviewSpec, PreviewStatus, PreviewDescription, PreviewApi, RuntimeOptions, PrerequisiteFinding,
   AttemptSummary, AttemptResult, Failure, ErrorCode, LogResult, LogOptions, DeleteDataOptions, WaitOptions,
   ServiceStatus, DataStatus, StopOptions, AuthorizationRequest,
   SecretRequirement, SecretSetupApi, SecretSetupStatus, SecretSetupSummary, PreviewManagementApi,

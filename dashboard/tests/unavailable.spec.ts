@@ -68,6 +68,7 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await dashboard.open();
+    await page.clock.install();
     await page.goto(launch);
     await expect(page).toHaveTitle("Previews · Previewhost");
     const nav = page.locator('[data-slot="sidebar-content"]');
@@ -147,6 +148,8 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    // Keep background polling from removing this filtered row before its explicit Recheck.
+    await page.clock.pauseAt(new Date(Date.now() + 1000));
     // Restore the unavailable owner; recheck must adopt its actual status without starting it.
     const project = rows[1].record.projectDirectory;
     await mkdir(project);
@@ -180,6 +183,7 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
       .click();
     await page.getByRole("menuitem", { name: "Recheck status" }).click();
     await expect(sheet.locator(".preview-nav")).toHaveCount(0);
+    await page.clock.resume();
     await sheet.getByRole("combobox", { name: "Filter previews" }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("option", { name: "Needs attention", exact: true })).toBeFocused();

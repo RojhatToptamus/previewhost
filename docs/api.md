@@ -33,7 +33,8 @@ const client = connectPreviewDaemon({
 your application. Both must be supplied by that application.
 No input map or data directory exists by default.
 `dockerSocket` selects an explicit local Engine socket and requires `dataDirectory`.
-Its default is the local Docker Desktop socket at `~/.docker/run/docker.sock`.
+The default is `~/.docker/run/docker.sock` on macOS, `/var/run/docker.sock` on Linux,
+and `\\.\pipe\docker_engine` on Windows.
 
 For `start` and `replace`, the callback receives `operation`, a validated copy of
 `spec`, and `signal`. Changes to this copy do not affect execution.
@@ -80,6 +81,17 @@ JSON stdin paths resolve from the current directory.
 const spec = await loadPreviewSpec('/absolute/project/preview.yaml', { signal });
 const description = await runtime.inspect(spec);
 ```
+
+Inspection reports advisory `prerequisites` findings for declared executables, native
+helpers, managed-data configuration, and local Docker images. `missing` identifies
+an absent requirement; `unverified` means inspection cannot establish availability.
+A missing executable behind a setup job remains unverified because that job may
+prepare it. Explicit PATH bindings are not resolved during inspection.
+
+Inspection does not start an owner, execute project commands, install dependencies,
+pull images, unlock secrets, or check application health. It reads file metadata and
+uses bounded GET requests to the configured local Docker Engine when managed databases
+are declared. Findings do not block startup. Normal source and schema validation still applies.
 
 `loadPreviewSpec` accepts one regular UTF-8 file of at most 1 MiB. Pipes belong on JSON stdin.
 
@@ -235,7 +247,7 @@ External services remain outside owned stop and deletion operations.
 
 | Method | Result and effect |
 | --- | --- |
-| `inspect(spec)` | Validated public description. No execution or permission grant. Environment key names appear without values. |
+| `inspect(spec)` | Validated public description and advisory prerequisite findings. No execution or permission grant. Environment key names appear without values. |
 | `start(spec)` | Reserves a candidate and returns `PreviewStatus` before startup finishes. |
 | `replace(name, spec)` | Starts one candidate while the active route remains available. Names must match. |
 | `get(name)` | Current `PreviewStatus`. |
@@ -446,13 +458,16 @@ previewhost secrets remember
 previewhost secrets forget
 previewhost secrets set shop/dev/token
 previewhost secrets set shop/dev/token --stdin
-previewhost secrets list
+previewhost secrets list [--query TEXT] [--after REFERENCE]
 previewhost secrets remove shop/dev/token
 ```
 
 Setup/edit/status use the daemon and accept `--endpoint` and `--token-file`.
 Init/remember/forget/set/list/remove operate directly on user entries without a daemon and never change
 its selection. They cannot modify internal database credentials.
+
+List returns `{ids, next?}` with at most 128 names. Search is case-insensitive and runs across all user references before pagination.
+Pass `next` as `--after` with the same query to continue. Pages read current storage; new names before the cursor appear when listing from the start.
 
 Commands unlock their own session through hidden password input when needed.
 `init` requires a password of at least 12 characters and confirmation.

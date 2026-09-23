@@ -77,7 +77,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(input.spec.command[0])) {
     throw new PreviewError('INVALID_INPUT', 'Windows batch files require an explicit cmd.exe command. Use node.exe with the script path to preserve literal arguments.');
   }
-  if (process.platform !== 'win32') await Promise.all(['/bin/ps', lsofPath()].map((name) => access(name, constants.X_OK)));
+  if (process.platform !== 'win32') await Promise.all(nativeTools().map((name) => access(name, constants.X_OK)));
   throwIfAborted(input.signal);
   const port = job ? 0 : await availablePort();
   throwIfAborted(input.signal);
@@ -390,3 +390,6 @@ async function waitForGroupAbsence(group: number, timeoutMs: number): Promise<bo
 }
 
 function lsofPath(): string { return process.platform === 'darwin' ? '/usr/sbin/lsof' : '/usr/bin/lsof'; }
+
+/** Files checked before launching native jobs or services. */
+export function nativeTools(): string[] { return process.platform === 'win32' ? [] : ['/bin/ps', lsofPath()]; }

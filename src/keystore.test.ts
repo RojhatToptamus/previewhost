@@ -28,6 +28,34 @@ async function fixture(t: TestContext) {
   return { directory, store, session };
 }
 
+test('name search and bounded continuation cover every reference without retrieving individual values', async t => {
+  const { store, session } = await fixture(t);
+  const names = Array.from({ length: 260 }, (_, index) => `project/dev/ref-${String(index).padStart(3, '0')}`);
+  for (const id of names) await store.set('user', id, 'FAKE_value');
+  await store.set('database', 'a'.repeat(32), 'FAKE_database');
+  t.mock.method(store, 'get', async () => { throw new Error('Browsing must not resolve individual values'); });
+  const first = await store.list();
+  assert.deepEqual(first, { ids: names.slice(0, 128), next: names[127] });
+  assert.deepEqual(await store.list({ query: ' REF-259 ' }), { ids: [names[259]] });
+  assert.deepEqual(await store.list({ query: 'not-present' }), { ids: [] });
+  assert.deepEqual(await store.list({ query: 'REF-', after: first.next }), { ids: names.slice(128, 256), next: names[255] });
+  assert.deepEqual(await store.list({ after: names[255] }), { ids: names.slice(256) });
+  // Name cursors do not shift when another unlocked session inserts or removes earlier entries.
+  const writer = session(); await writer.unlock({ password });
+  await writer.remove('user', names[127]);
+  await writer.set('user', 'project/dev/ref-000-new', 'FAKE_new');
+  await writer.set('user', 'project/dev/ref-999', 'FAKE_new');
+  assert.deepEqual((await store.list({ after: first.next })).ids, names.slice(128, 256));
+  assert.deepEqual(await store.list({ after: names[255] }), { ids: [...names.slice(256), 'project/dev/ref-999'] });
+  assert.ok((await store.list()).ids.includes('project/dev/ref-000-new'));
+  assert.ok(!JSON.stringify(await store.list()).includes('FAKE_'));
+  await assert.rejects(store.list({ after: 'invalid cursor' }), { code: 'INVALID_INPUT' });
+  await assert.rejects(store.list({ query: 'x'.repeat(129) }), { code: 'INVALID_INPUT' });
+  await assert.rejects(store.list({ signal: AbortSignal.abort() }), { code: 'CLOSED' });
+  store.lock();
+  await assert.rejects(store.list({ after: first.next }), { code: 'SECRET_STORE_UNAVAILABLE' });
+});
+
 test('encrypted values, exact references, separate namespaces, restart and backup recovery', async t => {
   const { directory, store, session } = await fixture(t);
   const value = '\ufeffFAKE_secret_ü\nline two \n';
@@ -37,7 +65,7 @@ test('encrypted values, exact references, separate namespaces, restart and backu
   assert.equal(await store.get('user', 'project/dev/api'), value);
   assert.equal(await store.get('user', 'constructor'), 'FAKE_constructor');
   assert.equal(await store.get('user', 'toString'), undefined);
-  assert.deepEqual(await store.list(), { ids: ['constructor', 'project/dev/api'], truncated: false });
+  assert.deepEqual(await store.list(), { ids: ['constructor', 'project/dev/api'] });
   for (const invalid of ['', 'a\0b', '\ud800', '🙂'.repeat(1025)]) assert.throws(() => validateSecretValue(invalid));
   for (const file of await readdir(directory)) {
     const contents = await readFile(join(directory, file));
