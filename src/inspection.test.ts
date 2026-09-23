@@ -107,7 +107,8 @@ test('offline inspect checks the selected Docker endpoint using GET only, withou
   await client.inspect({ name: 'static', type: 'static', directory });
   assert.equal(requests.length, count, 'Static previews do not need Docker.');
   await writeFile(join(directory, 'ordinary-file'), 'not a socket');
-  const unavailable = connectProject({ projectDirectory: directory, dockerSocket: join(directory, 'ordinary-file') });
+  const unavailableEndpoint = process.platform === 'win32' ? `${endpoint}-missing` : join(directory, 'ordinary-file');
+  const unavailable = connectProject({ projectDirectory: directory, dockerSocket: unavailableEndpoint });
   t.after(() => unavailable.close());
   assert.equal((await unavailable.inspect(spec)).prerequisites?.[0].requirement, 'docker');
   assert.equal(await readFile(join(directory, 'ordinary-file'), 'utf8'), 'not a socket');
