@@ -71,6 +71,11 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await page.clock.install();
     await page.goto(launch);
     await expect(page).toHaveTitle("Previews · Previewhost");
+    // Open each entry once; recent navigation resolves actions from current owner data.
+    for (const name of ["storefront-checkout", "storefront-payments"]) {
+      await page.locator(".overview-table .preview-name").filter({ hasText: name }).click();
+      await page.getByRole("button", { name: "Overview", exact: true }).click();
+    }
     const nav = page.locator('[data-slot="sidebar-content"]');
     await expect(nav.getByRole("button", { name: /^Actions for/ })).toHaveCount(
       2,
@@ -112,12 +117,12 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
-    const sheet = page.getByRole("dialog");
-    await sheet.getByRole("combobox", { name: "Filter previews" }).click();
+    await page.getByRole("combobox", { name: "Filter previews" }).click();
     await page
       .getByRole("option", { name: "Needs attention", exact: true })
       .click();
+    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+    const sheet = page.getByRole("dialog");
     await expect(
       sheet.getByRole("button", { name: /^Actions for/ }),
     ).toHaveCount(2);
@@ -182,14 +187,26 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
       .getByRole("button", { name: "Actions for storefront-payments" })
       .click();
     await page.getByRole("menuitem", { name: "Recheck status" }).click();
-    await expect(sheet.locator(".preview-nav")).toHaveCount(0);
+    await expect(sheet.locator(".preview-nav")).toHaveCount(1);
+    await sheet.getByRole("button", { name: "Actions for storefront-payments" }).click();
+    await page.getByRole("menuitem", { name: "Remove entry…" }).click();
+    await expect(dialog.getByRole("button", { name: "Remove entry", exact: true })).toBeDisabled();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await sheet.locator(".preview-nav").click();
+    await expect(page.getByRole("button", { name: "payments", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "payments", exact: true }).click();
+    await expect(page.getByRole("article", { name: "Preview details" })).toContainText("Ready");
     await page.clock.resume();
-    await sheet.getByRole("combobox", { name: "Filter previews" }).focus();
+    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+    await sheet.getByRole("button", { name: "Overview", exact: true }).click();
+    await page.getByRole("combobox", { name: "Filter previews" }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("option", { name: "Needs attention", exact: true })).toBeFocused();
     await page.keyboard.press("Home");
     await expect(page.getByRole("option", { name: "All statuses", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
+    await page.locator(".overview-table .preview-name").click();
+    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
     await expect(sheet.locator(".preview-nav")).toContainText("Ready");
     await expect(
       sheet.getByRole("button", { name: "Actions for payments" }),

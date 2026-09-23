@@ -20,8 +20,13 @@ It does not start owners or grant execution permissions.
 
 ![Preview overview with separate Storefront worktrees](../assets/dashboard-worktrees.png)
 
-Use search and the status filter to narrow the list. Active previews appear first. Each row has its own action menu.
-Use the source path to distinguish worktrees. **Open app** opens the serving attempt, even if a later update failed.
+**Overview** lists project folders and their previews. Search by folder, preview name, or a source path;
+use the status filter to find active work or failures. Active previews appear first, with newer attempts first.
+Matching folder names show a distinguishing parent path. Names never merge unrelated projects.
+Click a folder name to open that row's preview. **Open app** opens the serving attempt, even if a later update failed.
+
+The sidebar keeps your eight most recently opened previews in this browser tab. Overview filters
+leave these shortcuts visible. Both lists have the same environment actions.
 The list fills as project checks finish. Refresh checks the selected project before the rest.
 Browser Back returns to the previous view. Each preview keeps its diagnostic selections
 for this browser session, including after reload. Runtime information is fetched again.

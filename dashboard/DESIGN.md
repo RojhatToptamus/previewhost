@@ -84,18 +84,27 @@ A preview has one persistent identity and action header, followed immediately by
 
 Keep the brand at the left of the sidebar header area and its toggle at the right edge. Keep the toggle available when the sidebar is collapsed. Use a 24px desktop content gutter and 16px narrow-screen gutter. Avoid breadcrumbs that only repeat the selected view.
 
-The expanded sidebar and its brand header share a surface and right boundary. Use 12px sidebar gutters, 4px between navigation rows, 16px before search, and 8px between search and its filter.
+The expanded sidebar and its brand header share a surface and right boundary. Use 12px sidebar gutters and 4px between navigation rows.
 
-A preview name opens its details with one click. Keep the worktree path adjacent so previews with similar names remain distinguishable.
+The sidebar provides Overview, Secret Manager, and up to eight recently opened previews.
+Recent means visited in this browser tab, not recently modified source. Store only owner/name
+references; resolve status and actions from current API data. Overview filters never hide recent navigation.
 
-Group search and the compact status filter between navigation and the scrolling list. Opening details preserves both.
-Order active work first, then entries that need attention, with stable path/name ordering.
-Each sidebar row has a separate action menu; using it must not navigate to that preview.
-Keep each action trigger inside its row, aligned with the preview name. Show the path
-and status below the name. Reuse the same actions in the overview and details.
-Every entry offers Recheck status and Remove entry. Removal explains blockers in its
-review; an unreachable owner never counts as stopped. The server rechecks cleanup
-evidence and rejects changed records before removal.
+Overview owns the complete inventory, search, and status filter. Compare project folders,
+preview names, status, and the last startup attempt. Keep different preview names below
+the folder identity; omit a repeated name unless the folder has multiple previews. Put active work first,
+then entries needing attention; sort recent attempts first within each group. A project folder
+is not necessarily a repository, and one preview may use several source repositories.
+Never group owners by matching display names.
+
+Use a folder basename with the shortest distinguishing parent suffix. Keep the complete path in details and accessible control context. Long distinguishing suffixes
+may wrap in the overview; recent rows truncate them. A folder name opens that row's preview details.
+
+Each row has a separate action menu; using it must not navigate. Keep sidebar action triggers
+inside their rows, aligned with the name. Reuse the same actions in overview and details.
+Every entry offers Recheck status and Remove entry. Removal explains blockers in its review;
+an unreachable owner never counts as stopped. The server rechecks cleanup evidence and rejects
+changed records before removal.
 
 Paths stay on one line. Let parent directories truncate while preserving the final segments at full contrast. Use the shared `Path` component; never use right-to-left text direction to fake truncation.
 

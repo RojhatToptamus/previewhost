@@ -108,11 +108,38 @@ export function state(entry: Entry) {
           : "",
   };
 }
-export function shortProject(owner: Owner) {
-  return (
-    owner.project?.split("/").filter(Boolean).at(-1) ?? "Unavailable owner"
-  );
+function pathSegments(path?: string) {
+  return path?.split(path.startsWith("/") ? "/" : /[\\/]/).filter(Boolean) ?? [];
 }
+
+export function shortProject(owner: Owner) {
+  return pathSegments(owner.project).at(-1) ?? "Unavailable owner";
+}
+export type ProjectLabel = { name: string; qualifier: string };
+
+/** Display labels only. Matching paths never merge owners or grant access. */
+export function projectLabels(owners: Owner[]): Map<string, ProjectLabel> {
+  const parts = owners.map(owner => pathSegments(owner.project));
+  return new Map(owners.map((owner, index) => {
+    const path = parts[index];
+    if (!path.length) return [owner.id, { name: "Unverified project", qualifier: owner.id.slice(0, 12) }];
+    let depth = 1;
+    while (depth < path.length && parts.some((other, i) =>
+      i !== index && other.slice(-depth).join("/") === path.slice(-depth).join("/"),
+    )) depth++;
+    return [owner.id, { name: path.at(-1)!, qualifier: path.slice(-depth, -1).join("/") }];
+  }));
+}
+
+export function previewDetail(entry: Entry, label: ProjectLabel) {
+  const name = entry.name !== label.name || entries(entry.owner).length > 1 ? entry.name : undefined;
+  return [label.qualifier, name].filter(Boolean).join(" · ");
+}
+
+export function lastAttempt(entry: Entry) {
+  return entry.preview?.candidate ?? entry.preview?.latest ?? entry.preview?.active;
+}
+
 export function entries(owner: Owner): Entry[] {
   const names = [
     ...new Set([
@@ -190,11 +217,13 @@ export function visibleEntries(
     isActive(entry) ? 0 : needsAttention(entry) ? 1 : 2;
   return owners
     .flatMap(entries)
-    .filter(
-      (entry) =>
-        `${entry.owner.project ?? ""} ${entry.name ?? ""}`
-          .toLowerCase()
-          .includes(search) &&
+    .filter((entry) => {
+      const sources = [
+        ...attempts(entry.preview).flatMap(attempt => attempt.sources),
+        ...(entry.preview?.cleanup?.flatMap(item => item.sources) ?? []),
+      ];
+      const searchable = [entry.owner.project ?? entry.owner.id, entry.name, ...sources].join(" ");
+      return searchable.toLowerCase().includes(search) &&
         (filter === "all" ||
           (filter === "active" && isActive(entry)) ||
           (filter === "attention" && needsAttention(entry)) ||
@@ -202,11 +231,12 @@ export function visibleEntries(
             !entry.owner.error &&
             !isActive(entry) &&
             !pending(entry).length &&
-            !needsCleanup(entry.preview))),
-    )
+            !needsCleanup(entry.preview)));
+    })
     .sort(
       (a, b) =>
         rank(a) - rank(b) ||
+        (lastAttempt(b)?.startedAt ?? "").localeCompare(lastAttempt(a)?.startedAt ?? "") ||
         (a.owner.project ?? a.owner.id).localeCompare(
           b.owner.project ?? b.owner.id,
         ) ||

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-export type Selection = { owner: string; name?: string } | "secrets" | undefined;
+export type PreviewSelection = { owner: string; name?: string };
+export type Selection = PreviewSelection | "secrets" | undefined;
 export type PreviewView = {
   tab: "activity" | "logs" | "configuration";
   attemptId?: string;
@@ -11,19 +12,39 @@ export type PreviewView = {
   clearAfter?: number;
 };
 
+function isPreviewSelection(value: unknown): value is PreviewSelection {
+  return !!value && typeof value === "object" && "owner" in value &&
+    typeof value.owner === "string" && /^[a-f0-9]{64}$/.test(value.owner) &&
+    (!("name" in value) || value.name === undefined || typeof value.name === "string");
+}
+
 function selectionFromHistory(): Selection {
   const value = history.state?.previewhost;
   if (value === "secrets") return value;
-  if (
-    value && /^[a-f0-9]{64}$/.test(value.owner) &&
-    (value.name === undefined || typeof value.name === "string")
-  ) {
+  if (isPreviewSelection(value)) {
     return { owner: value.owner, name: value.name };
   }
 }
 
 export function useSelection() {
   const [selection, setSelection] = useState(selectionFromHistory);
+  const [recent, setRecent] = useState<PreviewSelection[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(sessionStorage.getItem("previewhost.recent") ?? "[]");
+      return Array.isArray(saved) ? saved.filter(isPreviewSelection).slice(0, 8)
+        .map(({ owner, name }) => ({ owner, name })) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    if (!isPreviewSelection(selection)) return;
+    setRecent(current => [selection, ...current.filter(item =>
+      item.owner !== selection.owner || (item.name !== selection.name && item.name !== undefined),
+    )].slice(0, 8));
+  }, [selection]);
+  useEffect(() => {
+    try { sessionStorage.setItem("previewhost.recent", JSON.stringify(recent)); }
+    catch { /* Quick navigation still works without storage. */ }
+  }, [recent]);
   useEffect(() => {
     const restore = () => setSelection(selectionFromHistory());
     window.addEventListener("popstate", restore);
@@ -34,7 +55,7 @@ export function useSelection() {
     history.pushState({ previewhost: value }, "", "/");
     setSelection(value);
   }
-  return [selection, select] as const;
+  return [selection, select, recent] as const;
 }
 
 // Only presentation choices belong here. Runtime data and authorization stay in the API.

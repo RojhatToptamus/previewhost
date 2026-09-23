@@ -686,7 +686,7 @@ The authenticated owner client also supports:
 observed attempt IDs (or `null`) before changing state. A mismatch returns
 `STALE_ATTEMPT`. The dashboard always supplies this guard. CLI and MCP calls can omit this guard. MCP forwards it when supplied.
 
-The sidebar and overview share the preview action menu. Search remains set when
+Recent sidebar shortcuts and overview rows share the preview action menu. Search remains set when
 opening details. Status filters and active-first ordering keep running work easy to find.
 Discovery reads owners in bounded pages; an unavailable owner does not hide others.
 

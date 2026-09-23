@@ -163,18 +163,22 @@ export function PreviewMenu({
 
   const actions =
     managementOnly || owner.offline || owner.error ? [] : previewActions(entry);
+  const hasPreviews = name === undefined && !!owner.previews?.length;
+  const hasPendingSetup = name === undefined
+    ? owner.requests?.some(request => request.state === "pending" || request.state === "saving")
+    : !!pending(entry).length;
   const idle =
     !p?.active &&
     !p?.candidate &&
     !p?.busy &&
     !p?.url &&
-    !pending(entry).length;
+    !hasPendingSetup;
   const canDelete =
     !owner.error &&
     idle &&
     p?.data &&
     (!needsCleanup(p) || deletionNeedsRetry(p));
-  const canRemove = idle && !p?.data && !needsCleanup(p);
+  const canRemove = !hasPreviews && idle && !p?.data && !needsCleanup(p);
   const reset = owner.error ? undefined : resetRequest(entry);
   const [checking, setChecking] = useState(false);
   async function reviewRemoval() {
@@ -198,13 +202,15 @@ export function PreviewMenu({
         ...request,
         blocked: canRemove
           ? undefined
-          : pending(entry).length
-            ? "Finish or cancel private setup first."
-            : !idle
-              ? "Stop this preview before removing its entry."
-              : needsCleanup(p)
-                ? "Resolve incomplete cleanup before removing this entry."
-                : "Delete the retained managed data before removing this entry.",
+          : hasPreviews
+            ? "Open this project's previews to manage or remove their entries first."
+            : hasPendingSetup
+              ? "Finish or cancel private setup first."
+              : !idle
+                ? "Stop this preview before removing its entry."
+                : needsCleanup(p)
+                  ? "Resolve incomplete cleanup before removing this entry."
+                  : "Delete the retained managed data before removing this entry.",
       });
       return;
     }

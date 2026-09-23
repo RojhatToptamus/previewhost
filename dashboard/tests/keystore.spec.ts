@@ -104,8 +104,8 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
     expect(await runtime.list()).toEqual([]);
     expect((await client.secretsStatus(expired.id)).state).toBe("expired");
-    await expect(page.locator(".preview-nav")).toHaveCount(1);
-    await page.locator(".preview-nav").filter({ hasText: "sample" }).click();
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page.locator('.overview-table .preview-name[aria-label$=" · sample"]').click();
     const privateSetup = page.locator("section").filter({ has: page.getByRole("heading", { name: "Private setup", exact: true }) });
     await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toBeVisible();
     await expect(privateSetup.getByText("Expired", { exact: true })).toHaveCount(0);
