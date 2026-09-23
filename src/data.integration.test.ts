@@ -118,7 +118,7 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
       setInterval(()=>{},10000);
     `;
     child = spawn(process.execPath, ['--input-type=module', '-e', script, directory, dockerSocket!, marker], { stdio: ['ignore', 'pipe', 'pipe'] });
-    await childReady(child);
+    await childReady(child, t.signal);
     await assert.rejects(createDataOwner({ directory, dockerSocket }), { code: 'BUSY' });
     const before = JSON.parse(await readFile(join(directory, 'sample.json'), 'utf8'));
     child.kill('SIGKILL'); await once(child, 'close');
@@ -213,13 +213,43 @@ async function bounded<T>(work: Promise<T>, ms: number): Promise<T> {
   try { return await Promise.race([work, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Fixture deadline exceeded.')), ms); })]); }
   finally { clearTimeout(timer); }
 }
-async function childReady(child: ChildProcess) {
+async function childReady(child: ChildProcess, signal: AbortSignal) {
   let output = '';
   let errorOutput = '';
-  await bounded(new Promise<void>((resolve, reject) => {
-    child.stdout!.on('data', (chunk: Buffer) => { output += chunk.toString(); if (output.includes('ready\n')) resolve(); });
-    child.stderr!.on('data', (chunk: Buffer) => { errorOutput = `${errorOutput}${chunk}`.slice(-4096); });
-    child.once('error', reject);
-    child.once('exit', () => reject(new Error(`Database fixture child exited before ready: ${errorOutput}`)));
-  }), 40_000);
+  // The test owns the deadline for both database starts, writes, crash and recovery.
+  // A separate child deadline can expire while those valid operations still run.
+  await new Promise<void>((resolve, reject) => {
+    const data = (chunk: Buffer) => { output += chunk.toString(); if (output.includes('ready\n')) finish(); };
+    const stderr = (chunk: Buffer) => { errorOutput = `${errorOutput}${chunk}`.slice(-4096); };
+    const exit = () => finish(new Error(`Database fixture child exited before ready: ${errorOutput}`));
+    const abort = () => finish(signal.reason);
+    function finish(error?: Error) {
+      child.stdout!.off('data', data);
+      child.stderr!.off('data', stderr);
+      child.off('error', finish);
+      child.off('exit', exit);
+      signal.removeEventListener('abort', abort);
+      if (error) reject(error); else resolve();
+    }
+    child.stdout!.on('data', data);
+    child.stderr!.on('data', stderr);
+    child.once('error', finish);
+    child.once('exit', exit);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    else if (child.exitCode !== null || child.signalCode !== null) exit();
+  });
 }
+
+test('canceling fixture readiness releases observation before the child is joined', { timeout: 5000 }, async () => {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const exited = once(child, 'close');
+  try {
+    const controller = new AbortController();
+    const waiting = childReady(child, controller.signal);
+    controller.abort(new Error('test canceled'));
+    await assert.rejects(waiting, /test canceled/);
+    assert.equal(child.stdout!.listenerCount('data'), 0);
+    assert.equal(child.stderr!.listenerCount('data'), 0);
+  } finally { child.kill('SIGKILL'); await exited; }
+});
