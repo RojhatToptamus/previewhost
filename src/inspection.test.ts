@@ -19,9 +19,11 @@ async function fixture(t: TestContext) {
 }
 
 test('inspect reports missing commands without running them and allows job-prepared executables', { timeout: 30_000 }, async t => {
+  let runtime: Awaited<ReturnType<typeof createPreviewRuntime>> | undefined;
+  // Stop the copied executable before fixture cleanup, including when an assertion fails.
+  t.after(() => runtime?.close());
   const directory = await fixture(t);
-  const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => true });
-  t.after(() => runtime.close());
+  runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => true });
   const executable = process.platform === 'win32' ? 'prepared.exe' : 'prepared';
   await writeFile(join(directory, 'server.mjs'), `import http from 'node:http'; http.createServer((_req,res)=>res.end('prepared')).listen(Number(process.env.PORT),process.env.HOST);`);
   const spec: PreviewSpec = { name: 'prepared', type: 'environment', primary: 'web', services: {
