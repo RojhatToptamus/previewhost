@@ -26,6 +26,14 @@ type Props = {
   acting: boolean;
   openLogs: (attempt: AttemptSummary, source?: string) => void;
 };
+const setupLabels = {
+  pending: "Awaiting approval or entry",
+  saving: "Saving",
+  complete: "Complete",
+  partial: "Incomplete",
+  canceled: "Canceled",
+  expired: "Expired",
+};
 const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1);
 const types: Record<string, string> = {
   command: "HTTP",
@@ -47,6 +55,14 @@ export function Activity(props: Props) {
   const { entry, mutate, acting, openLogs } = props;
   const { owner, preview: p } = entry;
   const latest = p?.candidate ?? p?.latest;
+  const setupRequests = requests(entry);
+  const openRequests = pending(entry);
+  const currentRequests = openRequests.length
+    ? openRequests
+    : setupRequests.slice(-1);
+  const previousRequests = setupRequests
+    .filter((request) => !currentRequests.includes(request))
+    .reverse();
   const failedJob = Object.values(latest?.services ?? {}).some(
     (service) => service.type === "job" && service.state === "failed",
   );
@@ -63,7 +79,7 @@ export function Activity(props: Props) {
           Some owned resources could not be confirmed stopped. Inspect the
           details before retrying cleanup.
         </Notice>
-      ) : pending(entry).length ? (
+      ) : openRequests.length ? (
         <Notice title="Private setup requested">
           Approve access or enter missing values in the private form. Cancel
           there.
@@ -162,28 +178,20 @@ export function Activity(props: Props) {
           {p.data?.cleanup && <p>{p.data.cleanup.message}</p>}
         </Notice>
       )}
-      {!!requests(entry).length && (
+      {!!setupRequests.length && (
         <Section title="Private setup">
-          {requests(entry).map((request) => (
+          {currentRequests.map((request) => (
             <div key={request.id} className="request">
               <strong>
-                {
-                  {
-                    pending: "Awaiting approval or entry",
-                    saving: "Saving",
-                    complete: "Complete",
-                    partial: "Partly saved",
-                    canceled: "Canceled",
-                    expired: "Expired",
-                  }[request.state]
-                }
+                {!openRequests.length && "Latest request: "}
+                {setupLabels[request.state]}
               </strong>
               {["pending", "saving"].includes(request.state) && (
                 <time>
                   Expires {new Date(request.expiresAt).toLocaleTimeString()}
                 </time>
               )}
-              {request.state === "pending" && pending(entry).length > 1 && (
+              {request.state === "pending" && openRequests.length > 1 && (
                 <Button
                   variant="outline"
                   disabled={acting}
@@ -206,26 +214,34 @@ export function Activity(props: Props) {
                   The browser did not open. Try opening the private form again.
                 </p>
               )}
-              {request.state === "complete" && (
-                <p>
-                  If your agent ended its turn, send “Secrets saved—continue” in
-                  that chat.
-                </p>
-              )}
               {request.state === "canceled" && (
                 <p>
-                  Setup stopped. Ask your agent for a new request only when you
+                  This request was canceled. Ask for new setup only when you
                   want to continue.
                 </p>
               )}
-              {["expired", "partial"].includes(request.state) && (
+              {request.state === "expired" && (
                 <p>
-                  Ask your agent to check setup and request any remaining
-                  values.
+                  If setup is still needed, ask your agent for a new request.
+                </p>
+              )}
+              {request.state === "partial" && (
+                <p>
+                  Ask your agent to check this request’s result before continuing.
                 </p>
               )}
             </div>
           ))}
+          {!!previousRequests.length && (
+            <details>
+              <summary>Request history ({previousRequests.length})</summary>
+              {previousRequests.map((request) => (
+                <div key={request.id} className="request">
+                  <strong>{setupLabels[request.state]}</strong>
+                </div>
+              ))}
+            </details>
+          )}
         </Section>
       )}
     </>

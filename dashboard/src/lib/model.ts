@@ -83,7 +83,7 @@ export function state(entry: Entry) {
     return {
       label: "Not started",
       tone: "muted",
-      note: requests(entry).some((r) => r.state === "canceled")
+      note: requests(entry).at(-1)?.state === "canceled"
         ? "Private setup canceled"
         : "",
     };

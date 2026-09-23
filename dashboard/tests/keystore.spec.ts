@@ -1,7 +1,11 @@
 import { test, expect } from "@playwright/test";
+import { mock } from "node:test";
+import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { state, type Entry } from "../src/lib/model";
 
 const { createPreviewRuntime } = await import(new URL("../../dist/runtime.js", import.meta.url).href) as typeof import("../../src/runtime");
 const { startDaemon } = await import(new URL("../../dist/daemon.js", import.meta.url).href) as typeof import("../../src/daemon");
@@ -37,9 +41,15 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     runtime = await createPreviewRuntime({ allowedRoots: [project], authorize: () => true });
     other = await createPreviewRuntime({ allowedRoots: [project], authorize: () => true });
     const tokenFile = join(directory, "control", "token");
-    daemon = await startDaemon({ runtime, tokenFile, port: 0 });
+    daemon = await startDaemon({ runtime, tokenFile, port: 0, owner: {
+      projectDirectory: project, pid: process.pid, allowedRoots: [project], allowExec: true, inputKeys: [], secretIds: [],
+    } });
     client = connectPreviewDaemon({ endpoint: daemon.endpoint, tokenFile });
-    dashboard = await startDashboard({ discover: async () => [], openBrowser: async url => { dashboardUrl = url; } });
+    const discover = async () => [{
+      id: createHash("sha256").update(project).digest("hex"), tokenFile,
+      connection: { endpoint: daemon!.endpoint, pid: process.pid, projectDirectory: project },
+    }];
+    dashboard = await startDashboard({ discover, openBrowser: async url => { dashboardUrl = url; } });
     await dashboard.open();
     await page.goto(dashboardUrl);
     await page.getByRole("button", { name: "Secret Manager", exact: true }).click();
@@ -58,7 +68,19 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     expect((await runtime.keystore.status()).state).toBe("locked");
 
     const spec = { name: "sample", type: "command" as const, cwd: project, command: [process.execPath, "app.mjs"], env: { APP_TOKEN: { secret: "project/dev/token" } } };
+    const expired = await client.secretsSetup(spec);
+    const expiredUrl = privateUrl;
+    const clock = mock.method(Date, "now", () => Date.parse(expired.expiresAt) + 1);
+    try { expect((await client.secretsStatus(expired.id)).state).toBe("expired"); }
+    finally { clock.mock.restore(); }
+    await setup.goto(expiredUrl);
+    await expect(setup.getByRole("heading", { name: "Private setup unavailable" })).toBeVisible();
+    expect((await runtime.inspect(spec)).secrets![0].selected).toBe(false);
+    // Browser launches have a one-second rate limit, independent of expiry.
+    await delay(1001);
     const request = await client.secretsSetup(spec);
+    expect(request.id).not.toBe(expired.id);
+    await setup.goto("about:blank");
     await setup.goto(privateUrl);
     await expect(setup.getByRole("heading", { name: "Allow these secret names?" })).toBeVisible();
     await expect(setup.locator("#fields")).toContainText("APP_TOKEN");
@@ -79,13 +101,43 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     await setup.getByRole("button", { name: "Save secrets", exact: true }).click();
     await expect(setup.getByRole("heading", { name: "Secret setup complete" })).toBeVisible();
     expect((await client.secretsStatus(request.id)).state).toBe("complete");
+    page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
     expect(await runtime.list()).toEqual([]);
+    expect((await client.secretsStatus(expired.id)).state).toBe("expired");
+    await expect(page.locator(".preview-nav")).toHaveCount(1);
+    await page.locator(".preview-nav").filter({ hasText: "sample" }).click();
+    const privateSetup = page.locator("section").filter({ has: page.getByRole("heading", { name: "Private setup", exact: true }) });
+    await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toBeVisible();
+    await expect(privateSetup.getByText("Expired", { exact: true })).toBeHidden();
+    await privateSetup.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(privateSetup.getByText("Expired", { exact: true })).toBeVisible();
+    await expect(privateSetup).not.toContainText("request any remaining values");
+    await page.keyboard.press("Enter");
     expect((await other.keystore.status()).state).toBe("locked");
     expect((await other.inspect(spec)).secrets![0].selected).toBe(false);
     const started = await runtime.start(spec);
     const ready = await runtime.wait(spec.name, started.candidate!.id);
     expect(ready.state).toBe("ready");
     expect(await (await fetch(ready.url!)).text()).toBe("FAKE_original");
+    await expect(page.getByRole("link", { name: "Open app", exact: true })).toBeVisible();
+    await expect(privateSetup).not.toContainText("Secrets saved");
+    await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toBeVisible();
+    // A later completed request must not hide a different form that still needs approval.
+    const extra = { ...spec, env: { EXTRA: { secret: "project/dev/extra" } } };
+    const pending = await client.secretsSetup(extra);
+    expect((await client.secretsSetup(spec)).state).toBe("complete");
+    await expect(privateSetup.getByText("Awaiting approval or entry", { exact: true })).toBeVisible();
+    await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toHaveCount(0);
+    expect((await client.secretsStatus(pending.id)).state).toBe("pending");
+    expect((await runtime.inspect(extra)).secrets![0].selected).toBe(false);
+    await setup.goto("about:blank");
+    await setup.goto(privateUrl);
+    await setup.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(setup.getByRole("heading", { name: "Secret setup canceled" })).toBeVisible();
+    expect((await client.secretsStatus(pending.id)).state).toBe("canceled");
+    await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Secret Manager", exact: true }).click();
 
     const edit = page.getByRole("button", { name: "Edit project/dev/token", exact: true });
     await expect(edit).toBeVisible(); await edit.click();
@@ -132,4 +184,15 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("a later completed setup does not keep an old cancellation in the preview status", () => {
+  const canceled = { id: "first", name: "sample", mode: "missing" as const, state: "canceled" as const,
+    browser: "opened" as const, expiresAt: "2026-01-01T00:05:00Z" };
+  const entry: Entry = { name: "sample", owner: { id: "owner", requests: [canceled] } };
+  expect(state(entry).note).toBe("Private setup canceled");
+  entry.owner.requests!.push({ ...canceled, id: "second", state: "complete" });
+  expect(state(entry)).toEqual({ label: "Not started", tone: "muted", note: "" });
+  entry.owner.requests!.push({ ...canceled, id: "third" });
+  expect(state(entry).note).toBe("Private setup canceled");
 });
