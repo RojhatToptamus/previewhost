@@ -397,15 +397,14 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
       catch (error) { if (!(error instanceof PreviewError) || error.code !== 'DAEMON_UNAVAILABLE') throw error; }
       // Offline inspection must not create a permissionless owner that blocks later authorized startup.
       const launch = await launchOptions(options, await project);
-      const { createPreviewRuntime } = await import('./runtime.js');
-      const runtime = await createPreviewRuntime({ allowedRoots: launch.info.allowedRoots, inputs: launch.inputs, secretIds: launch.info.secretIds });
-      try {
-        for (const directory of [projectOwnerDirectory(await project), ...(launch.info.dataDirectory ? [launch.info.dataDirectory] : [])]) {
-          const exists = await lstat(directory).catch(error => { if (error.code !== 'ENOENT') throw error; return undefined; });
-          if (exists) await runtime.protectDirectory(directory);
-        }
-        return await runtime.inspect(spec);
-      } finally { await runtime.close(); }
+      const { inspectPreviewSpec, runtimeContext } = await import('./inspection.js');
+      const privateDirectories = new Set([new Keystore().directory]);
+      for (const directory of [projectOwnerDirectory(await project), ...(launch.info.dataDirectory ? [launch.info.dataDirectory] : [])]) {
+        const exists = await lstat(directory).catch(error => { if (error.code !== 'ENOENT') throw error; return undefined; });
+        if (exists) privateDirectories.add(await canonicalDirectory(directory));
+      }
+      const context = await runtimeContext({ ...launch.info, inputs: launch.inputs });
+      return inspectPreviewSpec(spec, { ...context, dataDirectory: launch.info.dataDirectory, dockerSocket: launch.info.dockerSocket }, privateDirectories);
     },
     start: spec => call(true, client => client.start(spec)),
     replace: (name, spec) => call(true, client => client.replace(name, spec)),

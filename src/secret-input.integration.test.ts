@@ -66,7 +66,9 @@ test('CLI stdin preserves exact UTF-8 bytes in the shared store and rejects inva
     assert.ok(!rejected.stderr.includes('FAKE_'));
   }
   const listed = await cli(['secrets', 'list']);
-  assert.deepEqual(JSON.parse(listed.stdout), { ids: ['owner/value'], truncated: false });
+  assert.deepEqual(JSON.parse(listed.stdout), { ids: ['owner/value'] });
+  assert.deepEqual(JSON.parse((await cli(['secrets', 'list', '--query', 'OWNER'])).stdout), { ids: ['owner/value'] });
+  assert.deepEqual(JSON.parse((await cli(['secrets', 'list', '--after', 'owner/value'])).stdout), { ids: [] });
   assert.ok(!listed.stdout.includes('FAKE_'));
   assert.equal((await cli(['secrets', 'remove', 'owner/value'])).code, 0);
   assert.equal(await fixture.store.has('user', 'owner/value'), false);

@@ -11,7 +11,7 @@ import { readBody } from './daemon.js';
 import { failure, PreviewError, throwIfAborted } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
 import { reviewStaleProject, removeStaleProject, projectRecordSchema, deleteOfflineData, offlinePreviews, removeOfflineProject, discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
-import { Keystore, unlockSchema } from './keystore.js';
+import { Keystore, secretListSchema, unlockSchema } from './keystore.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
@@ -19,7 +19,7 @@ const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('recheck'), owner: ownerId }),
   z.strictObject({ action: z.literal('reviewRemoval'), owner: ownerId }),
   z.strictObject({ action: z.literal('removeStale'), owner: ownerId, expected: projectRecordSchema, cleanupVerified: z.literal(true) }),
-  z.strictObject({ action: z.literal('listSecrets') }),
+  secretListSchema.extend({ action: z.literal('listSecrets') }),
   unlockSchema.extend({ action: z.literal('unlockKeystore') }),
   z.strictObject({ action: z.enum(['rememberKeystore', 'forgetKeystore']) }),
   z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
@@ -115,13 +115,13 @@ export async function startDashboard(options: {
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
     const p = parsed.data;
-    if (['listSecrets', 'unlockKeystore', 'rememberKeystore', 'forgetKeystore'].includes(p.action)) {
+    if (p.action === 'listSecrets' || p.action === 'unlockKeystore' || p.action === 'rememberKeystore' || p.action === 'forgetKeystore') {
       const work = (async () => {
         if (p.action === 'unlockKeystore') { const { action: _, ...input } = p; return store.unlock(input, { signal }); }
         if (p.action === 'rememberKeystore') { await store.remember({ signal }); return {}; }
         if (p.action === 'forgetKeystore') { await store.forget({ signal }); return {}; }
         const keystore = await store.status({ signal });
-        return { ...(keystore.state === 'unlocked' ? await store.list({ signal }) : { ids: [], truncated: false }), keystore };
+        return { ...(keystore.state === 'unlocked' ? await store.list({ ...p, signal }) : { ids: [] }), keystore };
       })();
       updates.add(work);
       try { return await work; } finally { updates.delete(work); }

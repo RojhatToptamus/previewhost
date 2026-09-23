@@ -48,7 +48,7 @@ Secrets:
   previewhost secrets init [--remember]
   previewhost secrets remember
   previewhost secrets forget
-  previewhost secrets list
+  previewhost secrets list [--query TEXT] [--after REFERENCE]
   previewhost secrets remove ID
 
 Clients use one persistent owner per Git worktree root (cwd outside Git), or
@@ -273,7 +273,7 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
   const command = positionals[0];
   const accepted: Record<string, string[]> = {
     setup: ['file', 'endpoint', 'token-file', 'reopen'], edit: ['endpoint', 'token-file'], status: ['endpoint', 'token-file', 'timeout-ms'],
-    set: ['stdin'], list: [], remove: [], init: ['remember'], remember: [], forget: [],
+    set: ['stdin'], list: ['query', 'after'], remove: [], init: ['remember'], remember: [], forget: [],
   };
   for (const name of ['setup', 'edit', 'status']) accepted[name].push('project');
   for (const name of ['setup', 'edit']) accepted[name].push(...launchFlags);
@@ -310,7 +310,7 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
           result = { saved: positionals[1], message: 'Future starts use the new value. Running applications are unchanged.' };
         } else if (command === 'remove') {
           await store.remove('user', positionals[1], { signal: controller.signal }); result = { removed: positionals[1] };
-        } else if (command === 'list') result = await store.list({ signal: controller.signal });
+        } else if (command === 'list') result = await store.list({ query: values.query, after: values.after, signal: controller.signal });
         else if (command === 'remember') { await store.remember({ signal: controller.signal }); result = { remembered: true }; }
         else result = { created: true, ...(warning ? { warning } : {}) };
       }
@@ -339,7 +339,7 @@ function parseCliArgs() {
     'after-engine-restart': { type: 'boolean' },
     endpoint: { type: 'string' }, 'token-file': { type: 'string' },
     file: { type: 'string', short: 'f' }, 'no-wait': { type: 'boolean' },
-    'timeout-ms': { type: 'string' }, 'max-bytes': { type: 'string' }, source: { type: 'string' }, after: { type: 'string' },
+    'timeout-ms': { type: 'string' }, 'max-bytes': { type: 'string' }, source: { type: 'string' }, after: { type: 'string' }, query: { type: 'string' },
   } });
 }
 

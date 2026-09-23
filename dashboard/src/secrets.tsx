@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { KeystoreStatus as StoreStatus, SecretList as SecretPage } from "../../src/keystore";
 import { toast } from "sonner";
 import { call, errorMessage } from "./lib/api";
 import { Button } from "./components/ui/button";
@@ -24,24 +25,27 @@ import { ScrollArea } from "./components/ui/scroll-area";
 import { Spinner } from "./components/ui/spinner";
 import { EmptyState, Loading, Notice, SearchField } from "./components/shared";
 
-type StoreStatus = { state: "new" | "locked" | "unlocked"; canRemember: boolean; warning?: string };
-type SecretList = { ids: string[]; truncated: boolean; keystore: StoreStatus };
+type SecretList = SecretPage & { keystore: StoreStatus };
 export function SecretManager({ revision }: { revision: number }) {
   const [unlockRevision, setUnlockRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [list, setList] = useState<SecretList>();
+  const [cursors, setCursors] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const after = cursors.at(-1);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string>();
   useEffect(() => {
     if (editing) return;
     const controller = new AbortController();
     let pending = false;
-    async function refresh() {
-      if (pending || document.hidden) return;
+    async function refresh(foreground = false) {
+      if (pending || (!foreground && document.hidden)) return;
+      if (foreground) setLoading(true);
       pending = true;
       try {
         const result = await call<SecretList>(
-          { action: "listSecrets" },
+          { action: "listSecrets", query, after },
           controller.signal,
         );
         if (!controller.signal.aborted) {
@@ -51,23 +55,19 @@ export function SecretManager({ revision }: { revision: number }) {
       } catch (error) {
         if (!controller.signal.aborted) {
           setError(errorMessage(error));
-          setList(undefined);
         }
       } finally {
         pending = false;
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
-    void refresh();
+    void refresh(true);
     const timer = setInterval(() => void refresh(), 2500);
     return () => {
       controller.abort();
       clearInterval(timer);
     };
-  }, [revision, editing, unlockRevision]);
-  const ids =
-    list?.ids.filter((id) =>
-      id.toLowerCase().includes(query.trim().toLowerCase()),
-    ) ?? [];
+  }, [revision, editing, unlockRevision, query, after]);
   return (
     <div className="page secrets-page">
       <h1>Secret Manager</h1>
@@ -75,49 +75,38 @@ export function SecretManager({ revision }: { revision: number }) {
         Changes apply on the next start in every project using the reference.
       </p>
       {list && <KeystoreControls status={list.keystore} onUnlock={() => setUnlockRevision(value => value + 1)} />}
-      {error ? (
-        <Notice title="Secrets unavailable" error>
-          {error} Use Refresh to try again.
-        </Notice>
-      ) : !list ? (
-        <Loading>Loading secret references…</Loading>
-      ) : list.keystore.state !== "unlocked" ? null : !list.ids.length ? (
-        <EmptyState title="No stored secrets">
-          Add secrets through private setup when your agent requests them.
-        </EmptyState>
-      ) : (
-        <section className="secret-section">
+      {error && <Notice title="Secrets unavailable" error>{error} Use Refresh to try again.</Notice>}
+      {!list ? (
+        !error && <Loading>Loading secret references…</Loading>
+      ) : list.keystore.state !== "unlocked" ? null : (
+        <section className="secret-section" aria-busy={loading}>
           <div className="secret-toolbar">
             <SearchField
               value={query}
-              onChange={setQuery}
+              onChange={value => { setQuery(value); setCursors([]); }}
               label="Search references"
             />
             <span className="secret-count" role="status">
-              {ids.length} {ids.length === 1 ? "reference" : "references"}
+              {loading ? "Loading…" : error ? null : `${list.ids.length} shown`}
             </span>
           </div>
-          {list.truncated && (
-            <p className="warning">
-              Showing the first 128 references in the keystore. Additional
-              entries are not listed.
-            </p>
-          )}
-          {!ids.length ? (
-            <EmptyState title="No matching references">
-              Try another reference name.
+          {error ? null : !list.ids.length ? (
+            <EmptyState title={query.trim() ? "No matching references" : after ? "No more references" : "No stored secrets"}>
+              {query.trim() ? "Try another reference name." : after ? "Go back to earlier references." : "Add secrets through private setup when your agent requests them."}
             </EmptyState>
           ) : (
             <ScrollArea
+              key={after ?? "first"}
               className="secret-scroll"
               type="auto"
               aria-label="Stored references"
             >
               <div className="secret-list">
-                {ids.map((id) => (
+                {list.ids.map((id) => (
                   <SecretRow
                     key={id}
                     id={id}
+                    disabled={loading}
                     open={editing === id}
                     setOpen={(open) => setEditing(open ? id : undefined)}
                   />
@@ -125,6 +114,12 @@ export function SecretManager({ revision }: { revision: number }) {
               </div>
             </ScrollArea>
           )}
+          {(after || list.next) && <nav className="flex justify-end gap-2" aria-label="Reference pages">
+            <Button variant="outline" size="sm" disabled={loading || !after}
+              onClick={() => setCursors(previous => previous.slice(0, -1))}>Previous</Button>
+            <Button variant="outline" size="sm" disabled={loading || Boolean(error) || !list.next}
+              onClick={() => setCursors(previous => [...previous, list.next!])}>Next</Button>
+          </nav>}
         </section>
       )}
     </div>
@@ -133,10 +128,12 @@ export function SecretManager({ revision }: { revision: number }) {
 
 function SecretRow({
   id,
+  disabled,
   open,
   setOpen,
 }: {
   id: string;
+  disabled: boolean;
   open: boolean;
   setOpen: (open: boolean) => void;
 }) {
@@ -202,7 +199,7 @@ function SecretRow({
       <code>{id}</code>
       <Dialog open={open} onOpenChange={changeOpen}>
         <DialogTrigger asChild>
-          <Button variant="outline" size="sm" aria-label={"Edit " + id}>
+          <Button variant="outline" size="sm" disabled={disabled} aria-label={"Edit " + id}>
             Edit
           </Button>
         </DialogTrigger>

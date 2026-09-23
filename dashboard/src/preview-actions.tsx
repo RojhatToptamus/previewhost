@@ -332,6 +332,8 @@ export function PreviewMenu({
       >
         <ConfirmationContent
           review={review}
+          preview={p}
+          onComplete={() => setReview(undefined)}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             trigger.current?.focus();

@@ -59,6 +59,7 @@ Use the [recovery guide](troubleshooting.md#stored-secrets-are-missing-or-inacce
 In the dashboard's **Secret Manager**, create or unlock its session, then find the reference and select **Edit**.
 The list shows names, never stored values. Saving changes future starts in all projects that use that reference.
 Running applications keep the value they already received.
+Search covers all stored references. Use **Next** and **Previous** to browse pages of up to 128 names.
 
 If the keystore does not exist, create it from a terminal:
 
@@ -72,6 +73,9 @@ Then enter the credential and list the stored names:
 previewhost secrets set shop/dev/api-token
 previewhost secrets list
 ```
+
+To filter names, add `--query TEXT`. If the result includes `next`, pass that reference as `--after REFERENCE` with the same query.
+Pages reflect current storage. Refresh from the first page to include new names that sort before the current page.
 
 Each command requests hidden password input when its session is locked. `set` then requests the secret value through hidden input.
 These commands do not grant an owner access to the reference.

@@ -27,6 +27,8 @@ Use the source path to distinguish worktrees. **Open app** opens the serving att
 
 Open a preview's **Activity** tab to see services, setup jobs, and available recovery actions.
 **Serving** identifies the active application. **Latest update** identifies the replacement attempt.
+Services and setup jobs identify the attempt they belong to. A failed resource's **Logs** action
+selects that exact attempt and source. Failed updates do not roll back source edits or database writes.
 
 ![Failed update beside the serving attempt and its ready services](../assets/dashboard-update.png)
 
@@ -48,6 +50,10 @@ Removing the last entry closes an empty automatic owner and ends its secret appr
 Offline entries contain no restart configuration. Start them again through the CLI or MCP.
 See [setup jobs](jobs.md#progress-and-recovery) for explicit reruns and reset behavior.
 
+Reset and deletion results stay in the confirmation dialog. Reset reports deletion separately
+from startup: a failed migration does not repeat deletion. Fix the cause, then retry startup.
+If the response is lost, recheck status before taking another action.
+
 ## Read logs
 
 ![Logs for a failed migration, with attempt, source, and search controls](../assets/dashboard-logs.png)
@@ -56,6 +62,12 @@ Choose the attempt before comparing output. A failed replacement and a serving a
 Then select a service or job, or use **All output**.
 Logs are bounded tails, not a permanent archive.
 
+Either **Refresh** button retrieves current logs and environment status. Search, source, attempt,
+and scroll position remain selected; logs do not update automatically.
+**Clear view** hides output through the current cursor in this view only. Refresh shows newer output.
+**Show earlier logs** restores what is still retained. Changing attempts opens that attempt normally.
+Other windows, agents, and the stored log buffer are unchanged.
+
 ## Save configuration and manage secrets
 
 In **Configuration**, **Save as preview.yaml** writes the selected attempt's recipe to the project root.
@@ -63,6 +75,7 @@ Saving fails if `preview.yaml` or `preview.yml` already exists. It does not chan
 Secret references remain references. Stored values do not appear in this view.
 
 **Secret Manager** creates or unlocks the dashboard’s keystore session, then lists references for editing.
+Search covers all stored reference names. Use **Next** and **Previous** to browse bounded pages.
 It also offers automatic unlock controls on macOS. Project owners unlock separately through private setup.
 **Open private form** handles missing values and access approval.
 **Private setup** shows pending forms or the latest request result.

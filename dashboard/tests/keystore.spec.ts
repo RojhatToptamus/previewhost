@@ -193,3 +193,111 @@ test("a later completed setup does not keep an old cancellation in the preview s
   entry.owner.requests!.push({ ...canceled, id: "third" });
   expect(state(entry).note).toBe("Private setup canceled");
 });
+
+test("Secret Manager searches all references and keeps bounded pages usable after edits", async ({ page }) => {
+  const { Keystore } = await import(new URL("../../dist/keystore.js", import.meta.url).href) as typeof import("../../src/keystore");
+  const directory = await mkdtemp(join(tmpdir(), "previewhost-secret-pages-"));
+  const originalGet = keychain.get;
+  const password = "FAKE_pagination_password";
+  let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
+  let launch = "";
+  const vault = join(directory, "vault");
+  const store = new Keystore(vault);
+  const prototype = Keystore.prototype as unknown as { open: (this: InstanceType<typeof Keystore>) => unknown };
+  const originalOpen = prototype.open;
+  // Redirect only storage location; encryption, locking and private password entry stay real.
+  const redirected = mock.method(prototype, "open", function (this: InstanceType<typeof Keystore>) {
+    Object.defineProperty(this, "directory", { value: vault, configurable: true });
+    return originalOpen.call(this);
+  });
+  const names = Array.from({ length: 130 }, (_, index) => `disposable/worktree/api-token-${String(index).padStart(3, "0")}`);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    keychain.get = async () => undefined;
+    await store.unlock({ password, confirmation: password, create: true });
+    for (const id of names) await store.set("user", id, "FAKE_original");
+    dashboard = await startDashboard({ discover: async () => [], openBrowser: async url => { launch = url; } });
+    await dashboard.open(); await page.goto(launch);
+    await page.getByRole("button", { name: "Secret Manager", exact: true }).click();
+    await page.getByLabel("Keystore password", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "Unlock", exact: true }).click();
+    const rows = page.locator(".secret-row");
+    const next = page.getByRole("button", { name: "Next", exact: true });
+    const previous = page.getByRole("button", { name: "Previous", exact: true });
+    const search = page.getByRole("searchbox", { name: "Search references" });
+    await expect(rows).toHaveCount(128);
+    await expect(previous).toBeDisabled();
+    await expect(next).toBeEnabled();
+    await next.focus(); await page.keyboard.press("Enter");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toContainText(names[128]);
+    await expect(next).toBeDisabled();
+    await previous.click();
+    await expect(rows).toHaveCount(128);
+    await expect(next).toBeEnabled();
+    await page.route("**/api", route => {
+      const request = route.request().postDataJSON();
+      if (request.action === "listSecrets" && request.after) return route.fulfill({
+        status: 500, json: { error: { code: "SECRET_STORE_UNAVAILABLE", message: "Listing interrupted. Retry." } },
+      });
+      return route.continue();
+    });
+    await next.click();
+    await expect(page.getByText("Secrets unavailable", { exact: true })).toBeVisible();
+    await expect(rows).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Edit / })).toHaveCount(0);
+    await expect(page.locator(".secret-count")).toHaveText("");
+    await expect(search).toBeEnabled();
+    await expect(previous).toBeEnabled();
+    await expect(next).toBeDisabled();
+    await page.unroute("**/api");
+    await previous.click();
+    await expect(page.getByText("Secrets unavailable", { exact: true })).toHaveCount(0);
+    await expect(rows).toHaveCount(128);
+    // Search must find an entry outside the initial page and retain the input after empty results.
+    await search.fill("DOES-NOT-EXIST");
+    await expect(page.getByText("No matching references", { exact: true })).toBeVisible();
+    await expect(search).toBeFocused();
+    await search.fill("API-TOKEN-129");
+    const edit = page.getByRole("button", { name: `Edit ${names[129]}`, exact: true });
+    await expect(rows).toHaveCount(1); await edit.click();
+    await expect(page.getByLabel("New value", { exact: true })).toHaveValue("");
+    await page.getByLabel("New value", { exact: true }).fill("FAKE_updated");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(edit).toBeFocused();
+    expect(await store.get("user", names[129])).toBe("FAKE_updated");
+    expect(await store.get("user", names[128])).toBe("FAKE_original");
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(search).toHaveValue("API-TOKEN-129");
+    await expect(rows).toHaveCount(1);
+    expect(await page.locator("body").innerText()).not.toContain("FAKE_");
+    await search.fill("");
+    await expect(rows).toHaveCount(128);
+    await page.locator('[data-sonner-toast] [data-close-button]').click();
+    await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+    await page.screenshot({ path: "/tmp/previewhost-secret-pages-light.png" });
+    await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(next).toBeInViewport();
+    await expect(rows.first().locator("code")).toHaveCSS("color", "rgb(237, 237, 237)");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const scroll = page.locator('.secret-scroll [data-slot="scroll-area-viewport"]');
+    expect(await scroll.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    await page.screenshot({ path: "/tmp/previewhost-secret-pages-narrow-dark.png" });
+    await next.click();
+    await expect(rows).toHaveCount(2);
+    await store.remove("user", names[128]); await store.remove("user", names[129]);
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByText("No more references", { exact: true })).toBeVisible();
+    await previous.click();
+    await expect(rows).toHaveCount(128);
+    expect(errors).toEqual([]);
+  } finally {
+    await dashboard?.close(); store.close();
+    keychain.get = originalGet;
+    redirected.mock.restore();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

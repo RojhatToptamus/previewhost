@@ -103,7 +103,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
     inputSchema: accessSchema, annotations: write,
   }, (input, context) => access.request(input, context));
   server.registerTool('preview_inspect', {
-    description: 'Validate one preview or environment spec and describe sources, commands, bindings, and cleanup. Does not install dependencies, check application health, start resources, or grant permission. Environment values and database credentials are omitted.',
+    description: 'Validate a spec and describe sources, commands, bindings, cleanup, and read-only prerequisite findings. Missing executables may be prepared by earlier jobs; findings do not block startup. Checks do not execute project commands, install dependencies, pull images, unlock secrets, start owners/resources, or grant permission. Application health and secret values are not checked.',
     inputSchema, annotations: read,
   }, (input, context) => run('request', input, async (client, project) => client.inspect(await load(input, project, context.mcpReq.signal))));
   server.registerTool('preview_start', {

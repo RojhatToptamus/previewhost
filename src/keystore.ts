@@ -13,6 +13,8 @@ import { isPrivate, makePrivateDirectory } from './private-files.js';
 export type SecretNamespace = 'user' | 'database';
 export interface StoreOptions { signal?: AbortSignal }
 export interface KeystoreStatus { state: 'new' | 'locked' | 'unlocked'; canRemember: boolean; warning?: string }
+export const secretListSchema = z.strictObject({ query: z.string().max(128).optional(), after: secretIdSchema.optional() });
+export interface SecretList { ids: string[]; next?: string }
 export const unlockSchema = z.strictObject({ password: z.string().min(1).max(4096), create: z.boolean().default(false),
   confirmation: z.string().max(4096).optional(), remember: z.boolean().default(false) });
 const contentsSchema = z.strictObject({ user: z.record(secretIdSchema, z.string()), database: z.record(z.string().regex(/^[a-f0-9]{32}$/), z.string()) });
@@ -177,10 +179,15 @@ export class Keystore {
     return Object.hasOwn(values, id) ? values[id] : undefined;
   }
   async has(namespace: SecretNamespace, id: string, options: StoreOptions = {}): Promise<boolean> { return (await this.get(namespace, id, options)) !== undefined; }
-  async list(options: StoreOptions = {}) {
+  async list(options: StoreOptions & z.infer<typeof secretListSchema> = {}): Promise<SecretList> {
+    const parsed = secretListSchema.safeParse({ query: options.query, after: options.after });
+    if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Search must be at most 128 characters; use the returned next reference to continue.');
     await this.ready(options);
-    const ids = Object.keys(this.contents().user).sort();
-    return { ids: ids.slice(0, limits.secrets), truncated: ids.length > limits.secrets };
+    const query = parsed.data.query?.trim().toLowerCase() ?? '';
+    const matching = Object.keys(this.contents().user)
+      .filter(id => (!parsed.data.after || id > parsed.data.after) && id.toLowerCase().includes(query)).sort();
+    const ids = matching.slice(0, limits.secrets);
+    return { ids, ...(matching.length > ids.length ? { next: ids.at(-1)! } : {}) };
   }
   async add(namespace: SecretNamespace, id: string, value: string, options: StoreOptions = {}): Promise<boolean> { return this.mutate(namespace, id, value, 'add', options); }
   async update(namespace: SecretNamespace, id: string, value: string, options: StoreOptions = {}): Promise<boolean> { return this.mutate(namespace, id, value, 'update', options); }

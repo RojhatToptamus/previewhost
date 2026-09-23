@@ -16,7 +16,7 @@ import { createDataOwner, type DataOwner } from './data.js';
 import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
 import { Keystore } from './keystore.js';
 import { savePreviewSpec } from './config.js';
-import { requireSupportedPlatform } from './private-files.js';
+import { inspectPreviewSpec, runtimeContext } from './inspection.js';
 
 interface Attempt {
   summary: AttemptSummary;
@@ -67,25 +67,10 @@ export interface PreparedSecretSetup {
 }
 
 export async function createPreviewRuntime(options: RuntimeOptions): Promise<PreviewRuntime> {
-  requireSupportedPlatform();
-  if (!options || !Array.isArray(options.allowedRoots) || options.allowedRoots.length < 1 || options.allowedRoots.length > 32) {
-    throw new PreviewError('INVALID_INPUT', 'Supply between 1 and 32 allowed source roots.');
-  }
-  const roots = [...new Set(await Promise.all(options.allowedRoots.map(canonicalDirectory)))];
-  const inputs = { ...options.inputs };
-  if (options.secretIds !== undefined && (!Array.isArray(options.secretIds) || options.secretIds.length > limits.secrets)) {
-    throw new PreviewError('INVALID_INPUT', `Select at most ${limits.secrets} secret names.`);
-  }
-  for (const id of options.secretIds ?? []) validateSecretId(id);
-  const secretIds = new Set(options.secretIds ?? []);
-  if (Object.keys(inputs).length > 128 || Object.entries(inputs).some(([key, value]) =>
-    !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || typeof value !== 'string' || value.length > 4096 || value.includes('\0'))) {
-    throw new PreviewError('INVALID_INPUT', 'Owner inputs must be at most 128 named strings of at most 4096 characters.');
-  }
-  if (options.dockerSocket && !options.dataDirectory) throw new PreviewError('INVALID_INPUT', 'dockerSocket requires a dataDirectory.');
+  const { roots, inputs, secretIds } = await runtimeContext(options);
   const keystore = new Keystore();
   const data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket, keystore }) : undefined;
-  return new Runtime(roots, options.authorize, inputs, secretIds, data, keystore);
+  return new Runtime(roots, options.authorize, inputs, secretIds, data, keystore, { dataDirectory: options.dataDirectory, dockerSocket: options.dockerSocket });
 }
 
 class Runtime implements PreviewRuntime {
@@ -96,6 +81,7 @@ class Runtime implements PreviewRuntime {
   constructor(
     private readonly roots: string[], private readonly authorize: RuntimeOptions['authorize'],
     private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data: DataOwner | undefined, readonly keystore: Keystore,
+    private readonly storage: Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket'>,
   ) {
     this.privateDirectories.add(keystore.directory);
     if (data) this.privateDirectories.add(data.directory);
@@ -131,10 +117,9 @@ class Runtime implements PreviewRuntime {
 
   async inspect(input: PreviewSpec) {
     this.assertOpen();
-    const spec = await normalizeSpec(parseSpec(input), this.roots, this.inputs, this.privateDirectories);
+    const description = await inspectPreviewSpec(input, { ...this.storage, roots: this.roots, inputs: this.inputs, secretIds: this.secretIds }, this.privateDirectories);
     this.assertOpen();
-    const secrets = secretRequirements(spec, this.secretIds);
-    return { ...describeSpec(spec), ...(secrets.length ? { secrets } : {}) };
+    return description;
   }
 
   async prepareSecretSetup(input: PreviewSpec | string, signal: AbortSignal): Promise<PreparedSecretSetup> {

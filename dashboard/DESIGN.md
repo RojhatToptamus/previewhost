@@ -211,6 +211,11 @@ Omit permanent reassurance and help text from navigation. Use an icon with an ac
 
 Runtime, configuration, and authorization remain owned by the existing API. Derive presentation in `lib/model.ts`; keep selection and pending UI state in the view that uses them. Do not copy server state into a second lifecycle.
 
+Keep failed-update actions with their attempt and resource. Destructive confirmations retain their
+pending and failed outcome, including whether deletion finished before startup failed. Never offer
+an automatic destructive retry. Log filtering and Clear view affect only the current view; retain
+the chosen attempt on refresh and label output that is no longer retained.
+
 Before adding a component, section, token, or sentence, ask:
 
 - Which current task does it support?

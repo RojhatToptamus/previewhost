@@ -60,16 +60,12 @@ export function Activity(props: Props) {
   const currentRequests = openRequests.length
     ? openRequests
     : setupRequests.slice(-1);
-  const failedJob = Object.values(latest?.services ?? {}).some(
-    (service) => service.type === "job" && service.state === "failed",
-  );
   return (
     <>
       {deletionNeedsRetry(p) ? (
         <Notice title="Data deletion incomplete" error>
           Managed data was deleted, but its database credential could not be
-          removed. Resolve the Keychain error, then retry Delete data or Reset
-          data.
+          removed. Resolve the keystore error, then review data deletion again.
         </Notice>
       ) : needsCleanup(p) ? (
         <Notice title="Cleanup needs attention" error>
@@ -80,15 +76,6 @@ export function Activity(props: Props) {
         <Notice title="Private setup requested">
           Approve access or enter missing values in the private form. Cancel
           there.
-        </Notice>
-      ) : !p?.candidate && latest?.state === "failed" && !failedJob ? (
-        <Notice title={p?.active ? "Update failed" : "Startup failed"} error>
-          <p>
-            {latest.error?.message ?? "Review the latest attempt for details."}
-          </p>
-          <Button variant="outline" onClick={() => openLogs(latest)}>
-            View error log
-          </Button>
         </Notice>
       ) : !p?.candidate && latest?.state === "canceled" ? (
         <Notice title={p?.active ? "Update canceled" : "Startup canceled"}>
@@ -112,6 +99,7 @@ export function Activity(props: Props) {
                   <Status tone={tone(attempt.state)}>
                     {capitalize(attempt.state)}
                   </Status>
+                  <AttemptFailure attempt={attempt} openLogs={openLogs} />
                 </div>
               ))}
             </div>
@@ -126,6 +114,9 @@ export function Activity(props: Props) {
                 </code>
               </div>
             )
+          )}
+          {!(p.active && latest && p.active.id !== latest.id) && latest && (
+            <AttemptFailure attempt={latest} openLogs={openLogs} />
           )}
           <Services {...props} />
           <Jobs {...props} />
@@ -235,6 +226,63 @@ export function Activity(props: Props) {
   );
 }
 
+function attemptScope(
+  preview: NonNullable<Entry["preview"]>,
+  attempt: AttemptSummary,
+) {
+  if (attempt.id === preview.active?.id) return "serving";
+  return preview.active ? "latest update" : "latest attempt";
+}
+
+function AttemptFailure({
+  attempt,
+  openLogs,
+}: {
+  attempt: AttemptSummary;
+  openLogs: Props["openLogs"];
+}) {
+  if (attempt.state !== "failed") return null;
+  const failed = Object.entries(attempt.services ?? {}).filter(
+    ([, service]) => service.state === "failed",
+  );
+  return (
+    <div className="attempt-failure">
+      {failed.length ? (
+        failed.map(([name, service]) => (
+          <div key={name}>
+            <div className="flex items-center justify-between gap-3">
+              <strong>{name}</strong>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => openLogs(attempt, name)}
+              >
+                Logs
+              </Button>
+            </div>
+            {service.type !== "job" && service.error && (
+              <p className="text-muted-foreground">{service.error.message}</p>
+            )}
+          </div>
+        ))
+      ) : (
+        <div>
+          <p>
+            {attempt.error?.message ??
+              "Startup failed. Review this attempt’s output."}
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => openLogs(attempt)}>
+            Logs
+          </Button>
+        </div>
+      )}
+      <p className="text-muted-foreground">
+        Source edits and database writes are not rolled back.
+      </p>
+    </div>
+  );
+}
+
 function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
   const p = entry.preview!;
   const attempt = p.active ?? p.candidate ?? p.latest;
@@ -267,7 +315,9 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
       } as ServiceStatus,
     ]);
   return (
-    <Section title="Services">
+    <Section
+      title={"Services" + (attempt ? " · " + attemptScope(p, attempt) : "")}
+    >
       <div className="data-table service-table">
         <Table>
           <TableHeader>
@@ -365,13 +415,7 @@ function Jobs({ entry, mutate, acting, openLogs }: Props) {
   );
   if (!jobs.length || !attempt) return null;
   return (
-    <Section
-      title={
-        p.active && p.active.id !== attempt.id
-          ? "Setup jobs · latest update"
-          : "Setup jobs"
-      }
-    >
+    <Section title={"Setup jobs · " + attemptScope(p, attempt)}>
       <div className="data-table jobs-table">
         <Table>
           <TableHeader>

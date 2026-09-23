@@ -79,7 +79,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
             command: [
               process.execPath,
               "-e",
-              `console.log('GET /items');console.log('[browser] request failed');console.log('long line '+ 'x'.repeat(300));console.log('literal <script>window.untrusted=true</script>');require('http').createServer((q,r)=>r.end('${folder}')).listen(+process.env.PORT,process.env.HOST)`,
+              `console.log('GET /items');console.log('[browser] request failed');console.log('long line '+ 'x'.repeat(300));console.log('literal <script>window.untrusted=true</script>');require('http').createServer((q,r)=>{if(q.method==='POST'){let text='';q.on('data',chunk=>text+=chunk);q.on('end',()=>{console.log(text);r.end('logged')});return;}r.end('${folder}');}).listen(+process.env.PORT,process.env.HOST)`,
             ],
           },
         },
@@ -171,6 +171,13 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       .click();
     await expect(page.locator(".preview-title")).toContainText("Update failed");
     await expect(page.locator(".attempt-split")).toContainText("Serving");
+    await expect(page.getByRole("heading", { name: "Services · serving", exact: true })).toBeVisible();
+    await expect(page.locator(".attempt-split .attempt-failure")).toContainText("migrate");
+    await page.screenshot({ path: "/tmp/previewhost-attempts-light.png", animations: "disabled" });
+    await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+    await expect(page.locator("body")).toHaveClass(/ph-dark/);
+    await page.screenshot({ path: "/tmp/previewhost-attempts-dark.png", animations: "disabled" });
+    await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await expect(
       page.getByRole("link", { name: "Open app", exact: true }),
     ).toHaveAttribute("href", urls[0]);
@@ -201,8 +208,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(app.locator("body")).toHaveText("first");
     await app.close();
     await page
-      .getByRole("row")
-      .filter({ hasText: "migrate" })
+      .locator(".attempt-split .attempt-failure")
       .getByRole("button", { name: "Logs", exact: true })
       .click();
     await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText(
@@ -388,6 +394,92 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("button", { name: "Wrap lines" }),
     ).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(".logs")).toContainText("[browser] request failed");
+    const current = await runtimes[1].get("checkout-feature-with-long-address-layout-review");
+    const currentUrl = current.url!;
+    const currentId = current.active!.id;
+    const emit = async (text: string) => {
+      expect((await fetch(currentUrl, { method: "POST", body: text + "\n" + ".".repeat(256) })).status).toBe(200);
+      await expect.poll(async () => (await runtimes[1].logs(current.name, currentId, { source: "web" })).text).toContain(text.slice(-30));
+    };
+    await emit(Array.from({ length: 100 }, (_, index) => `before clear ${index}`).join("\n"));
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.locator(".logs")).toContainText("before clear 99");
+    await logPanel.evaluate(el => el.scrollTop = 80);
+    const scrollTop = await logPanel.evaluate(el => el.scrollTop);
+    await emit("refresh marker");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.locator(".logs")).toContainText("refresh marker");
+    expect(await logPanel.evaluate(el => el.scrollTop)).toBe(scrollTop);
+    await page.getByRole("searchbox", { name: "Search logs" }).fill("marker");
+    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    await expect(page.locator(".logs")).not.toContainText("refresh marker");
+    await emit("after clear marker 🙂");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.locator(".logs")).toContainText("after clear marker 🙂");
+    await expect(page.locator(".logs")).not.toContainText("refresh marker");
+    await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");
+    await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText("web");
+    await page.screenshot({ path: "/tmp/previewhost-clear-logs-dark.png" });
+    await page.setViewportSize({ width: 320, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByRole("button", { name: "Clear view", exact: true })).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Show earlier logs", exact: true })).toBeInViewport();
+    await page.getByRole("button", { name: "Clear view", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Wrap lines", exact: true })).toBeFocused();
+    await page.screenshot({ path: "/tmp/previewhost-clear-logs-narrow.png" });
+    await page.setViewportSize({ width: 1360, height: 900 });
+    await page.getByRole("combobox", { name: "Log source" }).click();
+    await page.getByRole("option", { name: "All output", exact: true }).click();
+    await expect(page.locator(".logs")).toContainText("after clear marker");
+    await expect(page.locator(".logs")).not.toContainText("refresh marker");
+    await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+    await page.getByRole("tab", { name: "Logs", exact: true }).click();
+    await expect(page.locator(".logs")).not.toContainText("refresh marker");
+    // Clearing this view never alters the API reader or another browser's captured output.
+    expect((await runtimes[1].logs(current.name, currentId)).text).toContain("refresh marker");
+    const independent = await context.newPage();
+    await independent.goto(launch);
+    await independent.locator(".overview-table .preview-name").filter({ hasText: current.name }).click();
+    await independent.getByRole("tab", { name: "Logs", exact: true }).click();
+    await expect(independent.locator(".logs")).toContainText("refresh marker");
+    await independent.close();
+    await page.getByRole("button", { name: "Show earlier logs", exact: true }).click();
+    await expect(page.locator(".logs")).toContainText("refresh marker");
+    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    await emit("x".repeat(70000) + "retained marker 🙂");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Earlier output omitted" })).toBeVisible();
+    await expect(page.locator(".logs")).toContainText("retained marker 🙂");
+    await page.getByRole("button", { name: "Show earlier logs", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Earlier output omitted" })).toBeVisible();
+    // An agent's replacement must not silently move the currently inspected attempt.
+    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    const failedApi = await runtimes[1].replace(current.name, {
+      name: current.name, type: "environment", primary: "web",
+      services: {
+        api: { type: "command", cwd: owners[1].connection.projectDirectory, command: [process.execPath, "-e", 'console.error("API startup failed: disposable fixture");process.exit(7)'] },
+        web: { type: "static", directory: owners[1].connection.projectDirectory, dependsOn: ["api"] },
+      },
+    });
+    expect((await runtimes[1].wait(current.name, failedApi.candidate!.id)).state).toBe("failed");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "Diagnostic attempt" })).toContainText(currentId.slice(0, 8));
+    await expect(page.locator(".logs")).not.toContainText("API startup failed");
+    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await expect(page.locator(".attempt-failure")).toContainText("api");
+    await expect(page.getByRole("link", { name: "Open app", exact: true })).toHaveAttribute("href", currentUrl);
+    expect((await fetch(currentUrl)).status).toBe(200);
+    await page.locator(".attempt-failure").getByRole("button", { name: "Logs", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "Diagnostic attempt" })).toContainText(failedApi.candidate!.id.slice(0, 8));
+    await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText("api");
+    await expect(page.locator(".logs")).toContainText("API startup failed");
+    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    await expect(page.locator(".logs")).not.toContainText("API startup failed");
+    await page.getByRole("combobox", { name: "Diagnostic attempt" }).click();
+    await page.getByRole("option", { name: `Serving · ${currentId.slice(0, 8)}` }).click();
+    await expect(page.getByRole("button", { name: "Show earlier logs", exact: true })).toHaveCount(0);
+    await expect(page.locator(".logs")).toContainText("retained marker");
     expect(
       await page.evaluate(() => (window as any).untrusted),
     ).toBeUndefined();

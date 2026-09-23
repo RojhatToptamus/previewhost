@@ -144,7 +144,7 @@ export function hint(entry: Entry) {
       ? "Data retained. Start through your agent or CLI to run this preview again."
       : "";
   if (deletionNeedsRetry(p))
-    return "Resolve the Keychain error, then retry data deletion.";
+    return "Resolve the keystore error, then review data deletion again.";
   if (needsCleanup(p))
     return "Cleanup is incomplete; keep the source directories and retry cleanup before starting again.";
   if (pending(entry).length) return "Saving secrets does not start the app.";

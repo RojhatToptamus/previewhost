@@ -14,20 +14,26 @@ export function Preview({
   entry,
   mutate,
   acting,
+  revision,
+  refresh,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
+  revision: number;
+  refresh: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("activity");
   const [attemptId, setAttemptId] = useState<string>();
+  const [clearAfter, setClearAfter] = useState<number>();
   const [source, setSource] = useState("");
   const [query, setQuery] = useState("");
   const [wrapLogs, setWrapLogs] = useState(false);
   const { owner, preview: p } = entry;
   const retained = attempts(p);
-  const selected =
-    retained.find((attempt) => attempt.id === attemptId) ?? retained[0];
+  const selected = attemptId
+    ? retained.find((attempt) => attempt.id === attemptId)
+    : retained[0];
   const actions = previewActions(entry);
   const canOpen = Boolean(p?.active && p.url);
   const address = canOpen
@@ -41,6 +47,7 @@ export function Preview({
   const context = hint(entry);
   function openLogs(attempt: AttemptSummary, name = "") {
     setAttemptId(attempt.id);
+    setClearAfter(undefined);
     setSource(name);
     setQuery("");
     setTab("logs");
@@ -125,7 +132,10 @@ export function Preview({
         <Tabs
           className="preview-tabs"
           value={tab}
-          onValueChange={(value) => setTab(value as Tab)}
+          onValueChange={(value) => {
+            if (value !== "activity" && selected) setAttemptId(selected.id);
+            setTab(value as Tab);
+          }}
         >
           <TabsList
             variant="line"
@@ -135,12 +145,12 @@ export function Preview({
             <TabsTrigger value="activity" id="tab-activity">
               Activity
             </TabsTrigger>
-            {selected && (
+            {!!retained.length && (
               <TabsTrigger value="logs" id="tab-logs">
                 Logs
               </TabsTrigger>
             )}
-            {selected && (
+            {!!retained.length && (
               <TabsTrigger value="configuration" id="tab-configuration">
                 Configuration
               </TabsTrigger>
@@ -156,14 +166,35 @@ export function Preview({
           </TabsContent>
           {(["logs", "configuration"] as const).map((view) => (
             <TabsContent key={view} value={view} className="diagnostics-panel">
+              {tab === view && !selected && (
+                <div className="diagnostic-body">
+                  <Notice title="Attempt no longer retained">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setAttemptId(retained[0]?.id);
+                        setClearAfter(undefined);
+                        setSource("");
+                      }}
+                    >
+                      Show latest attempt
+                    </Button>
+                  </Notice>
+                </div>
+              )}
               {tab === view && selected && (
                 <Diagnostics
                   entry={entry}
+                  revision={revision}
+                  refresh={refresh}
+                  clearAfter={clearAfter}
+                  setClearAfter={setClearAfter}
                   tab={view}
                   selected={selected}
                   retained={retained}
                   selectAttempt={(id) => {
                     setAttemptId(id);
+                    setClearAfter(undefined);
                     setSource("");
                   }}
                   source={source}
