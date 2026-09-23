@@ -61,7 +61,7 @@ The list shows names, never stored values. Saving changes future starts in all p
 Running applications keep the value they already received.
 Search covers all stored references. Use **Next** and **Previous** to browse pages of up to 128 names.
 
-If the keystore does not exist, create it from a terminal:
+You can also create the keystore from a terminal:
 
 ```sh
 previewhost secrets init
@@ -83,7 +83,7 @@ Keep passwords and secret values out of command arguments, configuration files, 
 
 ## Choose automatic unlock
 
-On macOS, **Remember unlock on this Mac** stores an unlock key in Keychain for future sessions.
+On macOS, open **Keystore options** in Secret Manager. **Remember unlock on this Mac** stores an unlock key in Keychain for future sessions.
 The CLI offers the same choice:
 
 ```sh

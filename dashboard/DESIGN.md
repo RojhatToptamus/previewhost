@@ -104,9 +104,9 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 | View | Primary purpose and structure |
 | --- | --- |
 | Previews | Compare worktrees, status, and available applications in aligned rows. Names open details; Open app opens the running application. |
-| Activity | Show actionable failures, serving/latest attempts, services, jobs, history, private setup, and managed data. Put recovery beside the affected resource. |
-| Logs | Put search, attempt, source, and refresh controls above output. Offer line wrapping for long output and preserve it across tabs. Explain omitted output; do not imply captured logs are live. |
-| Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yaml visible outside the scrolling body. |
+| Activity | Show actionable failures, serving/latest attempts with start times, services, jobs, private setup, and managed data. Put recovery beside the affected resource. |
+| Logs | Put search, attempt, and source above output. Use Log options for wrapping, search context, and Clear view. The header Refresh also retrieves logs. Explain hidden and omitted output separately; do not imply captured logs are live. |
+| Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yaml outside the scrolling body when no default file exists. Otherwise identify the existing file. |
 | Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
 
 Long lists need bounded scrolling without burying actions. The environment table uses a 320px height capped at 45% of viewport height, with its own scrollbar and sticky header. Secret lists use the existing bounded scroll area. Short lists should not gain artificial filler rows.
@@ -118,6 +118,11 @@ At narrow widths, stack controls in reading order and preserve the primary actio
 Display the serving application's readable hostname when supplied by the runtime. Keep the existing Open app destination; different origins can affect application cookies and CORS. Never construct an alias from a preview name or show a candidate's address as serving.
 
 Log source means the process or job that emitted the output. Frameworks can forward browser messages into that same output. Do not silently hide lines or classify their origin from text prefixes. Source selection and search provide reliable ways to narrow output.
+
+Back and reload preserve the selected preview and its diagnostic choices within a browser session.
+Store presentation choices only; fetch runtime state again. If an attempt is no longer retained,
+show a useful recovery action rather than silently selecting another. With no retained attempts,
+show Activity and its existing recovery actions.
 
 ## 5. Components and interaction
 

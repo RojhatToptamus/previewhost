@@ -155,7 +155,8 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     expect(await (await fetch(updated.url!)).text()).toBe("FAKE_updated");
     await page.setViewportSize({ width: 1360, height: 900 });
     if (process.platform === "darwin") {
-      await page.getByRole("button", { name: "Forget automatic unlock", exact: true }).click();
+      await page.getByRole("button", { name: "Keystore options", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Forget automatic unlock", exact: true }).click();
       await expect(page.getByText(/Already unlocked sessions remain unlocked/)).toBeVisible();
     }
     // Restart the dashboard: its key was not persisted, and owners remain independent.

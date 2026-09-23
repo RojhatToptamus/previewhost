@@ -286,8 +286,10 @@ and optional `{ code, message }` error.
 
 Environment attempts also contain a `services` map. Each entry reports `type`,
 `state`, optional public `url`/`browserUrl`, and an optional error. Service states
-are `waiting`, `starting`, `ready`, `failed`, and `stopped`. Jobs also report
-`succeeded`, `skipped` (retained success), or `canceled`, and never have public URLs.
+are `waiting`, `starting`, `ready`, `failed`, `canceled`, and `stopped`. Jobs also report
+`succeeded` or `skipped` (retained success), and never have public URLs.
+During startup, waiting resources include `waitingFor`, the unfinished dependency names
+derived from their configuration and current status. Managed database preparation reports `starting`.
 
 `data` reports retained resource names/types, `running`, and an optional cleanup
 error. It never contains passwords or database connection URLs.
@@ -310,6 +312,7 @@ shared across active and candidate applications. Candidate failure preserves
 the active application and its databases.
 If an owned service fails after startup, previewhost stops the environment's owned services.
 External connection checks run only at startup.
+An HTTP readiness timeout reports the latest HTTP status or connection failure without response bodies or headers.
 
 Replacement cannot undo source edits, database writes, or migrations performed
 by application code. Changes between an environment and a single preview require
@@ -666,11 +669,11 @@ The authenticated owner client also supports:
   Source files and saved secrets remain. `remove()` clears an empty project entry.
 - `describe(name, attemptId)`: redacted requested configuration for a retained attempt,
   including secret reference metadata without checking keystore presence.
-- `startAgain(name, attemptId)`: rerun the current stopped or failed attempt's declaration
+- `startAgain(name, attemptId)`: rerun the current stopped, failed, or canceled attempt's declaration
   through ordinary startup, source validation, and authorization. Existing active,
   busy, and cleanup checks still apply. No YAML is reloaded. The dashboard labels a
-  stopped attempt **Start preview** and a failed attempt **Retry start**.
-  Canceled attempts cannot use this operation.
+  stopped or canceled attempt **Start preview** and a failed attempt **Retry start**.
+  Cancellation never restarts an attempt automatically.
 - `saveConfiguration(name, attemptId)`: create root `preview.yaml` from that exact
   retained attempt through the existing validated saver. The automatic owner's project
   fixes the destination. Callers cannot supply a path or a replacement spec. Returns
@@ -727,8 +730,9 @@ No removal operation deletes source files, saved secrets, or the permanent proje
 
 Dashboard **Reset data** confirms the managed resource list, then calls guarded Stop,
 guarded `deleteData`, and `startAgain` in order. It restarts the serving configuration
-when available. Otherwise it uses the latest stopped or failed attempt. It starts only
-after deletion succeeds. A canceled attempt without a serving app is not resettable.
+when available. Otherwise it uses the latest stopped, failed, or canceled attempt.
+It starts only after deletion succeeds. Canceled jobs may have written data; reset requires
+the same explicit deletion confirmation.
 
 A startup failure uses ordinary error reporting and Retry start. It does not repeat
 deletion. After a lost response, inspect the current state before resetting again.

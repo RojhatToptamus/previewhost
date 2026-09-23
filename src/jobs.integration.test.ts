@@ -128,7 +128,9 @@ test('timeout and cancellation stop job process groups before startup returns', 
   const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => true }); t.after(() => runtime.close());
   const script = `const {spawn}=require('child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); require('fs').writeFileSync('pids',process.pid+' '+child.pid); setInterval(()=>{},1000)`;
   const spec: Spec = { name: 'cancel-jobs', type: 'environment', primary: 'web', services: {
-    slow: { ...job(directory, script), timeoutMs: 1000 }, web: { type: 'static', directory, dependsOn: ['slow'] },
+    slow: { ...job(directory, script), timeoutMs: 1000 },
+    api: { type: 'static', directory, dependsOn: ['slow'] },
+    web: { type: 'command', cwd: directory, command: [process.execPath, '-e', 'process.exit(0)'], env: { API_URL: { service: 'api' } } },
   } };
   const failed = await outcome(runtime, await runtime.start(spec), t.signal);
   assert.equal(failed.error?.code, 'TIMEOUT'); assert.equal(failed.services?.slow.state, 'failed');
@@ -137,9 +139,18 @@ test('timeout and cancellation stop job process groups before startup returns', 
   if (spec.services.slow.type === 'job') spec.services.slow.timeoutMs = 20_000;
   const starting = await runtime.start(spec);
   await until(() => access(join(directory, 'pids')).then(() => true, () => false));
+  const waiting = (await runtime.get(spec.name)).candidate!.services!;
+  assert.equal(waiting.slow.state, 'starting');
+  assert.deepEqual(waiting.api.waitingFor, ['slow']);
+  assert.deepEqual(waiting.web.waitingFor, ['api']);
+  waiting.api.waitingFor!.push('changed');
+  assert.deepEqual((await runtime.get(spec.name)).candidate!.services!.api.waitingFor, ['slow']);
   const canceled = await runtime.cancel(spec.name, starting.candidate!.id);
   assert.equal(canceled.latest?.state, 'canceled');
   assert.equal(canceled.latest?.services?.slow.state, 'canceled');
+  assert.equal(canceled.latest?.services?.api.state, 'canceled');
+  assert.equal(canceled.latest?.services?.web.state, 'canceled');
+  assert.ok(Object.values(canceled.latest!.services!).every(service => service.waitingFor === undefined));
   for (const pid of (await readFile(join(directory, 'pids'), 'utf8')).split(' ').map(Number)) assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });
 
@@ -210,8 +221,12 @@ test('failed and canceled seeds retain partial writes and block implicit retries
   await writeFile(join(f.directory, 'mode'), 'wait');
   const starting = await f.runtime.rerunJob(f.spec.name, stopped.latest!.id, 'seed');
   await seedWaiting(f, starting, t.signal);
-  await f.runtime.cancel(f.spec.name, starting.candidate!.id); await f.reconnect();
+  await f.runtime.cancel(f.spec.name, starting.candidate!.id);
   await writeFile(join(f.directory, 'mode'), '');
+  const blockedRetry = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, starting.candidate!.id), t.signal);
+  assert.equal(blockedRetry.state, 'failed');
+  assert.match(blockedRetry.services!.seed.error!.message, /explicitly rerun/);
+  await f.reconnect();
   failed = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(failed.state, 'failed');
   assert.match(failed.services!.seed.error!.message, /explicitly rerun/);
   ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, failed.id, 'seed'), t.signal);
@@ -414,15 +429,20 @@ test('dashboard reset requires explicit recovery after deletion, startup and can
     assert.equal((await rows(restarted.url!)).length, 1);
     assert.equal(deletionRequests, 2, 'startup recovery does not delete again');
     assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
-    // Reuse retained data to verify that cancellation blocks reset.
+    // Canceling a partially written seed still permits an explicitly confirmed reset.
     const canceledBase = await f.runtime.stop(f.spec.name);
     await writeFile(join(f.directory, 'mode'), 'wait');
     const pending = await f.runtime.rerunJob(f.spec.name, canceledBase.latest!.id, 'seed');
     await seedWaiting(f, pending, t.signal);
     await f.runtime.cancel(f.spec.name, pending.candidate!.id);
     const previousDeletes = deletionRequests;
-    assert.equal((await post(await resetRequest())).error?.code, 'STALE_ATTEMPT');
-    assert.equal(deletionRequests, previousDeletes, 'cannot erase data without a restartable configuration');
-    assert.ok((await f.runtime.get(f.spec.name)).data);
+    await writeFile(join(f.directory, 'mode'), '');
+    const reset = await post(await resetRequest());
+    assert.equal(reset.error, undefined);
+    const clean = await outcome(f.runtime, reset.result, t.signal);
+    assert.equal(clean.state, 'ready', JSON.stringify(clean));
+    assert.equal(deletionRequests, previousDeletes + 1);
+    assert.equal((await rows(clean.url!)).length, 1);
+    assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
   } finally { await f.keys.control('unlock'); }
 });

@@ -6,18 +6,23 @@ import type { HttpTarget } from './resources.js';
 /** Observe response headers without following redirects or retaining response bodies. */
 export async function waitForHttp(target: HttpTarget, readyPath: string, timeoutMs: number, signal: AbortSignal): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  let lastStatus: number | undefined;
+  let lastObservation: string | undefined;
   while (Date.now() < deadline) {
     throwIfAborted(signal);
     try {
-      lastStatus = await probe(target, readyPath, Math.min(2000, deadline - Date.now()), signal);
-      if (lastStatus >= 200 && lastStatus < 400) return;
-    } catch {
+      const status = await probe(target, readyPath, Math.min(2000, deadline - Date.now()), signal);
+      if (status >= 200 && status < 400) return;
+      lastObservation = `HTTP ${status}`;
+    } catch (error) {
       throwIfAborted(signal);
+      const code = (error as NodeJS.ErrnoException).code;
+      lastObservation = code === 'ECONNREFUSED' ? 'connection refused'
+        : code === 'ECONNRESET' ? 'connection closed before response headers'
+        : code === 'ETIMEDOUT' ? 'response headers timed out' : 'connection failed';
     }
     await delay(Math.min(50, Math.max(1, deadline - Date.now())), undefined, { signal });
   }
-  throw new PreviewError('START_FAILED', `HTTP readiness timed out${lastStatus ? ` (last status ${lastStatus})` : ''}. Read the attempt logs and verify the readiness path and port.`);
+  throw new PreviewError('START_FAILED', `HTTP readiness timed out${lastObservation ? ` (last check: ${lastObservation})` : ''}. Read the attempt logs and verify the readiness path and port.`);
 }
 
 function probe(target: HttpTarget, pathname: string, timeoutMs: number, signal: AbortSignal): Promise<number> {
@@ -33,7 +38,7 @@ function probe(target: HttpTarget, pathname: string, timeoutMs: number, signal: 
       if (error) reject(error); else resolve(status);
     };
     const abort = () => finish(new Error('Readiness request canceled.'));
-    const timer = setTimeout(() => finish(new Error('Readiness request timed out.')), timeoutMs);
+    const timer = setTimeout(() => finish(Object.assign(new Error('Readiness request timed out.'), { code: 'ETIMEDOUT' })), timeoutMs);
     signal.addEventListener('abort', abort, { once: true });
     request.once('response', (response) => {
       response.destroy();
@@ -44,7 +49,7 @@ function probe(target: HttpTarget, pathname: string, timeoutMs: number, signal: 
       finish(undefined, response.statusCode);
     });
     request.once('error', finish);
-    request.once('close', () => finish(new Error('Readiness connection closed before response headers.')));
+    request.once('close', () => finish(Object.assign(new Error('Readiness connection closed before response headers.'), { code: 'ECONNRESET' })));
     if (signal.aborted) abort();
   });
 }

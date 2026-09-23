@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { AttemptSummary } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import { attempts, hint, shortProject, state, type Entry } from "./lib/model";
@@ -8,29 +7,24 @@ import { AppLink, CopyButton, Notice, Path, Status } from "./components/shared";
 import { previewActions, PreviewMenu } from "./preview-actions";
 import { Activity } from "./activity";
 import { Diagnostics } from "./diagnostics";
+import { usePreviewView, type PreviewView } from "./lib/view-state";
 
-export type Tab = "activity" | "logs" | "configuration";
 export function Preview({
   entry,
   mutate,
   acting,
   revision,
-  refresh,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
   revision: number;
-  refresh: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("activity");
-  const [attemptId, setAttemptId] = useState<string>();
-  const [clearAfter, setClearAfter] = useState<number>();
-  const [source, setSource] = useState("");
-  const [query, setQuery] = useState("");
-  const [wrapLogs, setWrapLogs] = useState(false);
+  const [view, updateView] = usePreviewView(entry.owner.id, entry.name);
+  const { attemptId, clearAfter, source, query, wrapLogs, showContext } = view;
   const { owner, preview: p } = entry;
   const retained = attempts(p);
+  const tab = retained.length ? view.tab : "activity";
   const selected = attemptId
     ? retained.find((attempt) => attempt.id === attemptId)
     : retained[0];
@@ -46,11 +40,9 @@ export function Preview({
     : undefined;
   const context = hint(entry);
   function openLogs(attempt: AttemptSummary, name = "") {
-    setAttemptId(attempt.id);
-    setClearAfter(undefined);
-    setSource(name);
-    setQuery("");
-    setTab("logs");
+    updateView({
+      attemptId: attempt.id, clearAfter: undefined, source: name, query: "", tab: "logs",
+    });
     requestAnimationFrame(() =>
       document.getElementById("tab-logs")?.focus({ preventScroll: true }),
     );
@@ -133,8 +125,10 @@ export function Preview({
           className="preview-tabs"
           value={tab}
           onValueChange={(value) => {
-            if (value !== "activity" && selected) setAttemptId(selected.id);
-            setTab(value as Tab);
+            updateView({
+              tab: value as PreviewView["tab"],
+              ...(value !== "activity" && selected ? { attemptId: selected.id } : {}),
+            });
           }}
         >
           <TabsList
@@ -172,9 +166,7 @@ export function Preview({
                     <Button
                       variant="outline"
                       onClick={() => {
-                        setAttemptId(retained[0]?.id);
-                        setClearAfter(undefined);
-                        setSource("");
+                        updateView({ attemptId: retained[0]?.id, clearAfter: undefined, source: "" });
                       }}
                     >
                       Show latest attempt
@@ -186,23 +178,22 @@ export function Preview({
                 <Diagnostics
                   entry={entry}
                   revision={revision}
-                  refresh={refresh}
                   clearAfter={clearAfter}
-                  setClearAfter={setClearAfter}
+                  setClearAfter={(clearAfter) => updateView({ clearAfter })}
                   tab={view}
                   selected={selected}
                   retained={retained}
                   selectAttempt={(id) => {
-                    setAttemptId(id);
-                    setClearAfter(undefined);
-                    setSource("");
+                    updateView({ attemptId: id, clearAfter: undefined, source: "" });
                   }}
                   source={source}
-                  setSource={setSource}
+                  setSource={(source) => updateView({ source })}
                   query={query}
-                  setQuery={setQuery}
+                  setQuery={(query) => updateView({ query })}
                   wrapLogs={wrapLogs}
-                  setWrapLogs={setWrapLogs}
+                  setWrapLogs={(wrapLogs) => updateView({ wrapLogs })}
+                  showContext={showContext}
+                  setShowContext={(showContext) => updateView({ showContext })}
                   mutate={mutate}
                   acting={acting}
                 />

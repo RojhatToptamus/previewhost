@@ -191,7 +191,7 @@ export async function startDashboard(options: {
           // Stop and delete keep their own authorization and concurrency guards.
           throwIfAborted(signal);
           const stopped = await client.stop(p.name, { expected: p.expected });
-          if (stopped.latest?.id !== attemptId || !['stopped', 'failed'].includes(stopped.latest.state)) {
+          if (stopped.latest?.id !== attemptId || !['stopped', 'failed', 'canceled'].includes(stopped.latest.state)) {
             throw new PreviewError('STALE_ATTEMPT', 'No restartable configuration remains. Data was not deleted; ask your agent to start the preview.');
           }
           throwIfAborted(signal);

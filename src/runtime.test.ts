@@ -162,6 +162,8 @@ test('cancel and wait target exact attempts; timeout and stale cancellation do n
   assert.equal(await (await fetch(first.url!)).text(), '<h1>one</h1>');
   await runtime.cancel('page', second.candidate!.id);
   assert.equal((await runtime.wait('page', second.candidate!.id)).state, 'canceled');
+  await assert.rejects(runtime.startAgain('page', second.candidate!.id), code('ALREADY_EXISTS'));
+  assert.equal(await (await fetch(first.url!)).text(), '<h1>one</h1>');
   const third = await runtime.replace('page', { name: 'page', type: 'attach', url: `http://127.0.0.1:${address.port}` });
   allow = true;
   await ready(runtime, third);
@@ -200,8 +202,14 @@ test('readiness rejects upgrades and stop cancels a server that never sends head
   const spec: PreviewSpec = { name: 'bad-health', type: 'attach', url: `http://127.0.0.1:${address.port}`, timeoutMs: 100 };
   received = () => {};
   const first = await runtime.start(spec);
-  assert.equal((await runtime.wait(spec.name, first.candidate!.id)).error?.code, 'START_FAILED');
+  const upgrade = await runtime.wait(spec.name, first.candidate!.id);
+  assert.equal(upgrade.error?.code, 'START_FAILED');
+  assert.match(upgrade.error.message, /HTTP 101/);
   upgrading = false;
+  const silent = await runtime.start(spec);
+  const timeout = await runtime.wait(spec.name, silent.candidate!.id);
+  assert.equal(timeout.error?.code, 'START_FAILED');
+  assert.match(timeout.error.message, /response headers timed out/);
   const requestReceived = new Promise<void>((resolve) => { received = resolve; });
   const next = await runtime.start({ ...spec, timeoutMs: 5000 });
   await requestReceived;
@@ -209,6 +217,26 @@ test('readiness rejects upgrades and stop cancels a server that never sends head
   assert.equal((await runtime.wait(spec.name, next.candidate!.id)).state, 'canceled');
   await delay(20);
   assert.equal(sockets.size, 0);
+});
+
+test('readiness reports the latest connection failure instead of an earlier HTTP error', async (t) => {
+  let requests = 0;
+  const backend = http.createServer((_request, response) => {
+    requests++;
+    response.writeHead(503, { 'x-private': 'fake-private-header' });
+    response.end('fake-private-response');
+    backend.close();
+  });
+  await new Promise<void>((resolve) => backend.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve) => backend.close(() => resolve())));
+  const address = backend.address(); assert.ok(address && typeof address !== 'string');
+  const { runtime } = await fixture(t);
+  const started = await runtime.start({ name: 'closed-health', type: 'attach', url: `http://127.0.0.1:${address.port}`, timeoutMs: 300 });
+  const failed = await runtime.wait(started.name, started.candidate!.id);
+  assert.equal(failed.error?.code, 'START_FAILED');
+  assert.equal(requests, 1);
+  assert.match(failed.error.message, /connection refused/);
+  assert.doesNotMatch(failed.error.message, /503|fake-private|127\.0\.0\.1/);
 });
 
 test('terminal history stays bounded while attempts remain separately addressable', async (t) => {

@@ -1,6 +1,6 @@
 // The capability stays in this module; it is never included in rendered data or URLs.
 let capability = location.hash.slice(1);
-history.replaceState(null, "", "/");
+history.replaceState(history.state, "", "/");
 try {
   if (capability) sessionStorage.setItem("previewhost-dashboard", capability);
   else capability = sessionStorage.getItem("previewhost-dashboard") ?? "";

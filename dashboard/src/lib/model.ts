@@ -151,13 +151,13 @@ export function hint(entry: Entry) {
   if (p?.candidate)
     return p.active ? "Your previous app is still running." : "";
   if (p?.busy) return "";
-  if (p?.active && p.latest?.state === "failed")
-    return "Your previous app is still running.";
+  if (p?.active && p.latest && ["failed", "canceled"].includes(p.latest.state))
+    return "Your previous app is still running. Source edits and database writes are not rolled back.";
   if (p?.active) return "";
   if (p?.latest?.state === "failed")
     return "Fix the startup error, then retry.";
   if (p?.latest?.state === "canceled")
-    return "Startup was canceled; ask your agent to start again only when you want to continue.";
+    return "Start preview uses the same configuration and current source.";
   if (!p)
     return "Ask your agent to continue when setup is complete and you want to start this worktree.";
   return p?.data

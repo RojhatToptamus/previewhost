@@ -575,12 +575,6 @@
   flex: 1;
   min-width: 180px;
 }
-.refresh-details {
-  min-width: 88px;
-}
-.refresh-icon {
-  display: none;
-}
 .log-options {
   display: flex;
   flex-wrap: wrap;
@@ -590,6 +584,9 @@
   width: 100%;
 }
 .log-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--t4);
 }
@@ -678,6 +675,7 @@
 }
 .attempt-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 12px;
   padding: 10px 0 16px;
@@ -709,6 +707,14 @@
   margin-top: 12px;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+.attempt-time {
+  color: var(--t4);
+  font-size: 11px;
+}
+.attempt-split .attempt-time {
+  display: block;
+  margin-top: 4px;
 }
 .data-table,
 .definitions {
@@ -760,28 +766,8 @@
   gap: 8px;
   margin-top: 6px;
 }
-.activity-row {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  padding: 12px 0;
-}
-.activity-row + .activity-row,
 .request + .request {
   border-top: 1px solid var(--divider);
-}
-.activity-row time {
-  flex: none;
-  width: 90px;
-  color: var(--t4);
-}
-.activity-row > div {
-  min-width: 0;
-}
-.attempt-id {
-  display: block;
-  overflow-wrap: anywhere;
-  color: var(--t4);
 }
 .request {
   display: flex;
@@ -840,6 +826,12 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+.secrets-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .secrets-page .summary {
   margin-bottom: 8px;
@@ -952,16 +944,14 @@
   .logs-toolbar > [data-slot="select-trigger"] {
     width: 100%;
   }
-  .diagnostic-toolbar .refresh-details {
-    min-width: 32px;
-    width: 32px;
-    padding: 0;
+  .logs-toolbar > .attempt-select {
+    grid-column: 1 / 3;
+    max-width: none;
   }
-  .refresh-icon {
-    display: block;
-  }
-  .refresh-label {
-    display: none;
+  .logs-toolbar > [data-slot="select-trigger"]:not(.attempt-select) {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    max-width: none;
   }
   .logs-toolbar > [data-slot="input-group"] {
     grid-column: 1/-1;
@@ -981,13 +971,6 @@
   }
   .save-row button {
     margin-left: auto;
-  }
-  .activity-row {
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .activity-row > div {
-    width: 100%;
   }
   .secret-row {
     padding: 10px 12px;

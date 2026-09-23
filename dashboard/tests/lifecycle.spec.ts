@@ -26,6 +26,9 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
     runtime: Awaited<ReturnType<typeof createPreviewRuntime>>;
   }> = [];
   let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
+  let releaseSecond = () => {};
+  let releaseThird = () => {};
+  let releaseLists = () => {};
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -89,9 +92,34 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
       },
     });
     await dashboard.open();
+    const sorted = [...fixtures].sort((a, b) => a.id.localeCompare(b.id));
+    const secondPage = new Promise<void>(resolve => { releaseSecond = resolve; });
+    const thirdPage = new Promise<void>(resolve => { releaseThird = resolve; });
+    let holdPages = true;
+    let listGate: Promise<void> | undefined;
+    let rejectRecheck = false;
+    await page.route("**/api", async route => {
+      const input = route.request().postDataJSON();
+      if (input.action === "list") {
+        if (holdPages && input.after === sorted[15].id) await secondPage;
+        if (holdPages && input.after === sorted[31].id) await thirdPage;
+        if (listGate) await listGate;
+      }
+      if (input.action === "recheck" && rejectRecheck) {
+        await route.fulfill({ json: { error: { code: "TIMEOUT", message: "Fixture owner did not respond." } } });
+      } else await route.continue();
+    });
     await page.goto(launch);
     const nav = page.locator('[data-slot="sidebar-content"]');
+    await expect(nav.locator(".preview-nav")).toHaveCount(16);
+    await expect(page.getByRole("main").getByRole("table")).toBeVisible();
+    releaseSecond();
+    await expect(nav.locator(".preview-nav")).toHaveCount(32);
+    await expect(page.getByRole("status", { name: "Loading remaining previews" })).toBeVisible();
+    await page.screenshot({ path: "/private/tmp/previewhost-progressive-loading.png", animations: "disabled" });
+    releaseThird();
     await expect(nav.locator(".preview-nav")).toHaveCount(100);
+    holdPages = false;
     await expect(nav.locator(".preview-nav").first()).toContainText(
       "worktree-098",
     );
@@ -103,6 +131,41 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
     await search.fill("worktree-099");
     await nav.locator(".preview-nav").click();
     await expect(search).toHaveValue("worktree-099");
+    const details = page.getByRole("article", { name: "Preview details" });
+    await expect(details.locator(".preview-title")).toContainText("Ready");
+    listGate = new Promise<void>(resolve => { releaseLists = resolve; });
+    // Row recheck updates an unselected owner without waiting for the full scan.
+    const stoppedRow = await fixtures[98].runtime.stop("app");
+    await search.fill("worktree-098");
+    await nav.getByRole("button", { name: "Actions for app" }).click();
+    await page.getByRole("menuitem", { name: "Recheck status", exact: true }).click();
+    await expect(nav.locator(".preview-nav")).toContainText("Stopped");
+    await expect(details).toContainText("worktree-099");
+    const resumedRow = await fixtures[98].runtime.startAgain("app", stoppedRow.latest!.id);
+    await fixtures[98].runtime.wait("app", resumedRow.candidate!.id);
+    await nav.getByRole("button", { name: "Actions for app" }).click();
+    await page.getByRole("menuitem", { name: "Recheck status", exact: true }).click();
+    await expect(nav.locator(".preview-nav")).toContainText("Ready");
+    await search.fill("worktree-099");
+    // A selected-owner failure clears stale actions even while the full scan is held.
+    rejectRecheck = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(details.locator(".preview-title")).toContainText("Unavailable");
+    await expect(details.getByRole("link", { name: "Open app", exact: true })).toHaveCount(0);
+    await expect(details.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
+    await expect(nav.locator(".preview-nav")).toHaveCount(1);
+    const stoppedNeighbor = await fixtures[99].runtime.stop("app");
+    rejectRecheck = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(details.locator(".preview-title")).toContainText("Stopped");
+    await search.fill("");
+    await expect(nav.locator(".preview-nav")).toHaveCount(100);
+    const restartedNeighbor = await fixtures[99].runtime.startAgain("app", stoppedNeighbor.latest!.id);
+    await fixtures[99].runtime.wait("app", restartedNeighbor.candidate!.id);
+    listGate = undefined;
+    releaseLists();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(details.locator(".preview-title")).toContainText("Ready");
     const neighborUrl = (await fixtures[99].runtime.get("app")).url!;
     await search.fill("");
     await filter.click();
@@ -145,12 +208,20 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
     await expect(
       row.getByRole("button", { name: "Actions for app" }),
     ).toBeFocused();
+    await row.locator(".preview-nav").click();
+    listGate = new Promise<void>(resolve => { releaseLists = resolve; });
     await row.getByRole("button", { name: "Actions for app" }).click();
     await page.getByRole("menuitem", { name: "Remove entry…" }).click();
     await page
       .getByRole("button", { name: "Remove entry", exact: true })
       .click();
+    await fixtures[98].daemon.closed;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(row).toHaveCount(0);
+    await expect(page.getByText("Preview no longer listed", { exact: true })).toHaveCount(0);
+    listGate = undefined;
+    releaseLists();
+    await expect(page.getByText("Preview no longer listed", { exact: true })).toBeVisible();
     expect(await (await fetch(neighborUrl)).text()).toBe("99");
     await filter.click();
     await page
@@ -187,6 +258,7 @@ test("100 previews stay navigable and sidebar actions preserve neighboring previ
     ).toBe(true);
     expect(errors).toEqual([]);
   } finally {
+    releaseSecond(); releaseThird(); releaseLists();
     await dashboard?.close();
     await Promise.all(fixtures.map((f) => f.daemon.close()));
     await rm(directory, { recursive: true, force: true });

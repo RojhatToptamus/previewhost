@@ -12,6 +12,7 @@ import {
   type Owner,
 } from "./lib/model";
 import { Button } from "./components/ui/button";
+import { Spinner } from "./components/ui/spinner";
 import { Toggle } from "./components/ui/toggle";
 import { Toaster } from "./components/ui/sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
@@ -55,11 +56,10 @@ import {
   SelectItem,
 } from "./components/ui/select";
 import { SecretManager } from "./secrets";
+import { useSelection, type Selection } from "./lib/view-state";
 import brandSvg from "../../assets/previewhost.svg?raw";
 
 const brandMark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
-
-type Selection = { owner: string; name?: string } | "secrets" | undefined;
 
 export function App() {
   const [dark, setDark] = useState(() => {
@@ -72,12 +72,13 @@ export function App() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
-  const [selection, setSelection] = useState<Selection>();
+  const [selection, select] = useSelection();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
   const [acting, setActing] = useState(false);
   const mutation = useRef(false);
+  const selectedOwner = typeof selection === "object" ? selection.owner : undefined;
   useEffect(() => {
     document.body.classList.toggle("ph-dark", dark);
     try {
@@ -90,10 +91,22 @@ export function App() {
     if (!authenticated) return;
     const controller = new AbortController();
     let pending = false;
+    setLoaded(false);
     async function refresh() {
       if (pending || document.hidden) return;
       pending = true;
       try {
+        // A selected preview should not wait behind unrelated, unreachable owners.
+        if (selectedOwner) {
+          try {
+            const owner = await call<Owner>({ action: "recheck", owner: selectedOwner }, controller.signal);
+            if (!controller.signal.aborted) setOwners(current => mergeOwners(current, [owner]));
+          } catch (error) {
+            if (!controller.signal.aborted) {
+              setOwners(current => ownerReadFailed(current, selectedOwner, error));
+            }
+          }
+        }
         const result: Owner[] = [];
         let after: string | undefined;
         do {
@@ -104,8 +117,7 @@ export function App() {
           result.push(...page.owners);
           after = page.next;
           if (!controller.signal.aborted && after) {
-            setOwners((current) => (current.length ? current : [...result]));
-            setLoaded(true);
+            setOwners(current => mergeOwners(current, page.owners));
           }
         } while (after && !controller.signal.aborted);
         if (!controller.signal.aborted) {
@@ -130,7 +142,7 @@ export function App() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [revision]);
+  }, [revision, selectedOwner]);
   const mutate: Mutate = useCallback(
     async <T,>(body: object, success?: string | ((result: T) => string)) => {
       if (mutation.current)
@@ -145,6 +157,9 @@ export function App() {
       const id = success === undefined ? undefined : toast.loading("Working…");
       try {
         const result = await call<T>(body);
+        if ("action" in body && body.action === "recheck") {
+          setOwners(current => mergeOwners(current, [result as Owner]));
+        }
         if (success !== undefined)
           toast.success(
             typeof success === "function" ? success(result) : success,
@@ -152,6 +167,10 @@ export function App() {
           );
         return { ok: true, result };
       } catch (error) {
+        if ("action" in body && body.action === "recheck" && "owner" in body && typeof body.owner === "string") {
+          const ownerId = body.owner;
+          setOwners(current => ownerReadFailed(current, ownerId, error));
+        }
         const message =
           error instanceof Error && error.cause
             ? errorMessage(error)
@@ -167,9 +186,6 @@ export function App() {
     },
     [],
   );
-  function select(value: Selection) {
-    setSelection(value);
-  }
   const all = owners.flatMap(entries);
   const filtered = visibleEntries(owners, query, filter);
   const selected =
@@ -215,6 +231,7 @@ export function App() {
         </header>
         <Navigation
           owners={owners}
+          loading={!loaded}
           selection={selection}
           select={select}
           query={query}
@@ -243,7 +260,7 @@ export function App() {
             </div>
           ) : selection ? (
             selected &&
-            entries(selected).some((entry) => entry.name === selection.name) ? (
+            (selected.error || entries(selected).some((entry) => entry.name === selection.name)) ? (
               <Preview
                 key={selected.id + "/" + (selection.name ?? "")}
                 entry={{
@@ -256,19 +273,18 @@ export function App() {
                 mutate={mutate}
                 acting={acting}
                 revision={revision}
-                refresh={() => setRevision((value) => value + 1)}
               />
             ) : (
               <div className="page">
-                <Notice title="Preview no longer listed">
+                {!loaded ? <Loading /> : <Notice title="Preview no longer listed">
                   Start through your agent or CLI to reconnect.
-                </Notice>
+                </Notice>}
               </div>
             )
           ) : (
             <div className="page">
               <h1>Previews</h1>
-              {!loaded ? (
+              {!loaded && !all.length ? (
                 <Loading>Connecting to local previews…</Loading>
               ) : !all.length ? (
                 <EmptyState title="No previews running">
@@ -288,9 +304,10 @@ export function App() {
                       ).length
                     }{" "}
                     to review
+                    {!loaded && <Spinner className="ml-2 inline-block" aria-label="Loading remaining previews" />}
                   </p>
                   {!filtered.length ? (
-                    <EmptyState title="No matching previews">
+                    !loaded ? <Loading>Checking other projects…</Loading> : <EmptyState title="No matching previews">
                       Try another project or preview name.
                     </EmptyState>
                   ) : (
@@ -319,8 +336,27 @@ export function App() {
   );
 }
 
+function mergeOwners(current: Owner[], page: Owner[]) {
+  const byId = new Map(current.map(owner => [owner.id, owner]));
+  for (const owner of page) byId.set(owner.id, owner);
+  return [...byId.values()];
+}
+
+function ownerReadFailed(current: Owner[], id: string, error: unknown) {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause && typeof cause === "object" && "code" in cause && cause.code === "NOT_FOUND") {
+    return current.filter(owner => owner.id !== id);
+  }
+  return mergeOwners(current, [{
+    id,
+    project: current.find(owner => owner.id === id)?.project,
+    error: { message: errorMessage(error) },
+  }]);
+}
+
 function Navigation({
   owners,
+  loading,
   list,
   selection,
   select,
@@ -332,6 +368,7 @@ function Navigation({
   acting,
 }: {
   owners: Owner[];
+  loading: boolean;
   list: Entry[];
   selection: Selection;
   select: (value: Selection) => void;
@@ -440,7 +477,7 @@ function Navigation({
           </SidebarMenu>
           {!list.length && (
             <p className="sidebar-empty">
-              No matching previews
+              {loading ? "Checking previews…" : "No matching previews"}
             </p>
           )}
         </SidebarGroup>

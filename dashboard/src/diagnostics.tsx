@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCwIcon, WrapTextIcon } from "lucide-react";
+import { MoreHorizontalIcon } from "lucide-react";
 import type {
   AttemptSummary,
   LogResult,
@@ -17,7 +17,11 @@ import {
   SelectGroup,
   SelectItem,
 } from "./components/ui/select";
-import { Toggle } from "./components/ui/toggle";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup,
+  DropdownMenuItem, DropdownMenuCheckboxItem, DropdownMenuSeparator,
+} from "./components/ui/dropdown-menu";
+import { searchLogs } from "./lib/log-search";
 import { Spinner } from "./components/ui/spinner";
 import { ScrollArea } from "./components/ui/scroll-area";
 import {
@@ -48,10 +52,11 @@ type Props = {
   setQuery: (query: string) => void;
   wrapLogs: boolean;
   setWrapLogs: (wrap: boolean) => void;
+  showContext: boolean;
+  setShowContext: (context: boolean) => void;
   mutate: Mutate;
   acting: boolean;
   revision: number;
-  refresh: () => void;
   clearAfter?: number;
   setClearAfter: (after: number | undefined) => void;
 };
@@ -74,10 +79,11 @@ export function Diagnostics({
   setQuery,
   wrapLogs,
   setWrapLogs,
+  showContext,
+  setShowContext,
   mutate,
   acting,
   revision,
-  refresh,
   clearAfter,
   setClearAfter,
 }: Props) {
@@ -136,15 +142,10 @@ export function Diagnostics({
   const current = result?.key === key ? result : undefined;
   const logs = current?.logs;
   const description = current?.description;
-  const matches =
-    logs && query
-      ? logs.text
-          .split("\n")
-          .filter((line) => line.toLowerCase().includes(query.toLowerCase()))
-      : [];
+  const matches = logs && query ? searchLogs(logs.text, query, showContext) : undefined;
   const output = logs
     ? query
-      ? matches.join("\n") || "No matching lines in captured output."
+      ? matches?.text || "No matching lines in captured output."
       : logs.text ||
         (clearAfter === undefined
           ? "No output captured."
@@ -172,7 +173,7 @@ export function Diagnostics({
           />
         )}
         <Select value={selected.id} onValueChange={selectAttempt}>
-          <SelectTrigger aria-label="Diagnostic attempt">
+          <SelectTrigger aria-label="Diagnostic attempt" className="attempt-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -213,63 +214,59 @@ export function Diagnostics({
             </SelectContent>
           </Select>
         )}
-        <Button
-          variant="outline"
-          className="refresh-details"
-          aria-label={loading ? "Refreshing…" : "Refresh"}
-          disabled={loading || acting}
-          onClick={refresh}
-        >
-          {loading ? <Spinner /> : <RefreshCwIcon className="refresh-icon" />}
-          <span className="refresh-label">
-            {loading ? "Refreshing…" : "Refresh"}
-          </span>
-        </Button>
+        {tab === "configuration" && loading && (
+          <Spinner aria-label="Loading configuration" />
+        )}
+        {tab === "logs" && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" aria-label="Log options">
+                <MoreHorizontalIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuGroup>
+                <DropdownMenuCheckboxItem checked={wrapLogs} onCheckedChange={setWrapLogs}>
+                  Wrap lines
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem checked={showContext} onCheckedChange={setShowContext} disabled={!query}>
+                  Include surrounding lines
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  disabled={loading || !logs?.text}
+                  onSelect={() => {
+                    setClearAfter(logs!.cursor);
+                    body.current?.scrollTo(0, 0);
+                  }}
+                >
+                  Clear view
+                </DropdownMenuItem>
+                {clearAfter !== undefined && (
+                  <DropdownMenuItem onSelect={() => setClearAfter(undefined)}>
+                    Show earlier logs
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {tab === "logs" && (
           <div className="log-options">
             <p role="status" className="log-note">
+              {loading && <Spinner aria-label="Refreshing output" />}
               {logs
                 ? query
-                  ? `${matches.length} matching ${matches.length === 1 ? "line" : "lines"}`
-                  : clearAfter === undefined
-                    ? "Captured output"
-                    : "Earlier output hidden in this view"
+                  ? `${matches!.count} matching ${matches!.count === 1 ? "line" : "lines"}${showContext ? " · With context" : ""}`
+                  : "Captured output"
                 : loading
                   ? "Loading output…"
                   : "Output unavailable"}
+              {logs && clearAfter !== undefined ? " · Earlier output hidden" : ""}
               {logs?.truncated ? " · Earlier output omitted" : ""}
             </p>
-            <div className="flex flex-wrap items-center gap-1">
-              {clearAfter !== undefined && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setClearAfter(undefined)}
-                >
-                  Show earlier logs
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading || !logs?.text}
-                onClick={() => {
-                  setClearAfter(logs!.cursor);
-                  body.current?.scrollTo(0, 0);
-                }}
-                title="Hide captured output in this view only"
-              >
-                Clear view
-              </Button>
-              <Toggle
-                size="sm"
-                pressed={wrapLogs}
-                onPressedChange={setWrapLogs}
-              >
-                <WrapTextIcon data-icon="inline-start" />
-                Wrap lines
-              </Toggle>
-            </div>
           </div>
         )}
       </div>
@@ -297,35 +294,46 @@ export function Diagnostics({
           </pre>
         ) : (
           description && (
-            <Configuration entry={entry} description={description} />
+            <Configuration description={description} />
           )
         )}
       </div>
       {tab === "configuration" && description && (
         <div className="save-row">
-          <p>Existing files are never overwritten.</p>
-          <Button
-            variant="outline"
-            disabled={acting || loading}
-            onClick={() =>
-              void mutate<{ file: string; externalSources: string[] }>(
-                {
-                  action: "saveConfiguration",
-                  owner: entry.owner.id,
-                  name: entry.name,
-                  attemptId: selected.id,
-                },
-                (result) =>
-                  `Saved ${result.file}. The running preview is unchanged.` +
-                  (result.externalSources.length
-                    ? " Sources outside this project keep absolute paths: " +
-                      result.externalSources.join(", ")
-                    : ""),
-              )
-            }
-          >
-            Save as preview.yaml
-          </Button>
+          {entry.owner.configuration?.error ? (
+            <p>Configuration needs attention. See Activity.</p>
+          ) : entry.owner.configuration ? (
+            <p>
+              <code>{entry.owner.configuration.file.split("/").at(-1)}</code> already exists.
+              {" "}Showing this attempt’s configuration.
+            </p>
+          ) : (
+            <>
+              <p>Existing files are never overwritten.</p>
+              <Button
+                variant="outline"
+                disabled={acting || loading}
+                onClick={() =>
+                  void mutate<{ file: string; externalSources: string[] }>(
+                    {
+                      action: "saveConfiguration",
+                      owner: entry.owner.id,
+                      name: entry.name,
+                      attemptId: selected.id,
+                    },
+                    (result) =>
+                      `Saved ${result.file}. The running preview is unchanged.` +
+                      (result.externalSources.length
+                        ? " Sources outside this project keep absolute paths: " +
+                          result.externalSources.join(", ")
+                        : ""),
+                  )
+                }
+              >
+                Save as preview.yaml
+              </Button>
+            </>
+          )}
         </div>
       )}
     </>
@@ -341,10 +349,8 @@ const bindingLabels: Record<string, string> = {
 };
 
 function Configuration({
-  entry,
   description,
 }: {
-  entry: Entry;
   description: PreviewDescription;
 }) {
   const keys = new Set([
@@ -432,12 +438,6 @@ function Configuration({
           </Table>
         </ScrollArea>
       </Section>
-      {entry.owner.configuration && (
-        <p className="text-muted-foreground">
-          {entry.owner.configuration.file.split("/").at(-1)} exists. This view
-          shows the selected runtime attempt.
-        </p>
-      )}
       <Section title="Service definitions">
         {spec.type === "environment" && (
           <div className="definitions">

@@ -79,7 +79,7 @@ export function previewActions(entry: Entry): PreviewAction[] {
     !p.active &&
     !p.busy &&
     !p.candidate &&
-    ["stopped", "failed"].includes(p.latest?.state ?? "") &&
+    ["stopped", "failed", "canceled"].includes(p.latest?.state ?? "") &&
     !needsCleanup(p)
   )
     result.push({
@@ -101,7 +101,7 @@ function resetRequest(entry: Entry): Confirmation | undefined {
   if (
     !p?.data?.resources.length ||
     !p.latest ||
-    !(p.active || ["stopped", "failed"].includes(p.latest.state)) ||
+    !(p.active || ["stopped", "failed", "canceled"].includes(p.latest.state)) ||
     p.busy ||
     p.candidate ||
     (needsCleanup(p) && !deletionNeedsRetry(p))
