@@ -4,7 +4,7 @@ Connect your coding agent to Previewhost so it can start your app, read logs, an
 
 ## Register a client
 
-Use macOS with Node.js 22.23 or later. Install the global executable:
+Use Node.js 22.23 or later on a [supported platform](installation.md#requirements). Install the global executable:
 
 ```sh
 npm install -g previewhost

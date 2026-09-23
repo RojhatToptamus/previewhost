@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, fork } from 'node:child_process';
+import { once } from 'node:events';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { makePrivateDirectory } from './private-files.js';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { createPreviewRuntime } from './runtime.js';
@@ -14,12 +17,67 @@ import { reviewStaleProject, removeStaleProject, writeProjectRecord, connectProj
 import { createDataOwner } from './data.js';
 import { SecretSetup } from './secrets-setup.js';
 import { testKeystore } from './testSupport/keystore.js';
+import { publicAccess } from './testSupport/permissions.js';
 import type { PreviewSpec } from './contracts.js';
 
 const execute = promisify(execFile);
-const mac = { skip: process.platform !== 'darwin' };
 
-test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', mac, async t => {
+test('project records reject unsafe permissions and preserve readers during replacement and removal', { timeout: 15000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'previewhost-record-race-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, basename(projectOwnerDirectory(root)));
+  makePrivateDirectory(directory);
+  const record = { projectDirectory: root, dataDirectory: join(root, 'data') };
+  await writeProjectRecord(directory, record);
+  const path = join(directory, 'connection.json');
+  await publicAccess(path, true);
+  await assert.rejects(readProjectRecord(directory), { code: 'UNAUTHORIZED' });
+  await publicAccess(path, false);
+  assert.deepEqual(await readProjectRecord(directory), record);
+  await writeFile(path, '{}');
+  await assert.rejects(readProjectRecord(directory), { code: 'UNAUTHORIZED' });
+  await writeProjectRecord(directory, record);
+  const reader = await open(path, 'r');
+  try {
+    const replacement = { ...record, dataDirectory: join(root, 'replacement') };
+    await writeProjectRecord(directory, replacement);
+    assert.deepEqual(JSON.parse(await reader.readFile('utf8')), record);
+    assert.deepEqual(await readProjectRecord(directory), replacement);
+  } finally { await reader.close(); }
+  await writeProjectRecord(directory, record);
+
+  const writer = join(root, 'owner.mjs');
+  await writeFile(writer, `import { unlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { lockProject, writeProjectRecord } from ${JSON.stringify(new URL('./project.js', import.meta.url).href)};
+const directory = process.argv[2], record = JSON.parse(process.argv[3]);
+const lock = await lockProject(directory);
+try {
+  process.send('ready');
+  for (let i = 0; i < 500; i++) {
+    await writeProjectRecord(directory, record);
+    await unlink(join(directory, 'connection.json'));
+  }
+} finally { await lock.close(); process.disconnect(); }
+`);
+  const child = fork(writer, [directory, JSON.stringify(record)], { execArgv: [], silent: true });
+  let stderr = ''; child.stderr!.on('data', data => { stderr += data; });
+  const exited = once(child, 'exit');
+  try {
+    await once(child, 'message');
+    while (child.exitCode === null && child.signalCode === null) {
+      const current = await readProjectRecord(directory);
+      if (current) assert.deepEqual(current, record);
+    }
+    assert.equal((await exited)[0], 0, stderr);
+    assert.equal(await readProjectRecord(directory), undefined);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exited;
+  }
+});
+
+test('entry removal preserves neighbors and refuses active, stale, and private-setup operations', async t => {
   const fixture = await testKeystore(t);
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
   const tokenFile = join(fixture.directory, 'control/token');
@@ -55,7 +113,7 @@ test('entry removal preserves neighbors and refuses active, stale, and private-s
   } finally { await client.close(); await daemon.close(); }
 });
 
-test('an empty owner can clear canceled secret editing without deleting the saved reference', mac, async t => {
+test('an empty owner can clear canceled secret editing without deleting the saved reference', async t => {
   const fixture = await testKeystore(t);
   await fixture.store.add('user', 'disposable/shared', 'FAKE');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['disposable/shared'], authorize: () => true });
@@ -76,7 +134,7 @@ test('an empty owner can clear canceled secret editing without deleting the save
   } finally { await client.close(); await daemon.close(); }
 });
 
-test('CLI manages a deleted source and removing the last entry retires only its idle owner', mac, async () => {
+test('CLI manages a deleted source and removing the last entry retires only its idle owner', async () => {
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-deleted-source-')));
   const client = connectProject({ projectDirectory: project, allowExec: true });
   const cli = resolve('dist/cli.js');
@@ -85,8 +143,14 @@ test('CLI manages a deleted source and removing the last entry retires only its 
       command: [process.execPath, '-e', "require('http').createServer((q,r)=>r.end('alive')).listen(+process.env.PORT,process.env.HOST)"] });
     const ready = await client.wait('app', started.candidate!.id);
     assert.equal(ready.state, 'ready');
+    if (process.platform === 'win32') {
+      // Windows locks a running process's cwd. Management must still work after stop and deletion.
+      await assert.rejects(rm(project, { recursive: true }), { code: 'EBUSY' });
+      assert.equal(await (await fetch(ready.url!)).text(), 'alive');
+      await client.stop('app');
+    }
     await rm(project, { recursive: true });
-    assert.equal(await (await fetch(ready.url!)).text(), 'alive');
+    if (process.platform !== 'win32') assert.equal(await (await fetch(ready.url!)).text(), 'alive');
     await execute(process.execPath, [cli, 'stop', 'app', '--project', project]);
     const stopped = (await client.get('app')).latest!;
     assert.equal(stopped.state, 'stopped');
@@ -106,18 +170,16 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
     for (let i = 0; i < 145; i++) {
       const projectDirectory = join(directory, 'source-' + i);
       const id = createHash('sha256').update(projectDirectory).digest('hex');
-      await mkdir(join(directory, id), { mode: 0o700 });
+      makePrivateDirectory(join(directory, id));
       await writeFile(join(directory, id, 'connection.json'), JSON.stringify({ projectDirectory, pid: process.pid, endpoint: 'http://127.0.0.1:1' }), { mode: 0o600 });
       await writeFile(join(directory, id, 'token'), 'a'.repeat(64), { mode: 0o600 });
     }
     const records = await discoverProjectOwners(directory);
     assert.equal(records.length, 145);
-    if (process.platform === 'darwin') {
-      const unavailable = join(directory, records[0].id);
-      await assert.rejects(removeOfflineProject(unavailable), { code: 'STALE_ATTEMPT' });
-      await assert.rejects(deleteOfflineData(unavailable, 'app', {}), { code: 'STALE_ATTEMPT' });
-      assert.ok((await readProjectRecord(unavailable))?.endpoint);
-    }
+    const unavailable = join(directory, records[0].id);
+    await assert.rejects(removeOfflineProject(unavailable), { code: 'STALE_ATTEMPT' });
+    await assert.rejects(deleteOfflineData(unavailable, 'app', {}), { code: 'STALE_ATTEMPT' });
+    assert.ok((await readProjectRecord(unavailable))?.endpoint);
     let launch = '';
     dashboard = await startDashboard({ discover: () => discoverProjectOwners(directory), openBrowser: async url => { launch = url; } });
     await dashboard.open();
@@ -138,7 +200,7 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 test('offline projects keep real PostgreSQL data discoverable and delete only explicitly confirmed resources', {
-  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 60_000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 60_000,
 }, async t => {
   const fixture = await testKeystore(t);
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-offline-project-')));
@@ -161,7 +223,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
   try {
     const args = [resolve('dist/cli.js'), 'start', '--project', project, '--file', file, '--allow-exec'];
     const first = JSON.parse((await execute(process.execPath, [...args, '--data-dir', dataDirectory, '--docker-socket', dockerSocket!], {
-      env: { ...process.env, NODE_OPTIONS: `--import=${hook}` }, timeout: 30_000,
+      env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, timeout: 30_000,
     })).stdout);
     assert.equal(await (await fetch(first.url)).text(), '1');
     await assert.rejects(client.remove('app', first.id), { code: 'BUSY' });
@@ -171,7 +233,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
     let record = (await readProjectRecord(ownerDirectory))!;
     assert.equal(record.endpoint, undefined); assert.equal(record.dataDirectory, dataDirectory);
     assert.deepEqual((await offlinePreviews(record)).map(p => p.name), ['app']);
-    const second = JSON.parse((await execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${hook}` }, timeout: 30_000 })).stdout);
+    const second = JSON.parse((await execute(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, timeout: 30_000 })).stdout);
     assert.equal(await (await fetch(second.url)).text(), '1');
     await client.shutdown(); await rm(project, { recursive: true });
     record = (await readProjectRecord(ownerDirectory))!;
@@ -225,11 +287,11 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
 });
 
 
-test('stale removal checks process liveness, locks, exact records, and data metadata without stopping anything', mac, async () => {
+test('stale removal checks process liveness, locks, exact records, and data metadata without stopping anything', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-stale-record-'));
   const projectDirectory = join(directory, 'removed-source');
   const recordDirectory = join(directory, createHash('sha256').update(projectDirectory).digest('hex'));
-  await mkdir(recordDirectory, { mode: 0o700 });
+  makePrivateDirectory(recordDirectory);
   const dataDirectory = join(directory, 'data');
   const data = await createDataOwner({ directory: dataDirectory }); await data.close();
   const exitedPid = Number((await execute(process.execPath, ['-e', 'console.log(process.pid)'])).stdout);

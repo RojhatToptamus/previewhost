@@ -20,6 +20,49 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  platforms:
+    name: Verify ${{ matrix.platform }} x64
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: Linux
+          - os: windows-2025
+            platform: Windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.0
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - name: Linux dependencies and databases
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y procps lsof
+          docker pull postgres:17-alpine
+          docker pull redis:7-alpine
+          echo 'PREVIEWHOST_TEST_DOCKER_SOCKET=/var/run/docker.sock' >> "$GITHUB_ENV"
+      - name: Shared suite
+        if: runner.os == 'Linux'
+        run: npm run verify
+      - name: Shared suite with WSL Docker
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-databases.ps1
+      - name: Installed package
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/platform-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/platform-package"
+          npm run check:package -- "$RUNNER_TEMP"/platform-package/*.tgz
+
   docs:
     name: Verify documentation
     runs-on: ubuntu-latest
@@ -40,10 +83,9 @@ jobs:
       - run: npm run test:docs
 
   verify:
-    name: Verify macOS package
-    # Colima uses this Intel runner in its own macOS integration suite.
+    name: Verify macOS x64
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    timeout-minutes: 40
     outputs:
       pack-dir-artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -56,15 +98,15 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: Install Docker tools
-        run: brew install colima docker
+        run: brew install lima docker
       - name: Start local Docker
-        id: docker
         run: |
-          colima start --runtime docker --vm-type vz --cpus 2 --memory 4
-          docker info
-          echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.colima/default/docker.sock" >> "$GITHUB_ENV"
+          limactl start --name=previewhost --tty=false --vm-type=vz --cpus=2 --memory=4 --mount-none template:docker-rootful
+          echo "DOCKER_HOST=unix://$HOME/.lima/previewhost/sock/docker.sock" >> "$GITHUB_ENV"
+          echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.lima/previewhost/sock/docker.sock" >> "$GITHUB_ENV"
       - name: Pull database images
         run: |
+          docker info
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
       - run: npm run verify:release
@@ -120,16 +162,6 @@ jobs:
           import assert from 'node:assert/strict';
           assert.match(process.env.PACK_ARTIFACT_ID ?? '', /^[1-9][0-9]*$/, 'Release requires the verified package artifact.');
           NODE
-      - name: Docker startup diagnostics
-        if: failure() && steps.docker.outcome == 'failure'
-        run: |
-          for file in "$HOME"/.colima/_lima/colima/ha.stderr.log "$HOME"/.colima/_lima/colima/serial*.log; do
-            if [ -f "$file" ]; then
-              echo "::group::$(basename "$file")"
-              cat "$file"
-              echo "::endgroup::"
-            fi
-          done
       - name: Stop local Docker
         if: always()
-        run: colima stop
+        run: limactl stop previewhost

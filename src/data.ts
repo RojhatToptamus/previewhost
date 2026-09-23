@@ -1,15 +1,16 @@
 import { constants } from 'node:fs';
-import { open, mkdir, lstat, realpath, opendir, rename, unlink, type FileHandle } from 'node:fs/promises';
+import { open, lstat, realpath, opendir, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { z } from 'zod';
 import { limits, nameSchema, type DataStatus, type OwnedDatabaseSpec, type StopOptions } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
-import { Docker, object } from './docker.js';
+import { Docker, object, defaultDockerEndpoint } from './docker.js';
 import { databaseRedactions, probeDatabase } from './database-connections.js';
 import { Keystore } from './keystore.js';
+import { isPrivate, makePrivateDirectory, openOwnerLock, requireSupportedPlatform } from './private-files.js';
+import { publishWindowsFile } from './windows.js';
 
 export interface DatabaseBinding { url: string; redactions: string[] }
 export interface DataOwner {
@@ -77,7 +78,7 @@ async function retainedRecords(root: Awaited<ReturnType<typeof acquireRoot>>): P
 
 /** Read ownership records under their existing lock without Docker recovery, keystore access, or writes. */
 export async function withRetainedData<T>(directory: string, read: (records: Array<{ name: string; data: DataStatus }>) => Promise<T>): Promise<T> {
-  if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Owned databases currently require macOS.');
+  requireSupportedPlatform();
   const root = await acquireRoot(directory, true);
   try {
     const records = (await retainedRecords(root)).map(record => ({ name: record.name, data: {
@@ -94,11 +95,11 @@ export async function withRetainedData<T>(directory: string, read: (records: Arr
 
 /** A retained data directory has one kernel-locked owner and one record per environment. */
 export async function createDataOwner(options: { directory: string; dockerSocket?: string; keystore?: Keystore }): Promise<DataOwner> {
-  if (process.platform !== 'darwin') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Owned databases currently require macOS.');
+  requireSupportedPlatform();
   if (!isAbsolute(options.directory)) throw new PreviewError('INVALID_INPUT', 'The data directory must be absolute.');
   const keystore = options.keystore ?? new Keystore();
   const root = await acquireRoot(options.directory);
-  const socketPath = options.dockerSocket ?? join(homedir(), '.docker/run/docker.sock');
+  const socketPath = options.dockerSocket ?? defaultDockerEndpoint();
   const entries = new Map<string, Entry>();
   const live = new Map<string, Live>();
   const locks = new Map<string, Promise<unknown>>();
@@ -470,32 +471,33 @@ async function acquireRoot(directory: string, readOnly = false) {
   let handle: FileHandle | undefined;
   let directoryHandle: FileHandle | undefined;
   try {
-    if (!readOnly) await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (!readOnly) makePrivateDirectory(directory);
     const before = await lstat(directory);
-    if (!before.isDirectory() || before.uid !== process.getuid!() || (before.mode & 0o077) !== 0) throw new Error();
+    if (!before.isDirectory() || !isPrivate(directory, before)) throw new Error();
     directory = await realpath(directory);
-    directoryHandle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    if (process.platform !== 'win32') directoryHandle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     const lockPath = join(directory, '.lock');
-    // Darwin O_EXLOCK is a kernel lock on this permanent inode; libuv opens CLOEXEC.
-    handle = await open(lockPath, constants.O_RDWR | (readOnly ? 0 : constants.O_CREAT) | constants.O_NOFOLLOW | constants.O_NONBLOCK | 0x20, 0o600);
+    // The lock inode also retains the stable data owner identifier.
+    handle = await openOwnerLock(lockPath, !readOnly);
     const lock = await handle.stat();
-    if (!lock.isFile() || lock.nlink !== 1 || lock.uid !== before.uid || (lock.mode & 0o077) !== 0 || lock.size > 64) throw new Error();
+    if (!lock.isFile() || lock.nlink !== 1 || !isPrivate(lockPath, lock) || lock.size > 64) throw new Error();
     let owner = (await handle.readFile('utf8')).trim();
-    if (!owner && !readOnly) { owner = fresh(); await handle.write(`${owner}\n`, 0, 'utf8'); await handle.sync(); await directoryHandle.sync(); }
+    if (!owner && !readOnly) { owner = fresh(); await handle.write(`${owner}\n`, 0, 'utf8'); await handle.sync(); await directoryHandle?.sync(); }
     if (!token.safeParse(owner).success) throw new Error();
     const assertRoot = async () => {
       const current = await lstat(lockPath);
       const root = await lstat(directory);
-      if (current.dev !== lock.dev || current.ino !== lock.ino || current.nlink !== 1 || current.uid !== before.uid || (current.mode & 0o077) !== 0
-        || !root.isDirectory() || root.dev !== before.dev || root.ino !== before.ino || root.uid !== before.uid || (root.mode & 0o077) !== 0) {
+      if (current.dev !== lock.dev || current.ino !== lock.ino || current.nlink !== 1 || !isPrivate(lockPath, current)
+        || !root.isDirectory() || root.dev !== before.dev || root.ino !== before.ino || !isPrivate(directory, root)) {
         throw cleanupError('The private data directory or permanent ownership lock changed.');
       }
     };
     const read = async (filename: string) => {
+      if (!(await lstat(join(directory, filename))).isFile()) throw cleanupError('A retained database record is not a regular file.');
       const file = await open(join(directory, filename), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         const info = await file.stat();
-        if (!info.isFile() || info.nlink !== 1 || info.uid !== before.uid || (info.mode & 0o077) !== 0 || info.size > 65_536) {
+        if (!info.isFile() || info.nlink !== 1 || !isPrivate(join(directory, filename), info) || info.size > 65_536) {
           throw cleanupError('A retained database record has unsafe size, ownership or permissions.');
         }
         const buffer = Buffer.alloc(65_537);
@@ -530,13 +532,15 @@ async function acquireRoot(directory: string, readOnly = false) {
         try {
           file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
           await file.writeFile(value); await file.sync(); await file.close(); file = undefined;
-          await assertRoot(); await rename(temporary, join(directory, filename)); await directoryHandle!.sync();
+          await assertRoot();
+          if (process.platform === 'win32') publishWindowsFile(temporary, join(directory, filename));
+          else { await rename(temporary, join(directory, filename)); await directoryHandle!.sync(); }
         } catch {
           throw cleanupError('The database ownership record could not be published.');
         } finally { await file?.close(); await unlink(temporary).catch(() => {}); }
       },
-      async remove(filename: string) { await assertRoot(); await unlink(join(directory, filename)); await directoryHandle!.sync(); },
-      async close() { await directoryHandle!.close(); await handle!.close(); },
+      async remove(filename: string) { await assertRoot(); await unlink(join(directory, filename)); await directoryHandle?.sync(); },
+      async close() { await directoryHandle?.close(); await handle!.close(); },
     };
   } catch (error) {
     await directoryHandle?.close(); await handle?.close();

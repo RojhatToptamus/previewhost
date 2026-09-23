@@ -411,7 +411,7 @@ If an owner already runs with different settings, follow the [owner restart inst
 ## Stored secrets
 
 Stored secrets use a password-backed encrypted keystore on macOS, Windows, and Linux.
-Optional automatic unlock uses the existing macOS Keychain helper. Native commands, automatic owners, and managed databases still require macOS.
+Optional automatic unlock uses the macOS Keychain helper. See the [platform and database requirements](installation.md#requirements).
 Commands below use `previewhost` from PATH, or `./node_modules/.bin/previewhost` from your application directory.
 `shop/dev/token` is an example name, bound with `{secret: shop/dev/token}` in a direct spec or optional file.
 

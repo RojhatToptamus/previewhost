@@ -11,7 +11,7 @@ If prerelease mode is enabled again, `.changeset/pre.json` selects its channel; 
 3. Merge the PR into `main`. The Release workflow creates or updates
    `changeset-release/main`, with the version, lockfile, and changelog changes.
 4. On that release PR, select **Approve workflows to run** when GitHub requests it.
-   Review the changelog and wait for **Verify macOS package** to pass.
+   Review the changelog and wait for all CI checks to pass.
 5. Merge the release PR. Release verifies the merged source, publishes the
    verified tarball to npm, and creates a GitHub release with changelog notes. Alpha versions are marked as prereleases.
 
@@ -27,21 +27,23 @@ During prerelease mode, consumed changesets stay under `.changeset/pre/` until p
 ## What runs
 
 `.github/workflows/ci.yml` runs for PRs targeting `main`. Release also calls it
-before publication. It installs dependencies, starts local Docker through Colima,
+before publication. It installs dependencies, starts local Docker through Lima,
 pulls the two database fixture images, and runs `npm run verify:release`.
 That gate requires macOS, an explicit local Unix socket, and zero skipped,
 failed, canceled, or TODO tests. It rejects incomplete or duplicate TAP summaries.
 Release calls must return the uploaded, verified package artifact ID before publication.
 PR updates cancel superseded CI runs. Release runs retain their existing serialization.
 
-The runner is `macos-15-intel`, which Colima uses in its own integration workflow.
-Colima uses the native macOS VZ backend with two virtual CPUs. Docker tool installation,
-VM startup, and image pulls have separate CI steps so their durations are visible.
+The macOS job uses the free standard `macos-15-intel` runner.
+Lima uses its maintained `docker-rootful` template with the VZ backend, two virtual CPUs, and 4 GiB of memory.
+Previewhost runs on macOS. Docker runs inside the VM, without host filesystem mounts.
+Docker tool installation, VM startup, and image pulls have separate CI steps.
 The full suite retains its normal timeouts and the zero-skip release gate.
 Native compilation requires Xcode Command Line Tools. The build produces one
 ad-hoc signed Keychain helper with `arm64` and `x86_64` slices. Consumers do not
-compile it during installation. CI uses Node.js 24; the package minimum remains
-Node.js 22.23. Local arm64 results do not establish hosted Intel compatibility.
+compile it during installation. The macOS job uses Node.js 24.
+Linux and Windows x64 jobs use Node.js 22.23, the package minimum.
+Local arm64 results do not establish hosted Intel compatibility.
 
 For a release, CI downloads the Changesets publish plan and verifies its package and version.
 It selects `alpha` for alpha versions and `latest` for regular versions before packing.
@@ -79,7 +81,7 @@ before Trusted Publishing can be configured. Recheck name availability immediate
    used here. Under **Workflow permissions**, enable
    **Allow GitHub Actions to create and approve pull requests**.
    The workflow files request their required write permissions explicitly.
-3. After CI has run, protect `main` and require its **Verify macOS package** check.
+3. Protect `main` and require **Verify Linux x64**, **Verify macOS x64**, **Verify Windows x64**, and **Verify documentation**.
    Select the emitted check name in GitHub; the reusable release job has a nested name.
    Have a maintainer review and merge release PRs.
 
@@ -203,4 +205,4 @@ Those require the first real GitHub Actions runs and npm publication.
 - [Changesets tarball publishing](https://github.com/changesets/action/tree/v2/publish)
 - [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
 - [GitHub workflow triggers](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)
-- [Colima macOS integration workflow](https://github.com/abiosoft/colima/blob/main/.github/workflows/macos-integration.yml)
+- [Lima Docker template](https://github.com/lima-vm/lima/blob/master/templates/docker-rootful.yaml)

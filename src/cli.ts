@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { normalizeDockerEndpoint } from './docker.js';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { connectPreviewDaemon, defaultTokenFile } from './client.js';
@@ -11,6 +12,7 @@ import { Keystore } from './keystore.js';
 import { readSecretInput } from './secret-input.js';
 import { connectProject, managementProject, discoverProjectOwners, projectDirectory, type ProjectOptions } from './project.js';
 import { version } from './version.js';
+import { requireSupportedPlatform } from './private-files.js';
 
 const help = `previewhost — local previews and application environments
 
@@ -130,6 +132,7 @@ async function main(): Promise<void> {
   const command = positionals[0];
   if (values.version) { process.stdout.write(`${version}\n`); return; }
   if (values.help || !command || command === 'help') { process.stdout.write(help); return; }
+  requireSupportedPlatform();
   if (command === 'secrets') { await secretCommand(positionals.slice(1), values); return; }
   const accepted: Record<string, string[]> = {
     dashboard: [], projects: [], remove: ['endpoint', 'token-file'],
@@ -181,7 +184,7 @@ async function main(): Promise<void> {
       inputs[key] = value;
     }
     const dataDirectory = values['data-dir'] ? resolve(values['data-dir']) : undefined;
-    const dockerSocket = values['docker-socket'] ? resolve(values['docker-socket']) : undefined;
+    const dockerSocket = values['docker-socket'] ? normalizeDockerEndpoint(values['docker-socket']) : undefined;
     if (dockerSocket && !dataDirectory) throw new PreviewError('INVALID_INPUT', '--docker-socket requires --data-dir.');
     const runtime = await createPreviewRuntime({ allowedRoots, inputs, secretIds: values.secret, dataDirectory, dockerSocket,
       ...(values['allow-exec'] ? { authorize: () => true } : {}),

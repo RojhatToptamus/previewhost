@@ -37,7 +37,9 @@ async function backend(t: TestContext, handler?: http.RequestListener) {
 }
 
 async function gateway(t: TestContext, target?: HttpTarget): Promise<Gateway> {
-  const result = await createGateway();
+  const errors: Error[] = [];
+  const result = await createGateway({ onError: error => errors.push(error) });
+  t.after(() => assert.deepEqual(errors, [], 'The gateway must not fail during the test.'));
   t.after(() => result.close());
   result.setTarget(target);
   return result;
@@ -348,9 +350,14 @@ test('bounds stalled HTTP headers and WebSocket handshakes while keeping active 
 test('enforces the gateway connection limit and recovers capacity after clients leave', async (t) => {
   const upstream = await backend(t, (_request, response) => response.end('ok'));
   const proxy = await gateway(t, upstream.target);
-  const clients = await Promise.all(Array.from({ length: limits.gatewayConnections }, () => rawClient(t, proxy.url)));
-  const excess = await rawClient(t, proxy.url);
-  await eventually(() => excess.socket.destroyed, 'excess connection is rejected');
+  const clients: Awaited<ReturnType<typeof rawClient>>[] = [];
+  // Fill the application limit without overflowing the OS's pending-accept queue.
+  for (let i = 0; i < limits.gatewayConnections; i++) clients.push(await rawClient(t, proxy.url));
+  const excess = await rawClient(t, proxy.url).catch((error: NodeJS.ErrnoException) => {
+    assert.ok(error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED', String(error));
+    return undefined;
+  });
+  if (excess) await eventually(() => excess.socket.destroyed, 'excess connection is rejected');
   clients[0].socket.destroy();
   await pause(30);
   assert.equal((await request(proxy.url)).body, 'ok');
@@ -363,8 +370,15 @@ test('a pipelined client cannot bypass the in-flight proxy request bound', async
   const upstream = await backend(t, () => { accepted += 1; });
   const proxy = await gateway(t, upstream.target);
   const client = await rawClient(t, proxy.url);
-  client.socket.write(`GET / HTTP/1.1\r\nHost: ${new URL(proxy.url).host}\r\n\r\n`.repeat(limits.gatewayConnections + 64));
-  await eventually(() => accepted >= limits.gatewayConnections, 'upstream requests reach the configured bound');
+  const message = `GET / HTTP/1.1\r\nHost: ${new URL(proxy.url).host}\r\n\r\n`;
+  const deadline = Date.now() + 2_000;
+  // Keep every request in flight, while allowing the upstream to accept each pipeline batch.
+  for (let sent = 0; sent < limits.gatewayConnections; sent += 32) {
+    const count = Math.min(32, limits.gatewayConnections - sent);
+    client.socket.write(message.repeat(count));
+    await eventually(() => accepted === sent + count, 'upstream requests reach the configured bound', deadline - Date.now());
+  }
+  client.socket.write(message.repeat(64));
   await pause(50);
   assert.equal(accepted, limits.gatewayConnections);
   await proxy.close();

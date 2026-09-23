@@ -28,11 +28,11 @@ They communicate through HTTP and database connections, without imports between 
 ## Install the dependencies
 
 Use the [global CLI installation and runtime requirements](../../docs/installation.md).
-Managed databases also require macOS 13 or later, local Docker Engine, and the images below.
-The npm package includes the compiled Keychain helper. This walkthrough requires no source build.
+Managed databases also require a local Docker Engine and the images below.
+This walkthrough requires no source build.
 
 The npm package does not include this example.
-With access to the private GitHub repository, obtain its source:
+Clone the repository to run this example:
 
 ```sh
 git clone https://github.com/RojhatToptamus/previewhost.git

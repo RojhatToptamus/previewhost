@@ -20,9 +20,11 @@ Stop ends owned processes and retains managed database data.
 
 ## Get started
 
-Previewhost supports macOS and requires Node.js 22.23 or later.
-Native commands, automatic project owners, and managed databases require macOS.
-The encrypted keystore supports password access across platforms. Password-only tests also run on Linux; Windows remains unverified.
+Previewhost requires Node.js 22.23 or later.
+macOS and Linux support x64 and arm64. Windows requires x64.
+Native commands and automatic project owners run on macOS, Linux, and Windows.
+See the [platform and database requirements](docs/installation.md#requirements).
+Linux requires procps (`/bin/ps`) and `lsof` (`/usr/bin/lsof`).
 Automatic unlock requires macOS 13 or later.
 
 For an existing installation, read the [reset instructions](#reset-required-for-earlier-installations) before updating.

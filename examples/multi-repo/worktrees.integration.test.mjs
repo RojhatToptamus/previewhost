@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import http from 'node:http';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
@@ -54,15 +54,15 @@ test('the task recipe rejects missing paths and a different application recipe w
 
 test('CLI and MCP run dirty task worktrees, retain task data, and release every consumer before source removal', {
   // Five sequential attempts have independent 60-second startup deadlines, plus fixture setup and cleanup.
-  skip: process.platform !== 'darwin' || !dockerSocket, timeout: 360_000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 360_000,
 }, async (t) => {
   await testKeystore(t);
   const root = await mkdtemp(join(tmpdir(), 'previewhost-task-worktrees-'));
   const frontend = join(root, 'frontend task');
   const backend = join(root, 'backend task');
-  const gitEnv = { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: '1',
+  const gitEnv = { PATH: process.env.PATH, ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot } : {}), HOME: root, GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
-  const git = async (cwd, ...args) => (await execute('/usr/bin/git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout;
+  const git = async (cwd, ...args) => (await execute('git', args, { cwd, env: gitEnv, timeout: 10_000 })).stdout;
   let runtime, daemon, mcp;
   try {
     await writeFile(gitEnv.GIT_CONFIG_GLOBAL, '');
@@ -156,8 +156,11 @@ test('CLI and MCP run dirty task worktrees, retain task data, and release every 
     assert.equal(missingResult.error.code, 'START_FAILED');
     await assert.rejects(readFile(join(backend, 'node_modules/pg/package.json')), { code: 'ENOENT' });
     assert.deepEqual(await sourceState(), before);
-    // The synthetic caller supplies an independent installed tree without registry traffic.
-    await cp(join(project, 'node_modules'), join(backend, 'node_modules'), { recursive: true });
+    // Supply an independent runtime dependency tree without copying development tools or using the registry.
+    const { packages } = JSON.parse(await readFile(join(project, 'package-lock.json'), 'utf8'));
+    await cp(join(project, 'node_modules'), join(backend, 'node_modules'), {
+      recursive: true, filter: source => !packages[relative(project, source).split(sep).join('/')]?.dev,
+    });
     const installed = await readFile(join(backend, 'node_modules/pg/package.json'));
     const firstStart = await runCli(['start', '--no-wait', '--file', '-'], stdout);
     const first = await waitCli(spec.name, firstStart.candidate.id);
