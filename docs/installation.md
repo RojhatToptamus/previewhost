@@ -17,6 +17,7 @@ Install Previewhost with npm. Check the Node.js, operating-system, and Docker re
 Windows ARM64 is not supported.
 
 Windows databases: experimental. Tested on x64 with WSL Docker; Docker Desktop unverified.
+Windows interactive terminal input remains unverified. Stdin secret input is tested.
 
 The npm package includes the macOS Keychain helper and uses Koffi platform packages for kernel APIs. Installation needs no compiler or GitHub access.
 

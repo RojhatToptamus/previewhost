@@ -32,7 +32,7 @@ Managed databases also require a local Docker Engine and the images below.
 This walkthrough requires no source build.
 
 The npm package does not include this example.
-With access to the private GitHub repository, obtain its source:
+Clone the repository to run this example:
 
 ```sh
 git clone https://github.com/RojhatToptamus/previewhost.git

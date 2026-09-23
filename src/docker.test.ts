@@ -15,7 +15,10 @@ import { testKeystore } from './testSupport/keystore.js';
 test('Docker connection rejection settles even when HTTP never assigns a socket', { timeout: 2000 }, async t => {
   const request = http.request;
   t.mock.method(http, 'request', (options: http.RequestOptions, callback?: (res: http.IncomingMessage) => void) => request({
-    ...options, agent: undefined, createConnection() { throw new PreviewError('UNAUTHORIZED', 'Rejected connected pipe.'); },
+    ...options, agent: undefined, createConnection(_options, done) {
+      queueMicrotask(() => done!(new PreviewError('UNAUTHORIZED', 'Rejected connected pipe.'), undefined!));
+      return undefined;
+    },
   }, callback));
   const docker = new Docker('unused');
   await assert.rejects(docker.request('POST', '/containers/create', { marker: 'DUMMY' }), { code: 'UNAUTHORIZED' });

@@ -76,7 +76,10 @@ test('global MCP supports private setup, isolated worktree databases and owner r
       signal?.throwIfAborted();
       const response = await client.callTool({ name, arguments: { project, ...args } }, { signal });
       // A wait budget expiring is not a failed attempt. Observe the same attempt; never repeat startup.
-      if (name === 'preview_wait' && response.isError && (response.structuredContent as { error: { code: string } }).error.code === 'TIMEOUT') continue;
+      if (name === 'preview_wait' && response.isError && (response.structuredContent as { error: { code: string } }).error.code === 'TIMEOUT') {
+        assert.deepEqual(response.structuredContent, { error: { code: 'TIMEOUT', message: 'The attempt is still pending. Inspect status or wait again.' } });
+        continue;
+      }
       assert.equal(response.isError, undefined, JSON.stringify(response.structuredContent));
       return (response.structuredContent as { result: T }).result;
     }

@@ -166,6 +166,38 @@ test('SDK cancellation aborts only a wait and EOF releases pending requests with
   await other.cancel('pending', status.candidate!.id);
 });
 
+test('MCP observation preserves the original startup deadline and returns its failure', { timeout: 10_000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost mcp deadline '));
+  let starts = 0;
+  const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: ({ signal }) => {
+    starts++;
+    return new Promise<boolean>(resolve => signal.addEventListener('abort', () => resolve(false), { once: true }));
+  } });
+  const tokenFile = join(directory, 'private', 'token');
+  const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
+  const mcp = new Client({ name: 'previewhost-deadline', version: '1' });
+  t.after(async () => { await mcp.close(); await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  await mcp.connect(new StdioClientTransport({ command: process.execPath,
+    args: [cli, 'mcp', '--endpoint', daemon.endpoint, '--token-file', tokenFile], stderr: 'pipe' }));
+  const started = await mcp.callTool({ name: 'preview_start', arguments: { spec: {
+    name: 'deadline', type: 'environment', timeoutMs: 1000, primary: 'web', services: { web: { type: 'static', directory } },
+  } } });
+  assert.equal(started.isError, undefined);
+  const attempt = (started.structuredContent as { result: PreviewStatus }).result.candidate!;
+  const args = { name: 'deadline', attemptId: attempt.id };
+  const pending = await mcp.callTool({ name: 'preview_wait', arguments: { ...args, timeoutMs: 1 } });
+  assert.deepEqual(pending.structuredContent, { error: { code: 'TIMEOUT', message: 'The attempt is still pending. Inspect status or wait again.' } });
+  const completed = await mcp.callTool({ name: 'preview_wait', arguments: args });
+  assert.equal(completed.isError, undefined);
+  const result = (completed.structuredContent as { result: AttemptResult }).result;
+  assert.equal(result.id, attempt.id);
+  assert.equal(result.startedAt, attempt.startedAt);
+  assert.equal(result.state, 'failed');
+  assert.deepEqual(result.error, { code: 'TIMEOUT', message: 'The environment startup deadline expired.' });
+  assert.deepEqual((await mcp.callTool({ name: 'preview_wait', arguments: args })).structuredContent, completed.structuredContent);
+  assert.equal(starts, 1);
+});
+
 test('CLI and MCP keep data deletion and Engine recovery explicit and preserve owner denials', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost data adapters '));
   const runtime = await createPreviewRuntime({ allowedRoots: [directory] });

@@ -11,7 +11,7 @@ If prerelease mode is enabled again, `.changeset/pre.json` selects its channel; 
 3. Merge the PR into `main`. The Release workflow creates or updates
    `changeset-release/main`, with the version, lockfile, and changelog changes.
 4. On that release PR, select **Approve workflows to run** when GitHub requests it.
-   Review the changelog and wait for **Verify macOS package** to pass.
+   Review the changelog and wait for all CI checks to pass.
 5. Merge the release PR. Release verifies the merged source, publishes the
    verified tarball to npm, and creates a GitHub release with changelog notes. Alpha versions are marked as prereleases.
 
@@ -81,7 +81,7 @@ before Trusted Publishing can be configured. Recheck name availability immediate
    used here. Under **Workflow permissions**, enable
    **Allow GitHub Actions to create and approve pull requests**.
    The workflow files request their required write permissions explicitly.
-3. After CI has run, protect `main` and require its **Verify macOS package** check.
+3. Protect `main` and require **Verify Linux x64**, **Verify macOS x64**, **Verify Windows x64**, and **Verify documentation**.
    Select the emitted check name in GitHub; the reusable release job has a nested name.
    Have a maintainer review and merge release PRs.
 
