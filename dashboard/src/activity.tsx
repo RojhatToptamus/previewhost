@@ -60,9 +60,6 @@ export function Activity(props: Props) {
   const currentRequests = openRequests.length
     ? openRequests
     : setupRequests.slice(-1);
-  const previousRequests = setupRequests
-    .filter((request) => !currentRequests.includes(request))
-    .reverse();
   const failedJob = Object.values(latest?.services ?? {}).some(
     (service) => service.type === "job" && service.state === "failed",
   );
@@ -232,16 +229,6 @@ export function Activity(props: Props) {
               )}
             </div>
           ))}
-          {!!previousRequests.length && (
-            <details>
-              <summary>Request history ({previousRequests.length})</summary>
-              {previousRequests.map((request) => (
-                <div key={request.id} className="request">
-                  <strong>{setupLabels[request.state]}</strong>
-                </div>
-              ))}
-            </details>
-          )}
         </Section>
       )}
     </>

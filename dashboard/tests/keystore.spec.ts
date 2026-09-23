@@ -108,12 +108,9 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     await page.locator(".preview-nav").filter({ hasText: "sample" }).click();
     const privateSetup = page.locator("section").filter({ has: page.getByRole("heading", { name: "Private setup", exact: true }) });
     await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toBeVisible();
-    await expect(privateSetup.getByText("Expired", { exact: true })).toBeHidden();
-    await privateSetup.locator("summary").focus();
-    await page.keyboard.press("Enter");
-    await expect(privateSetup.getByText("Expired", { exact: true })).toBeVisible();
+    await expect(privateSetup.getByText("Expired", { exact: true })).toHaveCount(0);
+    await expect(privateSetup).not.toContainText("Request history");
     await expect(privateSetup).not.toContainText("request any remaining values");
-    await page.keyboard.press("Enter");
     expect((await other.keystore.status()).state).toBe("locked");
     expect((await other.inspect(spec)).secrets![0].selected).toBe(false);
     const started = await runtime.start(spec);

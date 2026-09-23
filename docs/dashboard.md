@@ -66,5 +66,5 @@ Secret references remain references. Stored values do not appear in this view.
 It also offers automatic unlock controls on macOS. Project owners unlock separately through private setup.
 **Open private form** handles missing values and access approval.
 **Private setup** shows pending forms or the latest request result.
-**Request history** keeps earlier results. Completing setup does not start the app.
+Completing setup does not start the app.
 See [Secrets](secrets.md) before changing a value shared across projects.
