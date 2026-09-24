@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, ArrowUpRight, Check, Copy, Database, Layers, Menu, Terminal, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Check, Copy, Menu, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import brandSvg from "../../assets/previewhost.svg?raw";
 import { copyText } from "./clipboard";
@@ -9,164 +9,83 @@ import { ProductDemo } from "./product-demo";
 import "./landing.css";
 
 const github = "https://github.com/RojhatToptamus/previewhost";
-const example = `${github}/tree/main/examples/multi-repo`;
 const brandMark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
+const interfaces = [{ id: "cli", label: "CLI" }, { id: "codex", label: "Codex" }, { id: "claude", label: "Claude Code" }, { id: "cursor", label: "Cursor" }] as const;
+type Interface = (typeof interfaces)[number]["id"];
+const agentCommands = {
+  codex: "codex mcp add previewhost -- previewhost mcp --allow-exec",
+  claude: "claude mcp add --scope user previewhost -- previewhost mcp --allow-exec",
+  cursor: '{\n  "mcpServers": {\n    "previewhost": {\n      "type": "stdio",\n      "command": "previewhost",\n      "args": ["mcp", "--allow-exec"]\n    }\n  }\n}',
+};
 
 function Brand() {
-  return <a className="landing-brand" href={import.meta.env.BASE_URL} aria-label="Previewhost home">
-    <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: brandMark }} />
-    <span>previewhost</span>
-  </a>;
+  return <a className="landing-brand" href={import.meta.env.BASE_URL} aria-label="Previewhost home"><span aria-hidden="true" dangerouslySetInnerHTML={{ __html: brandMark }} /><span>previewhost</span></a>;
 }
-
 function TextLink({ href, children, className = "" }: { href: string; children: ReactNode; className?: string }) {
   return <a className={`landing-text-link ${className}`} href={href}>{children}<ArrowRight aria-hidden="true" /></a>;
-}
-
-function DependencyDiagram() {
-  return <div className="landing-dependencies" role="img" aria-label="Example startup dependencies: PostgreSQL before migrate; migrate and Redis before API; API before reporting; API and reporting before frontend. The frontend receives the preview URL.">
-    <span className="landing-diagram-label">Example startup order</span>
-    <div className="landing-dependency-grid" aria-hidden="true">
-      <div className="dependency-node dependency-db"><Database /><div><strong>database</strong><span>PostgreSQL</span></div></div>
-      <div className="dependency-node dependency-cache"><Layers /><div><strong>cache</strong><span>Redis</span></div></div>
-      <div className="dependency-down dependency-db-arrow"><ArrowDown /></div>
-      <div className="dependency-node dependency-migrate"><Terminal /><div><strong>migrate</strong><span>Setup job</span></div></div>
-      <div className="dependency-join" />
-      <div className="dependency-node dependency-api"><Terminal /><div><strong>api</strong><span>HTTP service</span></div></div>
-      <div className="dependency-down dependency-api-arrow"><ArrowDown /></div>
-      <div className="dependency-node dependency-reporting"><Terminal /><div><strong>reporting</strong><span>HTTP service</span></div></div>
-      <div className="dependency-down dependency-reporting-arrow"><ArrowDown /></div>
-      <div className="dependency-node dependency-frontend"><Terminal /><div><strong>frontend</strong><span>Local preview URL</span></div></div>
-    </div>
-    <p>Previewhost supplies ports and connection URLs.</p>
-  </div>;
-}
-
-function Workflow() {
-  return <section id="how-it-works" className="landing-section landing-width" aria-labelledby="workflow-heading">
-    <p className="landing-section-label">01 / How it works</p>
-    <h2 id="workflow-heading">From source to a running stack.</h2>
-    <ol className="landing-steps">
-      <li><span>01</span><h3>Describe your services</h3><p>Keep commands and connections in <code>preview.yaml</code>.</p></li>
-      <li><span>02</span><h3>Start the preview</h3><p>Services wait for their dependencies and setup jobs.</p></li>
-      <li><span>03</span><h3>Open your app</h3><p>Use the local URL. Inspect the stack in the dashboard.</p></li>
-    </ol>
-    <div className="landing-workflow-detail">
-      <div className="landing-config-example">
-        <div className="landing-code-heading"><span>preview.yaml</span><span>API excerpt</span></div>
-        <pre aria-label="API service configuration excerpt"><code><span className="code-key">  api:</span>{"\n"}<span className="code-key">    type:</span>{" command\n"}<span className="code-key">    cwd:</span>{" ./api\n"}<span className="code-key">    command:</span>{" [node, server.mjs]\n"}<span className="code-key">    readyPath:</span>{" /ready\n"}<span className="code-key">    dependsOn:</span>{" [migrate]\n"}<span className="code-key">    env:</span>{"\n"}<span className="code-key">      DATABASE_URL:</span>{"\n        service: database\n"}<span className="code-key">      REDIS_URL:</span>{"\n        service: cache"}</code></pre>
-        <p>The API starts after its migration and databases are ready.</p>
-        <TextLink href={example}>See the complete example</TextLink>
-      </div>
-      <DependencyDiagram />
-    </div>
-    <p className="landing-requirement">Use your existing source and installed app dependencies. Managed PostgreSQL and Redis need <a href={pageHref("databases", "prepare-docker")}>local Docker and downloaded images</a>.</p>
-  </section>;
-}
-
-function Iteration() {
-  return <section className="landing-iteration" aria-labelledby="iteration-heading">
-    <div className="landing-width">
-      <div className="landing-iteration-grid">
-        <div className="landing-iteration-copy">
-          <p className="landing-section-label">02 / Keep iterating</p>
-          <h2 id="iteration-heading">Change the code.<br />Keep the URL.</h2>
-          <p>Replace a running preview. New requests switch only when the replacement is ready.</p>
-          <div className="landing-behavior"><h3>Stop the preview. Keep the data.</h3><p>Managed PostgreSQL and Redis data stays for the next start.</p></div>
-        </div>
-        <div className="landing-replacement" aria-label="Replacement outcomes">
-          <div className="landing-replacement-address"><span>LOCAL PREVIEW URL</span><code>shared-notes--frontend.localhost:49837</code></div>
-          <div className="landing-replacement-row"><span className="landing-result landing-result-ready">Ready</span><ArrowRight aria-hidden="true" /><div><h3>New requests use the replacement.</h3><p>The URL stays the same.</p></div></div>
-          <div className="landing-replacement-row"><span className="landing-result landing-result-error">Failed</span><ArrowRight aria-hidden="true" /><div><h3>The previous preview keeps serving.</h3><p>Source changes and database writes are not rolled back.</p></div></div>
-          <TextLink href="#product-demo">Try it in the interactive example</TextLink>
-        </div>
-      </div>
-      <div className="landing-worktrees">
-        <h3>Different worktrees.<br />Separate previews.</h3>
-        <p>Run existing worktrees side by side, with their own ports and managed data.</p>
-        <TextLink href={pageHref("worktrees")}>Read the worktree guide</TextLink>
-      </div>
-    </div>
-  </section>;
 }
 
 function CopyCommand({ command, label }: { command: string; label: string }) {
   const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  return <div className="landing-command-wrap">
-    <div className="landing-command"><code>{command}</code><button type="button" aria-label={`Copy ${label}`} onClick={async () => {
-      clearTimeout(timer.current);
-      try {
-        await copyText(command);
-        setStatus("copied");
-        timer.current = setTimeout(() => setStatus("idle"), 1800);
-      } catch { setStatus("error"); }
-    }}>{status === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}<span>{status === "copied" ? "Copied" : "Copy"}</span></button></div>
-    <span className={status === "error" ? "landing-copy-error" : "landing-sr-only"} role="status">{status === "copied" ? "Command copied." : status === "error" ? "Copy failed. Select the command and copy it manually." : ""}</span>
-  </div>;
+  return <div className="landing-command-wrap"><div className="landing-command"><code>{command}</code><button type="button" aria-label={`Copy ${label}`} onClick={async () => {
+    clearTimeout(timer.current);
+    try { await copyText(command); setStatus("copied"); timer.current = setTimeout(() => setStatus("idle"), 1800); }
+    catch { setStatus("error"); }
+  }}>{status === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}<span>{status === "copied" ? "Copied" : "Copy"}</span></button></div><span className={status === "error" ? "landing-copy-error" : "landing-sr-only"} role="status">{status === "copied" ? "Command copied." : status === "error" ? "Copy failed. Select the command and copy it manually." : ""}</span></div>;
+}
+
+function Capabilities() {
+  return <section id="how-it-works" className="landing-section landing-width" aria-labelledby="workflow-heading">
+    <div className="landing-section-intro"><p className="landing-section-label">Local development, coordinated</p><h2 id="workflow-heading">Separate stacks.<br />Connected services.</h2><p>Keep one version running while you work on another. Start each preview from existing source with its own configured services.</p></div>
+    <div className="landing-benefits">
+      <article><span>01</span><h3>Run worktrees side by side</h3><p>Each worktree gets separate ports and managed PostgreSQL and Redis data. Replacing a running preview keeps its URL.</p><TextLink href={pageHref("worktrees")}>Worktree isolation</TextLink></article>
+      <article><span>02</span><h3>Connect different repositories</h3><p>Point the frontend and APIs at their existing source directories. Service bindings supply URLs and wait for dependencies before startup.</p><TextLink href={`${github}/tree/main/examples/multi-repo`}>Multi-repository example</TextLink></article>
+      <article><span>03</span><h3>Find the service or job that failed</h3><p>Search captured process output by source and attempt. Inspect migration failures separately from the app that is still serving.</p><TextLink href={pageHref("dashboard", "read-logs")}>Service and job logs</TextLink></article>
+    </div>
+    <p className="landing-limit">Isolation applies to managed data and assigned ports. External databases can still share data; native commands run with your user permissions.</p>
+  </section>;
+}
+
+function Bindings() {
+  return <section className="landing-bindings" aria-labelledby="bindings-heading"><div className="landing-width">
+    <div className="landing-binding-grid">
+      <div className="landing-binding-copy"><p className="landing-section-label">Configuration and private setup</p><h2 id="bindings-heading">Use named connections.<br />Keep secrets out of config.</h2><p>Bind application variables to services, selected host inputs, or stored secret references. Previewhost supplies the values at startup.</p><ol className="landing-secret-flow"><li><span>1</span><p>Your agent declares the references it needs.</p></li><li><span>2</span><p>You approve access and enter missing values in a private form.</p></li><li><span>3</span><p>Configured services receive approved values. Saved configuration keeps the references; private setup returns status without the entered values.</p></li></ol><TextLink href={pageHref("secrets")}>Private setup and secret access</TextLink><p className="landing-caveat">Application code can still expose values. Log redaction is best effort.</p></div>
+      <div className="landing-binding-example"><div className="landing-code-heading"><span>preview.yaml</span><span>API service excerpt</span></div><pre tabIndex={0} aria-label="Example environment bindings"><code>{'api:\n  type: command\n  cwd: ./api\n  command: [node, server.mjs]\n  env:\n    DATABASE_URL: {service: database}\n    REDIS_URL: {service: cache}\n    API_TOKEN: {secret: "notes/dev/api-token"}\n    REGION: {fromEnv: REGION}'}</code></pre><dl><div><dt><code>service</code></dt><dd>A connection URL, plus a readiness dependency.</dd></div><div><dt><code>secret</code></dt><dd>A stored reference, shared wherever that exact name is approved.</dd></div><div><dt><code>fromEnv</code></dt><dd>A host value selected with --env when the owner starts.</dd></div></dl><p>For browser requests, <code>{'{browserUrl: api}'}</code> supplies an HTTP alias without a startup dependency.</p></div>
+    </div>
+    <div className="landing-config-options"><div><h3>Describe the app you have.</h3><p>Save preview.yaml, pass JSON to the CLI, or let your agent supply a spec directly. Previewhost does not load <code>.env</code> files automatically.</p><TextLink href={pageHref("configuration")}>Configuration guide</TextLink></div><dl><div><dt>Static files</dt><dd>Prepared HTML, assets, and build output.</dd></div><div><dt>HTTP applications</dt><dd>Your installed development server or application command.</dd></div><div><dt>Existing local servers</dt><dd>Attach by HTTP URL; the original process keeps ownership.</dd></div><div><dt>Services and setup jobs</dt><dd>HTTP services, managed or existing local PostgreSQL and Redis, and finite jobs.</dd></div></dl></div>
+    <p className="landing-limit">Install your app’s dependencies before startup. Managed databases require <a href={pageHref("databases", "prepare-docker")}>local Docker and downloaded images</a>. Non-HTTP background workers are not supported.</p>
+  </div></section>;
 }
 
 function GetStarted() {
-  const [selected, setSelected] = useState<"terminal" | "agent">("terminal");
-  return <section id="get-started" className="landing-start site-dark-surface" aria-labelledby="start-heading">
-    <div className="landing-width landing-start-grid">
-      <div className="landing-start-copy"><h2 id="start-heading">Start with your<br />next change.</h2><p>From your terminal or your coding agent.</p><div className="landing-platforms">Node.js 22.23+ · macOS, Linux, Windows</div><TextLink href={pageHref("installation", "requirements")}>Installation requirements</TextLink></div>
-      <div>
-        <div className="landing-setup">
-          <LandingTabs id="setup" label="Setup method" items={[{ id: "terminal", label: "Terminal" }, { id: "agent", label: "Coding agent" }]} selected={selected} onSelect={setSelected} />
-          <div id="setup-panel" role="tabpanel" aria-labelledby={`setup-${selected}`} tabIndex={0}>
-            <ol className="landing-setup-steps">
-              <li><span className="landing-step-number">1</span><div><h3>Install Previewhost</h3><CopyCommand label="install command" command="npm install -g previewhost" /></div></li>
-              {selected === "terminal" ? <>
-                <li><span className="landing-step-number">2</span><div><h3>Configure your app</h3><p>Install your app’s dependencies, then describe its services.</p><TextLink href={pageHref("configuration")}>Create preview.yaml</TextLink><p>For managed databases, complete <a className="landing-inline-link" href={pageHref("databases", "unlock-database-credentials")}>private setup</a> first.</p></div></li>
-                <li><span className="landing-step-number">3</span><div><h3>Start a preview</h3><p>From the folder containing <code>preview.yaml</code>, run:</p><CopyCommand label="start command" command="previewhost start --allow-exec" /><p>Run the dashboard in another terminal. Keep that terminal open.</p><CopyCommand label="dashboard command" command="previewhost dashboard" /></div></li>
-              </> : <>
-                <li><span className="landing-step-number">2</span><div><h3>Connect your coding agent</h3><p>For Codex, run:</p><CopyCommand label="Codex MCP command" command="codex mcp add previewhost -- previewhost mcp --allow-exec" /><TextLink href={pageHref("mcp", "register-a-client")}>Cursor and Claude Code setup</TextLink></div></li>
-                <li><span className="landing-step-number">3</span><div><h3>Ask for a preview</h3><p className="landing-agent-prompt">“Preview this application with Previewhost. Read its start commands, reuse project configuration if present, and verify the returned URL in a browser.”</p><p>Approve project access and complete private setup if requested.</p></div></li>
-              </>}
-            </ol>
-            <p className="landing-permissions"><code>--allow-exec</code> runs trusted commands with your user permissions, without a sandbox.</p>
-          </div>
-        </div>
-        <TextLink className="landing-next-guide" href={pageHref(selected === "terminal" ? "first-preview" : "mcp")}>{selected === "terminal" ? "Follow the CLI quickstart" : "Read the MCP guide"}</TextLink>
+  const [selected, setSelected] = useState<Interface>("cli");
+  const name = interfaces.find(item => item.id === selected)!.label;
+  return <section id="get-started" className="landing-start site-dark-surface" aria-labelledby="start-heading"><div className="landing-width">
+    <div className="landing-start-heading"><div><p className="landing-section-label">CLI and coding agents</p><h2 id="start-heading">Choose your interface.</h2></div><p>Node.js 22.23+ · macOS, Linux, Windows<br /><a href={pageHref("installation", "requirements")}>Installation requirements<ArrowUpRight aria-hidden="true" /></a></p></div>
+    <div className="landing-install-row"><h3><span>01</span>Install Previewhost</h3><CopyCommand label="install command" command="npm install -g previewhost" /></div>
+    <div className="landing-setup">
+      <div className="landing-setup-heading"><span>02</span><p>Run from your terminal, or connect your coding agent through MCP.</p></div>
+      <LandingTabs id="setup" label="Setup interface" items={interfaces} selected={selected} onSelect={setSelected} />
+      <div id="setup-panel" role="tabpanel" aria-labelledby={`setup-${selected}`} tabIndex={0}>
+        {selected === "cli" ? <div className="landing-setup-content"><div><h3>Start from your project directory.</h3><p>Install your app’s dependencies and <a href={pageHref("configuration")}>create preview.yaml</a> with its start commands and connections.</p><p>For managed databases or stored secrets, first complete private setup:</p><CopyCommand label="private setup command" command="previewhost secrets setup --allow-exec" /><TextLink href={pageHref("first-preview")}>Follow the CLI quickstart</TextLink></div><div className="landing-setup-commands"><p>Inspect the configuration, then start:</p><CopyCommand label="inspect and start commands" command={'previewhost inspect\npreviewhost start --allow-exec'} /><p>Open the returned URL. In another terminal, inspect your stacks:</p><CopyCommand label="dashboard command" command="previewhost dashboard" /><p className="landing-small">Keep the dashboard terminal open while using it.</p></div></div>
+          : <div className="landing-setup-content landing-agent-setup"><div><h3>{selected === "cursor" ? "Add Previewhost to Cursor." : `Register Previewhost with ${name}.`}</h3>{selected === "cursor" ? <p>Add this entry to <code>~/.cursor/mcp.json</code>, preserving other servers. Enable Previewhost in Cursor’s MCP settings.</p> : <p>Run the registration command in your terminal. One registration works across your projects.</p>}</div><div className="landing-setup-commands"><p>{selected === "cursor" ? "~/.cursor/mcp.json" : "Register the MCP server:"}</p><CopyCommand key={selected} label={`${name} ${selected === "cursor" ? "configuration" : "MCP command"}`} command={agentCommands[selected]} /></div><div className="landing-setup-next"><h3>Then ask for a preview.</h3><p>In a project chat, ask your agent to preview the app, reuse existing configuration, and verify the returned URL.</p><p>Approve project access. Complete private setup if asked, then tell your agent to continue.</p><TextLink href={pageHref("mcp")}>MCP setup guide</TextLink></div><p className="landing-agent-capabilities">Your agent can start previews, inspect status and captured output, and stop them. Previews keep running when it pauses.</p></div>}
       </div>
+      <p className="landing-permissions"><code>--allow-exec</code> permits trusted commands with your user permissions. It does not sandbox code or approve secrets.</p>
     </div>
-  </section>;
+  </div></section>;
 }
 
 export function LandingPage() {
   const { theme, toggleTheme } = useSiteTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
-  return <div className="landing">
-    <a className="landing-skip" href="#main-content">Skip to content</a>
-    <header className="landing-header" onKeyDown={event => {
-      if (event.key === "Escape" && menuOpen) { setMenuOpen(false); menuButton.current?.focus(); }
-    }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false); }}>
-      <div className="landing-width landing-header-inner">
-        <Brand />
-        <nav className="landing-nav" id="landing-navigation" aria-label="Main navigation" data-open={menuOpen} onClick={() => setMenuOpen(false)}>
-          <a href="#how-it-works">How it works</a><a href={pageHref("welcome")}>Docs</a><a href={github}>GitHub<ArrowUpRight aria-hidden="true" /></a>
-        </nav>
-        <div className="landing-header-actions"><SiteThemeToggle theme={theme} onToggle={toggleTheme} compact /><a className="landing-button landing-header-cta" href="#get-started">Get started</a><button className="landing-menu" ref={menuButton} type="button" aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen} aria-controls="landing-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button></div>
-      </div>
+  return <div className="landing"><a className="landing-skip" href="#main-content">Skip to content</a>
+    <header className="landing-header" onKeyDown={event => { if (event.key === "Escape" && menuOpen) { setMenuOpen(false); menuButton.current?.focus(); } }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false); }}>
+      <div className="landing-width landing-header-inner"><Brand /><nav className="landing-nav" id="landing-navigation" aria-label="Main navigation" data-open={menuOpen} onClick={() => setMenuOpen(false)}><a href="#how-it-works">Why Previewhost</a><a href={pageHref("welcome")}>Docs</a><a href={github}>GitHub<ArrowUpRight aria-hidden="true" /></a></nav><div className="landing-header-actions"><SiteThemeToggle theme={theme} onToggle={toggleTheme} compact /><a className="landing-button landing-header-cta" href="#get-started">Get started</a><button className="landing-menu" ref={menuButton} type="button" aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen} aria-controls="landing-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button></div></div>
     </header>
-    <main id="main-content">
-      <section className="landing-hero" aria-labelledby="hero-heading">
-        <div className="landing-width">
-          <div className="landing-hero-copy"><h1 id="hero-heading">Your whole app.<br />One local preview.</h1><p>Run your frontend, APIs, and databases together.<br className="landing-desktop-break" /> Separate previews for every worktree. A stable URL as you iterate.</p><div className="landing-hero-actions"><a className="landing-button" href="#get-started">Get started<ArrowRight aria-hidden="true" /></a><TextLink href={pageHref("mcp")}>Connect your agent</TextLink></div><p className="landing-hero-note"><a href={`${github}/blob/main/LICENSE`}>Open source</a><span aria-hidden="true">·</span>Runs on your machine</p></div>
-          <ProductDemo />
-        </div>
-      </section>
-      <Workflow />
-      <Iteration />
-      <GetStarted />
-    </main>
-    <footer className="landing-footer landing-width">
-      <div><Brand /><p>Local previews for apps and services.</p><small>Open source. MIT licensed.</small></div>
-      <nav aria-label="Documentation links"><span>Documentation</span><a href={pageHref("welcome")}>Introduction</a><a href={pageHref("installation")}>Installation</a><a href={pageHref("mcp")}>MCP setup</a><a href={pageHref("library")}>Node.js library</a></nav>
-      <nav aria-label="Project links"><span>Project</span><a href={github}>GitHub</a><a href="https://www.npmjs.com/package/previewhost">npm</a><a href={`${github}/blob/main/LICENSE`}>MIT license</a></nav>
-    </footer>
+    <main id="main-content"><section className="landing-hero" aria-labelledby="hero-heading"><div className="landing-width"><div className="landing-hero-copy"><h1 id="hero-heading">Run local app stacks<br />from your Git worktrees.</h1><p>Start frontends, APIs, PostgreSQL, and Redis together. Previewhost assigns ports, connects services, and keeps each worktree’s managed data separate.</p><div className="landing-hero-actions"><CopyCommand label="quick install command" command="npm install -g previewhost" /><TextLink href="#get-started">Choose your interface</TextLink></div><p className="landing-hero-note"><a href={`${github}/blob/main/LICENSE`}>Open source</a><span aria-hidden="true">·</span>Runs locally through CLI or MCP</p></div><ProductDemo /></div></section><Capabilities /><Bindings /><GetStarted /></main>
+    <footer className="landing-footer landing-width"><div><Brand /><p>Local previews for apps and services.</p><small>Open source. MIT licensed.</small></div><nav aria-label="Documentation links"><span>Documentation</span><a href={pageHref("welcome")}>Introduction</a><a href={pageHref("installation")}>Installation</a><a href={pageHref("mcp")}>MCP setup</a><a href={pageHref("library")}>Node.js library</a></nav><nav aria-label="Project links"><span>Project</span><a href={github}>GitHub</a><a href="https://www.npmjs.com/package/previewhost">npm</a><a href={`${github}/blob/main/LICENSE`}>MIT license</a></nav></footer>
   </div>;
 }

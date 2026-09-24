@@ -12,7 +12,7 @@ const absolute = (path) => url ? new URL(path, url).href : path;
 function pageHead(page) {
   const canonical = absolute(pagePath(page.id, base));
   const image = absolute(`${base}social-card.png`);
-  const imageAlt = 'Previewhost. Your whole app. One local preview. Frontend, APIs, PostgreSQL, and Redis running locally.';
+  const imageAlt = 'Previewhost. Local app stacks for Git worktrees. Separate ports and managed data.';
   const meta = (name, value, attribute = 'name') => `<meta ${attribute}="${name}" content="${escapeHtml(value)}" />`;
   const tags = [
     meta('robots', url ? 'index, follow, max-image-preview:large' : 'noindex, nofollow'),
