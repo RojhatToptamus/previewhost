@@ -4,7 +4,7 @@ import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadPages, repository } from './content.mjs';
-import { pagePath } from './pages.mjs';
+import { pagePath, homePage } from './pages.mjs';
 import { siteSettings } from './site.mjs';
 import { Marked } from 'marked';
 
@@ -20,11 +20,11 @@ let links = 0;
 const titles = new Set();
 const descriptions = new Set();
 const canonicalUrls = [];
-for (const page of pages) {
+for (const page of [homePage, ...pages]) {
   const pathname = pagePath(page.id, base);
   const file = resolve(output, pathname.slice(base.length), 'index.html');
   const html = readFileSync(file, 'utf8');
-  assert.equal((html.match(/<h1>/g) ?? []).length, 1, `${page.id}: one page title`);
+  assert.equal((html.match(/<h1(?:\s[^>]*)?>/g) ?? []).length, 1, `${page.id}: one page title`);
   assert(!html.includes('Task Monki documentation'), `${page.id}: stale branding`);
   const title = html.match(/<title>([^<]+)<\/title>/)?.[1];
   const meta = (name) => {
@@ -60,21 +60,23 @@ for (const page of pages) {
     assert.equal(canonical.length, 0);
     assert.equal(meta('robots'), 'noindex, nofollow');
   }
-  const markdown = readFileSync(resolve(file, '../index.md'), 'utf8');
-  const parser = new Marked();
-  const code = (text) => {
-    const blocks = [];
-    parser.walkTokens(parser.lexer(text), token => { if (token.type === 'code' || token.type === 'codespan') blocks.push(token.text); });
-    return blocks;
-  };
-  assert.deepEqual(code(markdown), code(page.markdown), `${page.id}: Markdown preserves code examples`);
-  parser.walkTokens(parser.lexer(markdown), token => {
-    if (token.type !== 'link' && token.type !== 'image') return;
-    if (/^(https?:|mailto:)/.test(token.href)) return;
-    const target = new URL(token.href, `http://docs.test${pathname}index.md`);
-    assert(target.pathname.startsWith(base), `${page.id}: Markdown link escapes deployment prefix`);
-    assert(existsSync(resolve(output, target.pathname.slice(base.length))), `${page.id}: missing Markdown target ${token.href}`);
-  });
+  if (page.id !== 'home') {
+    const markdown = readFileSync(resolve(file, '../index.md'), 'utf8');
+    const parser = new Marked();
+    const code = (text) => {
+      const blocks = [];
+      parser.walkTokens(parser.lexer(text), token => { if (token.type === 'code' || token.type === 'codespan') blocks.push(token.text); });
+      return blocks;
+    };
+    assert.deepEqual(code(markdown), code(page.markdown), `${page.id}: Markdown preserves code examples`);
+    parser.walkTokens(parser.lexer(markdown), token => {
+      if (token.type !== 'link' && token.type !== 'image') return;
+      if (/^(https?:|mailto:)/.test(token.href)) return;
+      const target = new URL(token.href, `http://docs.test${pathname}index.md`);
+      assert(target.pathname.startsWith(base), `${page.id}: Markdown link escapes deployment prefix`);
+      assert(existsSync(resolve(output, target.pathname.slice(base.length))), `${page.id}: missing Markdown target ${token.href}`);
+    });
+  }
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, `${page.id}: duplicate anchors`);
   for (const match of html.matchAll(/\b(?:href|src)="([^"]+)"/g)) {
@@ -126,7 +128,7 @@ try {
   assert.deepEqual(excluded, [], 'The npm package must not contain documentation website files.');
   const pkg = JSON.parse(readFileSync(resolve(repository, 'package.json'), 'utf8'));
   assert(!pkg.dependencies.marked, 'Markdown is a build dependency only.');
-  console.log(`Checked ${pages.length} pages, metadata, Markdown, llms.txt, crawler files, ${links} local links/assets/anchors, and npm exclusions.`);
+  console.log(`Checked the homepage and ${pages.length} documentation pages, metadata, Markdown, llms.txt, crawler files, ${links} local links/assets/anchors, and npm exclusions.`);
 } finally {
   rmSync(cache, { recursive: true, force: true });
 }

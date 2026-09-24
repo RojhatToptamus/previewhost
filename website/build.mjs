@@ -2,7 +2,7 @@ import { build, createServer } from 'vite';
 import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { loadPages, repository, escapeHtml } from './content.mjs';
-import { pagePath } from './pages.mjs';
+import { pagePath, homePage } from './pages.mjs';
 import { siteSettings } from './site.mjs';
 
 const configFile = resolve(repository, 'website/vite.config.mjs');
@@ -12,11 +12,11 @@ const absolute = (path) => url ? new URL(path, url).href : path;
 function pageHead(page) {
   const canonical = absolute(pagePath(page.id, base));
   const image = absolute(`${base}social-card.png`);
-  const imageAlt = 'Previewhost documentation. Run your app locally. Apps, services, databases, and containers. One local URL.';
+  const imageAlt = 'Previewhost. Your whole app. One local preview. Frontend, APIs, PostgreSQL, and Redis running locally.';
   const meta = (name, value, attribute = 'name') => `<meta ${attribute}="${name}" content="${escapeHtml(value)}" />`;
   const tags = [
     meta('robots', url ? 'index, follow, max-image-preview:large' : 'noindex, nofollow'),
-    `<link rel="alternate" type="text/markdown" href="${escapeHtml(canonical)}index.md" />`,
+    `<link rel="alternate" type="text/markdown" href="${escapeHtml(page.id === 'home' ? absolute(pagePath('welcome', base)) : canonical)}index.md" />`,
     `<link rel="describedby" href="${escapeHtml(absolute(`${base}llms.txt`))}" />`,
     meta('og:type', 'website', 'property'),
     meta('og:site_name', 'Previewhost', 'property'),
@@ -37,10 +37,10 @@ function pageHead(page) {
   if (url) {
     tags.push(`<link rel="canonical" href="${escapeHtml(canonical)}" />`, meta('og:url', canonical, 'property'));
     const structured = {
-      '@context': 'https://schema.org', '@type': 'TechArticle',
+      '@context': 'https://schema.org', '@type': page.id === 'home' ? 'WebPage' : 'TechArticle',
       headline: page.title, description: page.description, url: canonical,
       inLanguage: 'en', image,
-      isPartOf: { '@type': 'WebSite', name: 'Previewhost documentation', url: url.href },
+      isPartOf: { '@type': 'WebSite', name: 'Previewhost', url: url.href },
     };
     tags.push(`<script type="application/ld+json">${JSON.stringify(structured).replaceAll('<', '\\u003c')}</script>`);
   }
@@ -53,17 +53,19 @@ const server = await createServer({ configFile, server: { middlewareMode: true, 
 try {
   const { render } = await server.ssrLoadModule('/src/render.tsx');
   const pages = loadPages(base);
-  for (const page of pages) {
+  for (const page of [homePage, ...pages]) {
     const html = template
       .replace('<div id="root"></div>', () => `<div id="root">${render(page.id)}</div>`)
       .replace(/<title>.*?<\/title>/, () => `<title>${escapeHtml(page.documentTitle)}</title>`)
       .replace(/<meta name="description" content="[^"]*"/, () => `<meta name="description" content="${escapeHtml(page.description)}"`)
       .replace('</head>', () => `${pageHead(page)}\n  </head>`);
-    const file = resolve(output, page.id === 'welcome' ? 'index.html' : `${page.id}/index.html`);
+    const file = resolve(output, pagePath(page.id, '/').slice(1), 'index.html');
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, html);
-    await writeFile(resolve(dirname(file), 'index.md'), page.publishedMarkdown);
+    if (page.publishedMarkdown) await writeFile(resolve(dirname(file), 'index.md'), page.publishedMarkdown);
   }
+  // Preserve the existing machine-readable introduction address.
+  await writeFile(resolve(output, 'index.md'), pages[0].publishedMarkdown);
   const index = [
     '# Previewhost', '', `> ${pages[0].description}`, '',
     'For coding agents, start with MCP setup. For terminal commands, use CLI quickstart. For a Node.js program, use the library guide.', '',
@@ -77,7 +79,7 @@ try {
   }
   await writeFile(resolve(output, 'llms.txt'), index.join('\n'));
   if (url) {
-    const entries = pages.map((page) => `  <url><loc>${escapeHtml(absolute(pagePath(page.id, base)))}</loc></url>`);
+    const entries = [homePage, ...pages].map((page) => `  <url><loc>${escapeHtml(absolute(pagePath(page.id, base)))}</loc></url>`);
     await writeFile(resolve(output, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join('\n')}\n</urlset>\n`);
   }
   await writeFile(resolve(output, 'robots.txt'), url
@@ -91,7 +93,7 @@ try {
     .replace(/<meta name="description" content="[^"]*"/, '<meta name="description" content="This address does not match a documentation page."')
     .replace('</head>', '<meta name="robots" content="noindex" /></head>');
   await writeFile(resolve(output, '404.html'), notFound);
-  console.log(`Built ${pages.length} documentation pages in ${output}`);
+  console.log(`Built the homepage and ${pages.length} documentation pages in ${output}`);
   console.log(url ? `Public URL: ${url.href}` : 'Local preview build: noindex. Set DOCS_URL to the public HTTPS address before publishing.');
 } finally {
   await server.close();

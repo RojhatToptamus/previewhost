@@ -5,7 +5,7 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.goto('/');
+  await page.goto('/introduction/');
   await expect(page).toHaveTitle('Previewhost documentation | Local application previews');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Introduction');
   await expect(page.locator('.docs-sidebar')).toBeVisible();
@@ -29,7 +29,7 @@ test('static documentation, links, images, search, theme and copying', async ({ 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), href).toBe(true);
     expect(await page.locator('vite-error-overlay').count()).toBe(0);
   }
-  await page.goto('/');
+  await page.goto('/introduction/');
   await page.getByRole('button', { name: 'Search documentation (Command or Control K)' }).click();
   await expect(page.getByRole('searchbox')).toBeFocused();
   await page.keyboard.press('Escape');
@@ -42,7 +42,7 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   await expect(page.getByRole('option').first()).toBeVisible();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  await expect(page).not.toHaveURL('http://127.0.0.1:4173/');
+  await expect(page).not.toHaveURL('http://127.0.0.1:4173/introduction/');
   await page.goto('/installation/');
   await page.getByRole('button', { name: 'Copy code', exact: true }).first().click();
   await expect(page.getByRole('button', { name: 'Code copied' })).toBeVisible();
@@ -69,7 +69,7 @@ test('static documentation, links, images, search, theme and copying', async ({ 
 
 test('mobile navigation, keyboard dismissal and long reference tables', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/introduction/');
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('mobile.png') });
   const openMenu = page.getByRole('button', { name: 'Open documentation menu', exact: true });
   await openMenu.click();

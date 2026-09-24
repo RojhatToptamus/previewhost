@@ -18,5 +18,12 @@ export const pageSources = [
 ].map(([id, label, group, source]) => ({ id, label, group, source }));
 
 export function pagePath(id, base = '/') {
-  return `${base}${id === 'welcome' ? '' : `${id}/`}`;
+  return `${base}${id === 'home' ? '' : id === 'welcome' ? 'introduction/' : `${id}/`}`;
 }
+
+export const homePage = {
+  id: 'home',
+  title: 'Your whole app. One local preview.',
+  documentTitle: 'Previewhost — Your whole app. One local preview.',
+  description: 'Run your frontend, APIs, and databases together on your machine. Separate previews for every worktree, with a stable local URL when you replace a running preview.',
+};
