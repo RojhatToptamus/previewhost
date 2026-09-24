@@ -2,11 +2,11 @@ import { Moon, Sun } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import "./siteTheme.css";
 
-export const siteThemeStorageKey = "previewhost.docs.theme";
+const siteThemeStorageKey = "previewhost.docs.theme";
 
 export type SiteTheme = "light" | "dark";
 
-export function normalizeSiteTheme(value: string | null): SiteTheme {
+function normalizeSiteTheme(value: string | null): SiteTheme {
   return value === "dark" ? "dark" : "light";
 }
 
@@ -16,7 +16,7 @@ function readDeviceSiteTheme(): SiteTheme {
     : "light";
 }
 
-export function readStoredSiteTheme(): SiteTheme {
+function readStoredSiteTheme(): SiteTheme {
   try {
     const storedTheme = window.localStorage.getItem(siteThemeStorageKey);
     return storedTheme === null
@@ -27,7 +27,7 @@ export function readStoredSiteTheme(): SiteTheme {
   }
 }
 
-export function applySiteTheme(theme: SiteTheme) {
+function applySiteTheme(theme: SiteTheme) {
   document.documentElement.dataset.siteTheme = theme;
   const fallback = theme === "dark" ? "#000000" : "#ffffff";
   const themeColor =
@@ -77,8 +77,6 @@ export function useSiteTheme() {
 
   return {
     theme,
-    isDark: theme === "dark",
-    setTheme,
     toggleTheme: () =>
       setTheme(theme === "dark" ? "light" : "dark"),
   };
@@ -88,18 +86,15 @@ export function SiteThemeToggle({
   theme,
   onToggle,
   compact = false,
-  className = "",
 }: {
   theme: SiteTheme;
   onToggle: () => void;
   compact?: boolean;
-  className?: string;
 }) {
   const isDark = theme === "dark";
   const classes = [
     "site-theme-toggle",
     compact ? "site-theme-toggle--compact" : "",
-    className,
   ]
     .filter(Boolean)
     .join(" ");

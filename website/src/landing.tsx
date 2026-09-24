@@ -21,8 +21,8 @@ const agentCommands = {
 function Brand() {
   return <a className="landing-brand" href={import.meta.env.BASE_URL} aria-label="Previewhost home"><span aria-hidden="true" dangerouslySetInnerHTML={{ __html: brandMark }} /><span>Previewhost</span></a>;
 }
-function TextLink({ href, children, className = "" }: { href: string; children: ReactNode; className?: string }) {
-  return <a className={`landing-text-link ${className}`} href={href}>{children}<ArrowRight aria-hidden="true" /></a>;
+function TextLink({ href, children }: { href: string; children: ReactNode }) {
+  return <a className="landing-text-link" href={href}>{children}<ArrowRight aria-hidden="true" /></a>;
 }
 
 function CopyCommand({ command, label, prose = false }: { command: string; label: string; prose?: boolean }) {
