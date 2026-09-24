@@ -97,6 +97,8 @@ Use compatible migrations during replacement. Before a disruptive schema change,
 The dashboard shows **Setup jobs** for the latest attempt, including progress, failures, logs, and **Run again** when stopped.
 CLI `get`, `wait`, and `logs`, and their MCP counterparts, report the same outcomes.
 `skipped` means that the job already succeeded for the retained data. It did not execute in this attempt.
+Waiting resources identify unfinished dependencies. After cancellation, **Start preview** starts
+the retained configuration again. An interrupted once-only job still needs explicit rerun or data reset.
 
 For migration logs, run `previewhost logs shop ATTEMPT_ID --source migrate`.
 Replace `ATTEMPT_ID` with the failed attempt ID. MCP `preview_logs` accepts the same `source` and an optional `after` cursor.

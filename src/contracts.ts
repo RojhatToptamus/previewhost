@@ -149,6 +149,8 @@ export interface ServiceStatus {
   state: 'waiting' | 'starting' | 'ready' | 'succeeded' | 'skipped' | 'failed' | 'canceled' | 'stopped';
   url?: string;
   browserUrl?: string;
+  /** Dependencies still blocking this node during startup. Derived from the current attempt. */
+  waitingFor?: string[];
   error?: Failure;
 }
 export interface DataStatus {

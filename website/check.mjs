@@ -95,6 +95,11 @@ for (const page of [homePage, ...pages]) {
   }
 }
 
+const favicon = readFileSync(resolve(output, 'favicon.png'));
+assert.equal(favicon.readUInt32BE(16), 64);
+assert.equal(favicon.readUInt32BE(20), 64);
+assert.deepEqual(favicon, readFileSync(resolve(repository, 'assets/favicon.png')));
+
 const card = readFileSync(resolve(output, 'social-card.png'));
 assert.equal(card.readUInt32BE(16), 1200);
 assert.equal(card.readUInt32BE(20), 630);

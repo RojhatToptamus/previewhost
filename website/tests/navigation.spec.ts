@@ -10,7 +10,14 @@ test('static documentation, links, images, search, theme and copying', async ({ 
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Introduction');
   await expect(page.locator('.docs-sidebar')).toBeVisible();
   const logo = page.locator('.docs-brand-mark svg');
-  await expect(logo).toHaveAttribute('viewBox', '0 0 32 36');
+  expect(await page.locator('link[rel="icon"]').evaluateAll(async links => {
+    return Promise.all(links.map(async link => {
+      const image = new Image();
+      image.src = (link as HTMLLinkElement).href;
+      await image.decode();
+      return image.naturalWidth === image.naturalHeight && image.naturalWidth > 0;
+    }));
+  })).toEqual([true, true]);
   const lightLogoColor = await logo.evaluate(element => getComputedStyle(element).color);
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('desktop-light.png') });
   const links = await page.locator('.docs-sidebar-nav a').evaluateAll(elements => elements.map(element => (element as HTMLAnchorElement).pathname));
@@ -25,7 +32,11 @@ test('static documentation, links, images, search, theme and copying', async ({ 
     expect(markdownResponse.status()).toBe(200);
     expect(await markdownResponse.text()).toMatch(/^# /);
     await expect(page.locator('.docs-sidebar-nav [aria-current="page"]')).toHaveAttribute('href', href);
-    expect(await page.locator('img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)), href).toBe(true);
+    for (const image of await page.locator('img').all()) {
+      await image.scrollIntoViewIfNeeded();
+      await image.evaluate(element => (element as HTMLImageElement).decode());
+      expect(await image.evaluate(element => (element as HTMLImageElement).naturalWidth), href).toBeGreaterThan(0);
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), href).toBe(true);
     expect(await page.locator('vite-error-overlay').count()).toBe(0);
   }

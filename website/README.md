@@ -21,6 +21,15 @@ npm run preview:docs
 
 The build output is `.local/docs-site`.
 
+## Deployment
+
+The repository's `vercel.json` builds the public site for `https://www.previewhost.app/`.
+Canonical links, social URLs, and the sitemap use that address. Local builds omit
+`DOCS_URL` and remain `noindex`.
+
+The shared mark is `assets/previewhost.svg`. After changing it, regenerate the square
+PNG favicon with `node scripts/generate-favicon.mjs` (requires Playwright Chromium).
+
 ## Edit content
 
 The product homepage is in `src/landing.tsx` and `src/landing.css`. The introduction

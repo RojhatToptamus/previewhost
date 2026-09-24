@@ -12,6 +12,7 @@ import { failure, PreviewError } from './errors.js';
 import { makePrivateDirectory } from './private-files.js';
 import { SecretSetup } from './secrets-setup.js';
 import { secretsPage, secretsScript, secretsStyle } from './secrets-page.js';
+import { brandIcon, favicon } from './ui.js';
 import type { ProjectOwnerInfo } from './project.js';
 
 async function createToken(path: string, runtime: PreviewRuntime): Promise<string> {
@@ -204,12 +205,14 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
       const browser = ['/secrets/form', '/secrets/unlock', '/secrets/approve', '/secrets/save', '/secrets/cancel'].includes(req.url ?? '');
       const asset: [string | Buffer, string] | undefined = req.url === '/secrets' ? [secretsPage, 'text/html; charset=utf-8'] : req.url === '/secrets.js' ? [secretsScript, 'text/javascript; charset=utf-8'] :
         req.url === '/secrets.css' ? [secretsStyle, 'text/css; charset=utf-8'] :
+        req.url === '/previewhost.svg' ? [brandIcon, 'image/svg+xml'] :
+        req.url === '/favicon.png' ? [favicon, 'image/png'] :
         req.url === '/fonts/geist.woff2' ? [geist, 'font/woff2'] : req.url === '/fonts/geist-mono.woff2' ? [geistMono, 'font/woff2'] : undefined;
       if (asset && req.method === 'GET') {
         if (req.headers.origin !== undefined && (req.headers.origin !== secrets.origin || headerCount('origin') !== 1)) throw new PreviewError('UNAUTHORIZED', 'Use the same origin for this private page.');
         res.writeHead(200, { 'content-type': asset[1], 'content-length': Buffer.byteLength(asset[0]),
           'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'cross-origin-resource-policy': 'same-origin',
-          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", connection: 'close' });
+          'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", connection: 'close' });
         res.end(asset[0]); return;
       }
       if (browser ? req.headers.origin !== secrets.origin || headerCount('origin') !== 1 : req.headers.origin !== undefined) {

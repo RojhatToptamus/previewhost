@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeystoreStatus as StoreStatus, SecretList as SecretPage } from "../../src/keystore";
 import { toast } from "sonner";
+import { MoreHorizontalIcon } from "lucide-react";
 import { call, errorMessage } from "./lib/api";
 import { Button } from "./components/ui/button";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
+} from "./components/ui/dropdown-menu";
 import {
   Dialog,
   DialogTrigger,
@@ -20,6 +24,7 @@ import {
   FieldError,
 } from "./components/ui/field";
 import { Input } from "./components/ui/input";
+import { Checkbox } from "./components/ui/checkbox";
 import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Spinner } from "./components/ui/spinner";
@@ -70,11 +75,7 @@ export function SecretManager({ revision }: { revision: number }) {
   }, [revision, editing, unlockRevision, query, after]);
   return (
     <div className="page secrets-page">
-      <h1>Secret Manager</h1>
-      <p className="summary">
-        Changes apply on the next start in every project using the reference.
-      </p>
-      {list && <KeystoreControls status={list.keystore} onUnlock={() => setUnlockRevision(value => value + 1)} />}
+      <SecretManagerHeader status={list?.keystore} onUnlock={() => setUnlockRevision(value => value + 1)} />
       {error && <Notice title="Secrets unavailable" error>{error} Use Refresh to try again.</Notice>}
       {!list ? (
         !error && <Loading>Loading secret references…</Loading>
@@ -266,14 +267,13 @@ function SecretRow({
   );
 }
 
-function KeystoreControls({ status, onUnlock }: { status: StoreStatus; onUnlock(): void }) {
+function SecretManagerHeader({ status, onUnlock }: { status?: StoreStatus; onUnlock(): void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const password = useRef<HTMLInputElement>(null);
   const confirmation = useRef<HTMLInputElement>(null);
-  const remember = useRef<HTMLInputElement>(null);
-  const creating = status.state === "new";
+  const creating = status?.state === "new";
   useEffect(() => {
     const clear = () => {
       if (password.current) password.current.value = "";
@@ -286,7 +286,7 @@ function KeystoreControls({ status, onUnlock }: { status: StoreStatus; onUnlock(
     event.preventDefault();
     if (busy) return;
     const input = { action: "unlockKeystore", create: creating, password: password.current!.value,
-      confirmation: confirmation.current?.value, remember: remember.current?.checked ?? false };
+      confirmation: confirmation.current?.value, remember: new FormData(event.currentTarget).has("remember") };
     password.current!.value = "";
     if (confirmation.current) confirmation.current.value = "";
     setBusy(true); setError("");
@@ -304,21 +304,42 @@ function KeystoreControls({ status, onUnlock }: { status: StoreStatus; onUnlock(
     } catch (error) { setError(errorMessage(error)); }
     finally { setBusy(false); }
   }
-  return <section className="mb-6 flex max-w-xl flex-col gap-4">
-    {status.state !== "unlocked" ? <form onSubmit={submit} className="flex flex-col gap-4">
+  return <>
+    <div className="secrets-heading">
+      <h1>Secret Manager</h1>
+      {status?.state === "unlocked" && status.canRemember && <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" disabled={busy} aria-label="Keystore options">
+            {busy ? <Spinner /> : <MoreHorizontalIcon />}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuGroup>
+            <DropdownMenuItem onSelect={() => void cache("rememberKeystore")}>
+              Remember unlock on this Mac
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void cache("forgetKeystore")}>
+              Forget automatic unlock
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>}
+    </div>
+    <p className="summary">Changes apply on the next start in every project using the reference.</p>
+    {status && status.state !== "unlocked" && <form onSubmit={submit} className="flex max-w-xl flex-col gap-4">
       <h2>{creating ? "Create your keystore" : "Unlock your keystore"}</h2>
       <p>{creating ? "Choose at least 12 characters. Keep your password safe; Previewhost cannot recover it." : "Unlock this dashboard session to manage stored values. Project owners unlock separately through private setup."}</p>
       <Field><FieldLabel htmlFor="vault-password">Keystore password</FieldLabel>
         <Input id="vault-password" ref={password} type="password" autoComplete={creating ? "new-password" : "current-password"} required maxLength={4096} disabled={busy} /></Field>
       {creating && <Field><FieldLabel htmlFor="vault-confirm">Confirm password</FieldLabel>
         <Input id="vault-confirm" ref={confirmation} type="password" autoComplete="new-password" required maxLength={4096} disabled={busy} /></Field>}
-      {status.canRemember && <label className="flex items-center gap-2"><input type="checkbox" ref={remember} disabled={busy} />Remember unlock on this Mac</label>}
+      {status.canRemember && <Field orientation="horizontal">
+        <Checkbox id="remember-unlock" name="remember" disabled={busy} />
+        <FieldLabel htmlFor="remember-unlock">Remember unlock on this Mac</FieldLabel>
+      </Field>}
       <Button type="submit" disabled={busy} className="self-start">{busy ? "Working…" : creating ? "Create keystore" : "Unlock"}</Button>
-    </form> : status.canRemember ? <div className="flex flex-wrap gap-2">
-      <Button variant="outline" disabled={busy} onClick={() => void cache("rememberKeystore")}>Remember unlock on this Mac</Button>
-      <Button variant="outline" disabled={busy} onClick={() => void cache("forgetKeystore")}>Forget automatic unlock</Button>
-    </div> : null}
-    {(message || status.warning) && <p role="status">{message || status.warning}</p>}
+    </form>}
+    {(message || status?.warning) && <p role="status">{message || status?.warning}</p>}
     {error && <FieldError>{error}</FieldError>}
-  </section>;
+  </>;
 }

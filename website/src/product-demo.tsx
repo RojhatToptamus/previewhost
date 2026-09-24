@@ -126,12 +126,12 @@ export function ProductDemo() {
       <div className="demo-window">
         <aside className="demo-sidebar" aria-label="Example preview navigation">
           <div className="demo-brand"><span aria-hidden="true" dangerouslySetInnerHTML={{ __html: mark }} /><strong>previewhost</strong></div>
-          <button className="demo-overview-button" type="button" aria-pressed={overview} onClick={() => setOverview(true)}><Grid2X2 aria-hidden="true" />All previews<span>1</span></button>
+          <button className="demo-overview-button" type="button" aria-pressed={overview} onClick={() => setOverview(true)}><Grid2X2 aria-hidden="true" />Overview<span>1</span></button>
           <div className="demo-sidebar-label">Previews</div>
           <button type="button" className="demo-preview-button" aria-pressed={!overview} onClick={() => setOverview(false)}><span>shared-notes</span><code>~/projects/shared-notes</code><Status value={status} /></button>
         </aside>
         <div className="demo-workspace">
-          {overview ? <div className="demo-overview"><h2>All previews</h2><p>Apps running from your local source.</p><button type="button" onClick={openPreview}><span><strong>shared-notes</strong><code>~/projects/shared-notes</code></span><Status value={status} /><ChevronRight aria-hidden="true" /></button></div> : <>
+          {overview ? <div className="demo-overview"><h2>Overview</h2><p>Apps running from your local source.</p><button type="button" onClick={openPreview}><span><strong>shared-notes</strong><code>~/projects/shared-notes</code></span><Status value={status} /><ChevronRight aria-hidden="true" /></button></div> : <>
             <div className="demo-preview-header">
               <div className="demo-identity"><div><h2>shared-notes</h2><Status value={status} /></div><code className="demo-path">~/projects/shared-notes</code><span className="demo-address"><ArrowUpRight aria-hidden="true" /><code>{starting ? "Waiting for the frontend…" : address}</code></span></div>
               <button type="button" className="demo-button demo-primary" disabled={starting} onClick={() => dialog.current?.showModal()}>Open app<ArrowUpRight aria-hidden="true" /></button>

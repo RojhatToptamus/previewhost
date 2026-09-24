@@ -135,12 +135,24 @@ test('public recovery remains available after failed runtime close and releases 
   const fixture = await faultEngine('volume-lost-absent');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], dataDirectory: fixture.data,
     dockerSocket: fixture.socket, authorize: () => true });
+  let entered!: () => void; let release!: () => void;
+  const preparing = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  fixture.onInfo = async () => { entered(); await held; };
   try {
     const started = await runtime.start({ name: 'sample', type: 'environment', primary: 'web', services: {
-      web: { type: 'static', directory: fixture.directory }, database: { type: 'postgres' },
+      web: { type: 'static', directory: fixture.directory, dependsOn: ['database'] }, database: { type: 'postgres' },
     } });
+    await preparing;
+    const preparingStatus = (await runtime.get('sample')).candidate!.services!;
+    assert.equal(preparingStatus.database.state, 'starting');
+    assert.equal(preparingStatus.web.state, 'waiting');
+    assert.deepEqual(preparingStatus.web.waitingFor, ['database']);
+    release();
     const result = await runtime.wait('sample', started.candidate!.id);
     assert.equal(result.state, 'cleanup-incomplete');
+    assert.ok(Object.values(result.services!).every(service => service.state === 'canceled'));
+    assert.ok(Object.values(result.services!).every(service => service.error === undefined && service.waitingFor === undefined));
     await assert.rejects(runtime.close(), { code: 'CLEANUP_INCOMPLETE' });
     const recovered = await runtime.stop('sample', { afterEngineRestart: true });
     assert.equal(recovered.data?.cleanup, undefined);
@@ -153,6 +165,7 @@ test('public recovery remains available after failed runtime close and releases 
     try { await next.deleteData('sample'); } finally { await next.close(); }
     assert.equal(fixture.deletions.length, 0);
   } finally {
+    release();
     await runtime.stop('sample', { afterEngineRestart: true }).catch(() => {});
     try { await runtime.close(); } finally { await fixture.close(); }
   }

@@ -5,7 +5,7 @@ import {
   type LogResult, type LogOptions, type DeleteDataOptions, type PreviewDescription, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
 } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
-import { attachmentTarget, canonicalDirectory, describeSpec, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
+import { attachmentTarget, canonicalDirectory, describeSpec, environmentDependencies, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
 import { createGateway, type Gateway } from './gateway.js';
 import { startStatic } from './static.js';
 import { startNative } from './native.js';
@@ -222,8 +222,8 @@ class Runtime implements PreviewRuntime {
   async startAgain(name: string, attemptId: string): Promise<PreviewStatus> {
     const slot = this.slot(name);
     const attempt = this.attempt(slot, attemptId);
-    if (slot.latest !== attempt || !['stopped', 'failed'].includes(attempt.summary.state)) {
-      throw new PreviewError('STALE_ATTEMPT', 'Select the current stopped or failed attempt before starting again.');
+    if (slot.latest !== attempt || !['stopped', 'failed', 'canceled'].includes(attempt.summary.state)) {
+      throw new PreviewError('STALE_ATTEMPT', 'Select the current stopped, failed, or canceled attempt before starting again.');
     }
     // start admits synchronously; its normal startup path revalidates sources and authority.
     return this.start(attempt.declaration);
@@ -259,7 +259,7 @@ class Runtime implements PreviewRuntime {
       throw new PreviewError('INVALID_INPUT', `Wait timeout must be between 1 and ${limits.waitMs} milliseconds.`);
     }
     await waitBounded(attempt, timeoutMs, options.signal);
-    return { ...copySummary(attempt.summary), name, ...(slot.active === attempt && slot.gateway ? { url: slot.gateway.url } : {}) };
+    return { ...copySummary(attempt), name, ...(slot.active === attempt && slot.gateway ? { url: slot.gateway.url } : {}) };
   }
 
   async logs(name: string, attemptId?: string, options: LogOptions = {}): Promise<LogResult> {
@@ -427,10 +427,12 @@ class Runtime implements PreviewRuntime {
         const databases = Object.fromEntries(Object.entries(spec.services).filter((entry) => entry[1].type === 'postgres' || entry[1].type === 'redis')) as
           Record<string, Extract<(typeof spec.services)[string], { type: 'postgres' | 'redis' }>>;
         if (Object.keys(databases).length && !this.data) throw new PreviewError('INVALID_INPUT', 'Managed databases require a private dataDirectory (--data-dir for the daemon).');
+        attempt.summary.services = Object.fromEntries(Object.entries(spec.services).map(([id, service]) => [id, {
+          type: service.type, state: service.type === 'postgres' || service.type === 'redis' ? 'starting' : 'waiting',
+        }]));
         const bindings = this.data && (Object.keys(databases).length || this.data.status(slot.name))
           ? await this.data.open(slot.name, databases, { signal, onFailure: (error) => this.environmentFailed(slot, error) }) : {};
         this.admitted(slot, attempt);
-        attempt.summary.services = {};
         attempt.resource = await startEnvironment({
           spec, url: slot.gateway.url, inputs: this.inputs, secrets, databases: bindings, signal, privateDirectories: this.privateDirectories, data: this.data, rerunJob,
           appendLog: (text, source) => attempt.log.append(text, source),
@@ -492,6 +494,10 @@ class Runtime implements PreviewRuntime {
           attempt.summary.error = failure(error, 'CLEANUP_INCOMPLETE');
           attempt.summary.state = 'cleanup-incomplete';
         });
+      }
+      // Startup has ended. Unstarted nodes and interrupted preparation are not still waiting.
+      for (const service of Object.values(attempt.summary.services ?? {})) {
+        if (service.state === 'waiting' || service.state === 'starting') service.state = 'canceled';
       }
     }
   }
@@ -621,9 +627,9 @@ class Runtime implements PreviewRuntime {
     const data = this.data?.status(slot.name);
     return {
       name: slot.name, ...(slot.gateway ? { url: slot.gateway.url } : {}),
-      ...(slot.active ? { active: copySummary(slot.active.summary) } : {}),
-      ...(slot.candidate ? { candidate: copySummary(slot.candidate.summary) } : {}),
-      ...(slot.latest ? { latest: copySummary(slot.latest.summary) } : {}),
+      ...(slot.active ? { active: copySummary(slot.active) } : {}),
+      ...(slot.candidate ? { candidate: copySummary(slot.candidate) } : {}),
+      ...(slot.latest ? { latest: copySummary(slot.latest) } : {}),
       busy: !!slot.operation || !!slot.stopping,
       ...(slot.cleanup.size ? { cleanup: [...slot.cleanup].filter((attempt) => attempt.summary.state === 'cleanup-incomplete').map((attempt) => ({
         attemptId: attempt.summary.id, error: attempt.summary.error!, sources: [...attempt.summary.sources],
@@ -653,7 +659,18 @@ class Runtime implements PreviewRuntime {
 }
 
 function isLive(slot: Slot): boolean { return !!(slot.active || slot.candidate || slot.operation || slot.stopping || slot.gateway || slot.cleanup.size); }
-function copySummary(summary: AttemptSummary): AttemptSummary { return structuredClone(summary); }
+function copySummary(attempt: Attempt): AttemptSummary {
+  const summary = structuredClone(attempt.summary);
+  if (summary.state === 'starting' && summary.services && attempt.declaration.type === 'environment') {
+    for (const [id, dependencies] of environmentDependencies(attempt.declaration)) {
+      const service = summary.services[id];
+      if (service?.state !== 'waiting') continue;
+      const waitingFor = dependencies.filter(dependency => !['ready', 'succeeded', 'skipped'].includes(summary.services![dependency]?.state));
+      if (waitingFor.length) service.waitingFor = waitingFor;
+    }
+  }
+  return summary;
+}
 function nodeCost(spec: EffectiveSpec): number { return spec.type === 'environment' ? Object.keys(spec.services).length : 1; }
 export function needsExecution(spec: EffectiveSpec): boolean {
   return spec.type === 'command' || spec.type === 'environment' && Object.values(spec.services).some((service) =>

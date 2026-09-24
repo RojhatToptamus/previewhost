@@ -23,8 +23,8 @@ test('interactive example exposes views, filters and keyboard navigation', async
   await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();
   await expect(page.getByLabel('Log source', { exact: true })).toHaveValue('reporting');
   await expect(page.locator('.demo-log-output')).toContainText('reporting v1: ready for HTTP requests.');
-  await page.getByRole('button', { name: 'All previews', exact: false }).click();
-  await expect(page.locator('.demo-overview h2')).toHaveText('All previews');
+  await page.getByRole('button', { name: 'Overview', exact: false }).click();
+  await expect(page.locator('.demo-overview h2')).toHaveText('Overview');
   await page.locator('.demo-overview button').click();
   await expect(page.locator('.demo-identity h2')).toHaveText('shared-notes');
   await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();

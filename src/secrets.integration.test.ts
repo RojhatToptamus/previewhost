@@ -116,7 +116,8 @@ test('unselected and canceled secret resolution create no listener or command', 
   const fixture = await testKeystore(t);
   await writeFile(join(fixture.directory, 'app.mjs'), app);
   await setSecret('selected', 'FAKE_value');
-  const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['selected'], authorize: () => true });
+  let allow = true; let authorizations = 0;
+  const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], secretIds: ['selected'], authorize: () => { authorizations++; return allow; } });
   const spec: PreviewSpec = { name: 'denied', type: 'command', cwd: fixture.directory, command: [process.execPath, 'app.mjs'], env: { VALUE: { secret: 'not-selected' } } };
   try {
     const reads = t.mock.method(keystore, 'get', keystore.get.bind(fixture.store));
@@ -127,7 +128,7 @@ test('unselected and canceled secret resolution create no listener or command', 
     let entered!: () => void;
     const reading = new Promise<void>((resolve) => { entered = resolve; });
     reads.mock.restore();
-    t.mock.method(keystore, 'get', async (_namespace: SecretNamespace, _id: string, options: StoreOptions = {}) => {
+    const pendingRead = t.mock.method(keystore, 'get', async (_namespace: SecretNamespace, _id: string, options: StoreOptions = {}) => {
       entered();
       return new Promise<string>((_resolve, reject) => options.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
     });
@@ -135,9 +136,20 @@ test('unselected and canceled secret resolution create no listener or command', 
     await reading;
     await runtime.cancel('canceled', pending.candidate!.id);
     assert.equal((await runtime.get('canceled')).latest?.state, 'canceled');
-    await assert.rejects(runtime.startAgain('canceled', pending.candidate!.id), { code: 'STALE_ATTEMPT' });
     assert.equal((await runtime.get('canceled')).url, undefined);
     await assert.rejects(readFile(join(fixture.directory, 'starts')), { code: 'ENOENT' });
+    pendingRead.mock.restore();
+    allow = false;
+    const deniedRetry = await outcome(runtime, await runtime.startAgain('canceled', pending.candidate!.id));
+    assert.equal(deniedRetry.error?.code, 'EXECUTION_DENIED');
+    assert.equal(authorizations, 3);
+    await assert.rejects(readFile(join(fixture.directory, 'starts')), { code: 'ENOENT' });
+    allow = true;
+    const ready = await outcome(runtime, await runtime.startAgain('canceled', deniedRetry.id));
+    assert.equal(ready.state, 'ready');
+    assert.equal(authorizations, 4);
+    assert.equal((await body(ready.url!)).value, 'FAKE_value');
+    await assert.rejects(runtime.startAgain('canceled', pending.candidate!.id), { code: 'ATTEMPT_EXPIRED' });
   } finally { await runtime.close(); }
 });
 

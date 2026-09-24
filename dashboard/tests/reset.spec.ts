@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PreviewSpec } from "../../src/contracts";
@@ -219,7 +219,7 @@ test("reset keeps deletion and startup outcomes in context with real PostgreSQL"
     releaseDeletion = undefined;
     await expect(dialog).toContainText("Data deleted. Startup failed.");
     await expect(dialog).toContainText("Fix the error, then retry startup.");
-    await page.screenshot({ path: "/tmp/previewhost-reset-failed.png" });
+    await page.screenshot({ path: "/tmp/previewhost-reset-failed.png", animations: "disabled" });
     await expect(
       page.locator("[data-sonner-toast]").filter({ hasText: "Data deleted" }),
     ).toHaveCount(0);
@@ -269,10 +269,52 @@ test("reset keeps deletion and startup outcomes in context with real PostgreSQL"
     ).toHaveCount(0);
     expect(deletionCount).toBe(3);
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
-    await expect(
-      page.getByRole("link", { name: "Open app", exact: true }),
-    ).toBeVisible();
-    expect(deletionCount).toBe(3);
+    await expect(page.getByRole("link", { name: "Open app", exact: true })).toBeVisible();
+    await page.unroute("**/api");
+    await runtime.stop(spec.name);
+    await writeFile(join(directory, "seed.mjs"), connection +
+      `await db.query("INSERT INTO items(label) VALUES ('partial')"); await db.end(); await (await import('node:fs/promises')).writeFile('partial-seed','written'); setInterval(()=>{},1000);`);
+    const stopped = await runtime.get(spec.name);
+    await runtime.rerunJob(spec.name, stopped.latest!.id, "seed");
+    await expect.poll(() => readFile(join(directory, "partial-seed"), "utf8").catch(() => "")).toBe("written");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await page.getByRole("button", { name: "Cancel startup", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Start preview", exact: true })).toBeVisible();
+    await writeFile(join(directory, "seed.mjs"), connection +
+      `await db.query("INSERT INTO items(label) VALUES ('demo')"); await db.end();`);
+    await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+    await reset();
+    await expect(dialog).toContainText("db · PostgreSQL");
+    await page.screenshot({ path: "/tmp/previewhost-canceled-reset-dark.png", animations: "disabled" });
+    await dialog.getByRole("button", { name: "Delete data and start", exact: true }).click();
+    await expect(dialog).toContainText("Data deleted.");
+    const restarting = await runtime.get(spec.name);
+    const restarted = await runtime.wait(spec.name, (restarting.candidate ?? restarting.latest)!.id);
+    expect(restarted.state).toBe("ready");
+    await expect(dialog).toContainText("Data deleted. Preview ready.");
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    const resetCanceled = await runtime.get(spec.name);
+    expect(await (await fetch(resetCanceled.url! + "/items")).json()).toEqual([{ id: 1, label: "demo" }]);
+    expect(deletionCount).toBe(4);
+
+    // An offline owner's retained-data view has no attempts to restore from browser history.
+    await page.getByRole("tab", { name: "Logs", exact: true }).click();
+    await runtime.stop(spec.name);
+    const retainedData = (await runtime.get(spec.name)).data;
+    await page.route("**/api", async route => {
+      const body = route.request().postDataJSON();
+      if (body.action === "list" || body.action === "recheck") {
+        const owner = { id: "a".repeat(64), project: directory, offline: true,
+          previews: [{ name: spec.name, busy: false, data: retainedData }], requests: [] };
+        await route.fulfill({ json: { result: body.action === "list" ? { owners: [owner] } : owner } });
+      } else await route.continue();
+    });
+    await page.reload();
+    await expect(page.getByRole("tab", { name: "Activity", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: "Show latest attempt" })).toHaveCount(0);
+    await page.locator(".header-actions").getByRole("button", { name: "Actions for review-store" }).click();
+    await expect(page.getByRole("menuitem", { name: "Delete data…", exact: true })).toBeVisible();
   } finally {
     allowDelete = true;
     releaseDeletion?.();
