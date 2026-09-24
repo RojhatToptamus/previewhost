@@ -1,10 +1,10 @@
 # Dashboard
 
-Check running previews, read service and setup-job logs, and stop previews from the browser.
+Start local applications, edit environment bindings, and inspect their progress and logs.
 
 ## Open the dashboard
 
-After a preview starts through the CLI or MCP, run this in another terminal:
+Run:
 
 ```sh
 previewhost dashboard
@@ -14,7 +14,26 @@ The command opens your default browser. Keep its terminal running while you use 
 Closing the page or stopping this command does not stop your previews.
 
 The dashboard lists automatic project owners and data retained after clean owner shutdown. Deleted worktrees can still have retained data. Standalone `serve` instances and embedded runtimes do not appear automatically.
-It does not start owners or grant execution permissions.
+Discovery does not start anything. **New preview** can start a project after you review its configuration and approve access.
+
+## Start a preview
+
+Choose **New preview**, then a known project, a registered Git worktree, or an absolute folder path.
+Selecting a folder does not move an existing preview or share its database data.
+
+Use its existing configuration file, or enter YAML/JSON without creating a file.
+Default lookup accepts `preview.yaml` or `preview.yml`; invalid or conflicting files require correction.
+Relative source paths resolve from the file's directory, or the selected project for pasted input.
+Review all source folders, commands, jobs, and managed databases before allowing startup.
+
+Private setup handles secret approval, missing values, and owner unlock. After completion, return
+and continue startup. Cancellation requires an explicit new request; it never starts the application.
+Closing a review does not cancel an open private form. Pasted configuration is not retained after
+closing the dialog; enter it again or use a configuration file.
+
+Existing owners keep their execution permissions. The dashboard does not restart an owner to
+change those permissions. If it was started without execution permission, explicitly shut it down
+and relaunch with `--allow-exec`. This stops that owner's previews; managed data and stored values remain.
 
 ## Find the right preview
 
@@ -62,10 +81,10 @@ Waiting resources name their unfinished dependencies. Managed databases show Sta
 | Clear an old entry | **Remove entry** requires no remaining work, managed data, or incomplete cleanup. Sources and saved secrets remain. |
 | Check an unavailable owner | **Recheck status** retries the connection. **Remove entry** explains blockers and requires confirmation that application processes stopped. |
 
-Start and retry do not reload `preview.yaml`. To apply file changes, use CLI or MCP start/replace with the updated file.
+Start and retry use retained configuration. To load file changes, open **Configuration** and choose **Review and apply**, or use CLI/MCP start/replace.
 Retry start does not open private setup. Complete any required secret approval and owner unlock before retrying.
 Removing the last entry closes an empty automatic owner and ends its secret approvals.
-Offline entries contain no restart configuration. Start them again through the CLI or MCP.
+Offline entries contain no restart configuration. Use **New preview** with a file or direct configuration, or start through CLI/MCP.
 See [setup jobs](jobs.md#progress-and-recovery) for explicit reruns and reset behavior.
 
 Reset and deletion results stay in the confirmation dialog. Reset reports deletion separately
@@ -89,10 +108,28 @@ Other windows, agents, and the stored log buffer are unchanged.
 
 ## Save configuration and manage secrets
 
-In **Configuration**, **Save as preview.yaml** writes the selected attempt's recipe to the project root.
-If `preview.yaml` or `preview.yml` already exists, the footer identifies it instead of offering Save.
-The displayed configuration still belongs to the selected attempt. Saving never overwrites a file or changes the running application.
-Secret references remain references. Stored values do not appear in this view.
+**Current configuration** opens the exact input file when the attempt records one; otherwise it
+opens the retained direct configuration. **Recorded attempt** remains a read-only historical view.
+When a replacement fails, **Failed update configuration** opens its input file or retained declaration for correction.
+**Project configuration file** explicitly selects an existing root file when it differs from that attempt.
+
+Select a command service or setup job to add, edit, or remove a binding. Literal values remain
+undisclosed; replacing one requires an explicit new value. Secret bindings contain reference
+names, not credentials. Use an exact existing name only for intentional sharing.
+
+- **Save file** updates the selected file without changing the running application. Unedited
+  values, comments, and relative paths remain. Formatting can change. Concurrent changes are rejected.
+- **Review and apply** starts or replaces the whole environment after review. For file-backed edits,
+  save first. A saved file remains saved if application startup fails or is canceled.
+- Direct configuration can be applied without writing a file. **Save as preview.yaml** is optional
+  and refuses to overwrite either default file.
+
+Replacement keeps the old app serving until the new attempt is ready. It does not roll back
+source edits, migrations, or partial database writes. Successful once-only jobs stay completed;
+changing their bindings does not rerun them. Use the existing explicit job rerun when needed.
+
+Removing a binding keeps its stored secret and existing owner approval. Changing a stored value
+affects future starts that use that exact reference, including other projects; it does not restart them.
 
 **Secret Manager** creates or unlocks the dashboard’s keystore session, then lists references for editing.
 Search covers all stored reference names. Use **Next** and **Previous** to browse bounded pages.

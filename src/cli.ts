@@ -108,12 +108,14 @@ function integer(value: string | undefined, name: string, maximum: number, minim
   return Number(value);
 }
 
-async function readSpec(file: string | undefined, signal: AbortSignal, project: string): Promise<PreviewSpec> {
-  if (file && file !== '-') return loadPreviewSpec(file, { signal });
+async function readSpec(file: string | undefined, signal: AbortSignal, project: string): Promise<{ spec: PreviewSpec; sourceFile?: string }> {
+  if (file && file !== '-') { const sourceFile = resolve(file); return { spec: await loadPreviewSpec(sourceFile, { signal }), sourceFile }; }
   if (file === '-' && process.stdin.isTTY) throw new PreviewError('INVALID_INPUT', 'Pipe one JSON spec to --file -.');
-  if (process.stdin.isTTY) return loadPreviewSpec(await resolvePreviewFile(project), { signal });
-  return readPreviewSpec(process.stdin, { baseDirectory: process.cwd(), format: 'json', signal,
-    fallbackProject: file === undefined ? project : undefined });
+  if (process.stdin.isTTY) { const sourceFile = await resolvePreviewFile(project); return { spec: await loadPreviewSpec(sourceFile, { signal }), sourceFile }; }
+  let sourceFile: string | undefined;
+  const spec = await readPreviewSpec(process.stdin, { baseDirectory: process.cwd(), format: 'json', signal,
+    fallbackProject: file === undefined ? project : undefined, onFile: file => { sourceFile = file; } });
+  return { spec, sourceFile };
 }
 
 const launchFlags = ['root', 'allow-exec', 'env', 'secret', 'data-dir', 'docker-socket'];
@@ -220,10 +222,10 @@ async function main(): Promise<void> {
   try {
     let result: unknown;
     switch (command) {
-      case 'inspect': result = await client.inspect(await readSpec(values.file, inputController.signal, project)); break;
+      case 'inspect': result = await client.inspect((await readSpec(values.file, inputController.signal, project)).spec); break;
       case 'start': case 'replace': {
-        const spec = await readSpec(values.file, inputController.signal, project);
-        const status = command === 'start' ? await client.start(spec) : await client.replace(spec.name, spec);
+        const { spec, sourceFile } = await readSpec(values.file, inputController.signal, project);
+        const status = command === 'start' ? await client.start(spec, { sourceFile }) : await client.replace(spec.name, spec, { sourceFile });
         result = status;
         if (!values['no-wait']) {
           const id = status.candidate?.id ?? status.latest?.id ?? status.active?.id;
@@ -317,7 +319,7 @@ async function secretCommand(positionals: string[], values: ReturnType<typeof pa
     } else {
       const project = await projectDirectory(values.project);
       client = connectProject(projectOptions(values, project));
-      result = command === 'setup' ? await client.secretsSetup(await readSpec(values.file, controller.signal, project), { reopen: values.reopen, signal: controller.signal }) :
+      result = command === 'setup' ? await client.secretsSetup((await readSpec(values.file, controller.signal, project)).spec, { reopen: values.reopen, signal: controller.signal }) :
         command === 'edit' ? await client.secretsEdit(positionals[1], { signal: controller.signal }) : await client.secretsStatus(positionals[1], {
           timeoutMs: integer(values['timeout-ms'], '--timeout-ms', limits.secretWaitMs), signal: controller.signal,
         });

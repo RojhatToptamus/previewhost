@@ -136,10 +136,10 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 | Previews | Compare worktrees, status, and available applications in aligned rows. Names open details; Open app opens the running application. |
 | Activity | Show actionable failures, serving/latest attempts with start times, services, jobs, private setup, and managed data. Put recovery beside the affected resource. |
 | Logs | Put search, attempt, and source above output. Use Log options for wrapping, search context, and Clear view. The header Refresh also retrieves logs. Explain hidden and omitted output separately; do not imply captured logs are live. |
-| Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yaml outside the scrolling body when no default file exists. Otherwise identify the existing file. |
+| Configuration | Distinguish the editable current declaration/file from recorded attempts. Keep Save file and Review and apply outside the scrolling body. Direct configuration can apply without saving; Save as preview.yaml remains explicit. |
 | Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
 
-Long lists need bounded scrolling without burying actions. The environment table uses a 320px height capped at 45% of viewport height, with its own scrollbar and sticky header. Secret lists use the existing bounded scroll area. An empty environment list uses a short message without a scroll box. Short lists should not gain artificial filler rows.
+Long lists need bounded scrolling without burying actions. Environment tables stop growing at 320px or 45% of viewport height, with an internal scrollbar and sticky header. Secret lists use the existing bounded scroll area. An empty environment list uses a short message without a scroll box. Short lists should not gain artificial filler rows.
 
 Tables compare values. Give each column enough room for its content; do not squeeze references into an action-width column. Reserve compact right columns for actions. Use row separators without extra lines above the first row or below the last.
 
@@ -269,3 +269,8 @@ Before finishing a UI change:
 - Verify focus visibility, tab order, dialogs, selection, copy feedback, and scroll ownership.
 - Use disposable data. Never capture secret values or private capabilities.
 - State what was actually tested and what remains unverified.
+
+Configuration editors preserve undisclosed values on the server. Show removed bindings with Undo.
+Keep edits when switching diagnostic tabs. A stale file or attempt needs an explicit reload,
+never a silent merge. Review lists the actual sources, execution scope and job/data effects;
+private secret approval stays separate. Use the same review for New preview and Apply.

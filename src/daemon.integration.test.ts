@@ -14,6 +14,7 @@ import { PreviewError } from './errors.js';
 import { createPreviewRuntime } from './runtime.js';
 import { makePrivateDirectory } from './private-files.js';
 import { publicAccess } from './testSupport/permissions.js';
+import { loadPreviewSpec } from './config.js';
 
 async function fixture(t: TestContext, authorize?: RuntimeOptions['authorize']) {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost transport '));
@@ -69,6 +70,86 @@ test('configuration saving requires owner project metadata', async t => {
   await assert.rejects(f.client.saveConfiguration('page', status.candidate!.id), { code: 'INVALID_INPUT' });
   await assert.rejects(f.client.allowSources([f.directory]), { code: 'EXECUTION_DENIED' });
   await assert.rejects(readFile(join(f.directory, 'preview.yaml')), { code: 'ENOENT' });
+});
+
+test('start and replace transport preserve file origin and stale slot guards', async t => {
+  const f = await fixture(t);
+  await writeFile(join(f.directory, 'index.html'), 'guarded transport preview');
+  const spec = { name: 'page', type: 'static' as const, directory: f.directory };
+  const sourceFile = join(f.directory, 'custom.yaml');
+  const first = await f.client.start(spec, { sourceFile, expected: { active: null, candidate: null, latest: null } });
+  await f.client.wait('page', first.candidate!.id);
+  assert.equal((await f.client.describe('page', first.candidate!.id)).sourceFile, sourceFile);
+  const replacementFile = join(f.directory, 'replacement.json');
+  const replacement = await f.client.replace('page', spec, { sourceFile: replacementFile,
+    expected: { active: first.candidate!.id, candidate: null, latest: first.candidate!.id } });
+  await f.client.wait('page', replacement.candidate!.id);
+  assert.equal((await f.client.describe('page', replacement.candidate!.id)).sourceFile, replacementFile);
+  await assert.rejects(f.client.replace('page', spec, { expected: {
+    active: first.candidate!.id, candidate: null, latest: first.candidate!.id,
+  } }), { code: 'STALE_ATTEMPT' });
+  const stopped = await f.client.stop('page');
+  const again = await f.client.startAgain('page', stopped.latest!.id);
+  await f.client.wait('page', again.candidate!.id);
+  assert.equal((await f.client.describe('page', again.candidate!.id)).sourceFile, replacementFile);
+  await f.client.stop('page');
+  await assert.rejects(f.client.start(spec, { expected: { active: null, candidate: null, latest: first.candidate!.id } }), { code: 'STALE_ATTEMPT' });
+  const direct = await f.client.start(spec);
+  await f.client.wait('page', direct.candidate!.id);
+  assert.equal((await f.client.describe('page', direct.candidate!.id)).sourceFile, undefined);
+});
+
+test('binding edits preserve undisclosed values through review, private setup, apply and save', async t => {
+  let secretReview: Extract<Parameters<NonNullable<RuntimeOptions['authorize']>>[0], { operation: 'secrets-setup' }> | undefined;
+  const f = await fixture(t, request => {
+    if (request.operation === 'secrets-setup') { secretReview = request; return false; }
+    return request.operation === 'start' || request.operation === 'replace';
+  });
+  await writeFile(join(f.directory, 'server.mjs'), `import http from 'node:http'; if(process.env.CHANGE==='fail')process.exit(2); http.createServer((req,res)=>res.end(JSON.stringify([process.env.KEEP,process.env.CHANGE,process.env.REMOVE,process.env.NEW]))).listen(Number(process.env.PORT),process.env.HOST);`);
+  const first = await f.client.start({ name: 'edited', type: 'command', cwd: f.directory,
+    command: [process.execPath, 'server.mjs'], env: { KEEP: 'retained-fixture', CHANGE: 'before', REMOVE: 'drop' } }, { sourceFile: join(f.directory, 'original.yaml') });
+  const ready = await f.client.wait('edited', first.candidate!.id);
+  assert.equal(ready.state, 'ready');
+  const changes = [{ key: 'CHANGE', value: 'after' }, { key: 'REMOVE', value: null }, { key: 'NEW', value: 'added' }];
+  const inspection = await f.client.configureBindings('edited', ready.id, changes, { operation: 'inspect' });
+  if (!('bindings' in inspection)) throw new Error('Expected configuration inspection');
+  assert.deepEqual(inspection.bindings.map(row => row.key).sort(), ['CHANGE', 'KEEP', 'NEW']);
+  assert.ok(inspection.bindings.every(row => row.value === null));
+  assert.ok(!JSON.stringify(inspection).includes('retained-fixture'));
+  assert.deepEqual(await (await fetch(ready.url!)).json(), ['retained-fixture', 'before', 'drop', null]);
+  await assert.rejects(f.client.configureBindings('edited', ready.id, changes, { operation: 'secrets' }), { code: 'EXECUTION_DENIED' });
+  assert.ok(secretReview?.spec?.type === 'command');
+  assert.deepEqual(secretReview.spec.env, { KEEP: 'retained-fixture', CHANGE: 'after', NEW: 'added' });
+  const expected = { active: ready.id, candidate: null, latest: ready.id };
+  const applied = await f.client.configureBindings('edited', ready.id, changes, { operation: 'apply', expected });
+  if (!('busy' in applied)) throw new Error('Expected preview status');
+  const updated = await f.client.wait('edited', applied.candidate!.id);
+  assert.equal(updated.state, 'ready');
+  assert.equal(updated.url, ready.url);
+  assert.equal((await f.client.describe('edited', updated.id)).sourceFile, undefined);
+  assert.deepEqual(await (await fetch(ready.url!)).json(), ['retained-fixture', 'after', null, 'added']);
+  await assert.rejects(f.client.configureBindings('edited', ready.id, [{ key: 'KEEP', value: null }], { operation: 'apply', expected }), { code: 'STALE_ATTEMPT' });
+  const failing = await f.client.configureBindings('edited', updated.id, [{ key: 'CHANGE', value: 'fail' }], {
+    operation: 'apply', expected: { active: updated.id, candidate: null, latest: updated.id },
+  });
+  const failed = await f.client.wait('edited', failing.candidate!.id);
+  assert.equal(failed.state, 'failed');
+  assert.deepEqual(await (await fetch(ready.url!)).json(), ['retained-fixture', 'after', null, 'added']);
+  const fixed = await f.client.configureBindings('edited', failed.id, [{ key: 'CHANGE', value: 'fixed' }], {
+    operation: 'apply', expected: { active: updated.id, candidate: null, latest: failed.id },
+  });
+  const recovered = await f.client.wait('edited', fixed.candidate!.id);
+  assert.equal(recovered.state, 'ready');
+  assert.equal(recovered.url, ready.url);
+  assert.deepEqual(await (await fetch(ready.url!)).json(), ['retained-fixture', 'fixed', null, 'added']);
+  await assert.rejects(f.client.configureBindings('edited', recovered.id, [], { operation: 'save' }), { code: 'INVALID_INPUT' });
+  const saved = await f.runtime.configureBindings('edited', recovered.id, [{ key: 'CHANGE', value: 'saved-only' }], { operation: 'save' }, { projectDirectory: f.directory });
+  if (!('file' in saved)) throw new Error('Expected saved configuration');
+  const declaration = await loadPreviewSpec(saved.file);
+  assert.ok(declaration.type === 'command');
+  assert.deepEqual(declaration.env, { KEEP: 'retained-fixture', CHANGE: 'saved-only', NEW: 'added' });
+  assert.deepEqual(await (await fetch(ready.url!)).json(), ['retained-fixture', 'fixed', null, 'added']);
+  await assert.rejects(f.runtime.configureBindings('edited', recovered.id, [], { operation: 'save' }, { projectDirectory: f.directory }), { code: 'ALREADY_EXISTS' });
 });
 
 test('control authority, content, strict schemas, and body bounds are enforced before execution', async (t) => {

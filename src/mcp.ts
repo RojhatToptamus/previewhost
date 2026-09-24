@@ -27,15 +27,16 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   const rootsFor = (project: string) => access ? access.roots(project) : Promise.resolve([project, ...(options.allowedRoots ?? [])]);
   const load = async (input: z.output<typeof inputSchema>, project: string, signal?: AbortSignal) => {
     const allowedRoots = await rootsFor(project);
-    const spec = input.spec ?? await loadPreviewSpec(input.file === undefined ? await resolvePreviewFile(project) : resolve(project, input.file), { allowedRoots, signal });
+    const sourceFile = input.spec === undefined ? input.file === undefined ? await resolvePreviewFile(project) : resolve(project, input.file) : undefined;
+    const spec = input.spec ?? await loadPreviewSpec(sourceFile!, { allowedRoots, signal });
     if (access) {
-      try { return await normalizeSources(parseSpec(spec), allowedRoots); }
+      try { return { spec: await normalizeSources(parseSpec(spec), allowedRoots), sourceFile }; }
       catch (error) {
         if (error instanceof PreviewError && error.code === 'SOURCE_DENIED') throw new PreviewError('SOURCE_DENIED', 'A source needs approval. Request preview_access with this project and its required backend/source directories, then retry the original configuration. Never relocate sources to bypass approval.');
         throw error;
       }
     }
-    return spec;
+    return { spec, sourceFile };
   };
   const loadForStartup = async (input: z.output<typeof inputSchema>, project: string, client: ReturnType<typeof connectProject>, signal: AbortSignal) => {
     const spec = await load(input, project, signal);
@@ -52,7 +53,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
       'Start, then wait for the returned attempt ID. For secrets, request private setup, wait on status, then retry only after complete. Never request values in chat or inspect the private form. ' +
       'Use {secret: ID} for stored references. An active owner survives MCP disconnect. ' +
       'Use preview_access for unapproved projects and backend source directories when available; do not edit registration or relocate sources. Denial or cancellation means stop until the user asks to continue. ' +
-      'When the user wants to compare or manage local previews, suggest previewhost dashboard; it can inspect, stop, rerun, and explicitly save a retained configuration. Use preview_replace for replacement; the dashboard does not replace previews. ' +
+      'When the user wants to compare or manage local previews, suggest previewhost dashboard; it can start, inspect, stop, rerun, edit bindings, and explicitly save or apply configuration. Saving a file does not change the serving application until it is applied. ' +
       'If secret setup is canceled, stop and wait for an explicit user request before new setup or startup. Never assume accidental browser closure. ' +
       'Use absolute cwd/directory paths in direct specs, even with project. Omit injected PORT, HOST and PREVIEW_URL from env. ' +
       'For new secret bindings, choose project-specific stored references, distinct from environment-variable names. Preserve existing references; share exact references only intentionally. Required credential variables use private secret bindings even for dummy local values; never invent credential literals. ' +
@@ -105,18 +106,18 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   server.registerTool('preview_inspect', {
     description: 'Validate a spec and describe sources, commands, bindings, cleanup, and read-only prerequisite findings. Missing executables may be prepared by earlier jobs; findings do not block startup. Checks do not execute project commands, install dependencies, pull images, unlock secrets, start owners/resources, or grant permission. Application health and secret values are not checked.',
     inputSchema, annotations: read,
-  }, (input, context) => run('request', input, async (client, project) => client.inspect(await load(input, project, context.mcpReq.signal))));
+  }, (input, context) => run('request', input, async (client, project) => client.inspect((await load(input, project, context.mcpReq.signal)).spec)));
   server.registerTool('preview_start', {
     description: 'Start a named preview or environment from existing source. Commands run as argv without shell expansion. Use {port} and 127.0.0.1 for explicit listen arguments, or honor injected PORT/HOST. PREVIEW_URL is the public origin. Returns a starting attempt; use preview_wait with its id. An environment becomes ready only after all services are ready and finite type: job nodes succeed. Use dependsOn for migrations and seeds; run: once retains successful seeds with managed data. Use a database-querying readyPath, not /openapi.json. Execution and managed databases require daemon owner permission.',
     inputSchema, annotations: write,
-  }, (input, context) => run('request', input, async (client, project) => client.start(await loadForStartup(input, project, client, context.mcpReq.signal))));
+  }, (input, context) => run('request', input, async (client, project) => { const { spec, sourceFile } = await loadForStartup(input, project, client, context.mcpReq.signal); return client.start(spec, { sourceFile }); }));
   server.registerTool('preview_replace', {
     description: 'Prepare a replacement while keeping active routes. All environment services become ready before the routes change together. Shared database data stays in place. Wait for the returned candidate id. Candidate failure keeps the old preview, but jobs may have changed its shared database; writes are not rolled back. Always jobs run again, successful once jobs are skipped.',
     inputSchema: z.strictObject({ name: requestSchemas.replace.shape.name, ...inputShape }).refine(exclusive, 'Supply either file or spec, never both.'), annotations: { ...write, destructiveHint: true },
-  }, (input, context) => run('request', input, async (client, project) => client.replace(input.name, await loadForStartup(input, project, client, context.mcpReq.signal))));
+  }, (input, context) => run('request', input, async (client, project) => { const { spec, sourceFile } = await loadForStartup(input, project, client, context.mcpReq.signal); return client.replace(input.name, spec, { sourceFile }); }));
   server.registerTool('preview_save_config', {
     description: 'Only on an explicit user request, create project-root preview.yaml from the original prepared spec, never an inspect result. Validates sources, schema and dependencies, and preserves declarative references without reading secrets or owner inputs. Does not start or health-test an application. Project-local paths become relative; externalSources identifies nonportable paths. Saving fails if preview.yaml or preview.yml exists, including a directory or symlink. Use the host editor for explicitly requested updates. Credential values must never enter this tool; use {secret: ID}.',
-    inputSchema: requestSchemas.start.extend(scope), annotations: { ...write, openWorldHint: false },
+    inputSchema: requestSchemas.inspect.extend(scope), annotations: { ...write, openWorldHint: false },
   }, (input, context) => run('request', input, async (_client, project) => savePreviewSpec(input.spec, { projectDirectory: project, allowedRoots: await rootsFor(project), signal: context.mcpReq.signal })));
   server.registerTool('preview_list', {
     description: 'List bounded preview observations, source directories and retained database data, including names restored after owner restart. Use after a lost mutation response before retrying.',
@@ -153,7 +154,7 @@ export function createMcpServer(options: ProjectOptions = {}): { server: McpServ
   server.registerTool('preview_secrets_setup', {
     description: 'Request exact secret references through the owner’s private browser form. For new bindings, choose project-specific references, not generic environment-variable names such as API_SECRET. Preserve existing references; use the same exact reference only for intentional sharing. After a canceled result, do not call this tool again or retry startup until the user explicitly asks to resume. The owner approves runtime access to unselected names, then enters only missing values privately. Existing entries are reused, never overwritten. Any authorized preview on this owner can use approved names until shutdown. Returns public metadata only. Never supply values or inspect the private form. Requires owner setup authorization. Saving starts no code; check status, then retry ordinary start/replace with the current spec only after complete.',
     inputSchema, annotations: write,
-  }, (input, context) => run('request', input, async (client, project) => client.secretsSetup(await loadForStartup(input, project, client, context.mcpReq.signal), { signal: context.mcpReq.signal })));
+  }, (input, context) => run('request', input, async (client, project) => client.secretsSetup((await loadForStartup(input, project, client, context.mcpReq.signal)).spec, { signal: context.mcpReq.signal })));
   server.registerTool('preview_secrets_status', {
     description: 'Read or wait up to 25000ms for the public result of private secret setup. canceled is terminal: stop and wait for an explicit user request before new setup or startup. Do not assume accidental closure or ask for values in the canceled form. pending or saving after a wait timeout means setup is still in progress; keep the same request ID. An interrupted status wait leaves the form available. expired is terminal; ask before new setup. browser: failed reports launch failure, not cancellation. No values are read or returned. Complete records access approval and observed presence, not credential validity or future keystore access. Check current preview state before startup with the current spec. Partial is terminal: its private form cannot be reused. After the owner fixes the reported issue, request fresh setup; do not keep waiting on a partial result or ask the owner to resubmit the old form. Retain this request ID with its original project. If the turn ends while setup is pending, the owner can finish the form and send “Secrets saved—continue” to resume.',
     inputSchema: secretRequestSchemas.status.extend(scope), annotations: read,

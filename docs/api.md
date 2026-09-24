@@ -248,8 +248,8 @@ External services remain outside owned stop and deletion operations.
 | Method | Result and effect |
 | --- | --- |
 | `inspect(spec)` | Validated public description and advisory prerequisite findings. No execution or permission grant. Environment key names appear without values. |
-| `start(spec)` | Reserves a candidate and returns `PreviewStatus` before startup finishes. |
-| `replace(name, spec)` | Starts one candidate while the active route remains available. Names must match. |
+| `start(spec, { expected?, sourceFile? }?)` | Reserves a candidate and returns `PreviewStatus` before startup finishes. |
+| `replace(name, spec, { expected?, sourceFile? }?)` | Starts one candidate while the active route remains available. Names must match. |
 | `get(name)` | Current `PreviewStatus`. |
 | `list()` | Current and retained terminal status records. |
 | `wait(name, attemptId, { timeoutMs?, signal? })` | Exact `AttemptResult`. Default and maximum wait: 30 seconds. |
@@ -258,6 +258,17 @@ External services remain outside owned stop and deletion operations.
 | `stop(name, { afterEngineRestart? })` | Stops all applications and owned containers. Preserves data. Repeated stop retries incomplete cleanup. |
 | `rerunJob(name, attemptId, job)` | Reruns the named job and starts the stopped environment from its latest configuration. Normal authorization applies. Partial writes remain. |
 | `deleteData(name, { expected? })` | Permanently removes a stopped environment's verified owned database data after host authorization. |
+
+`expected` is the observed `{ active, candidate, latest }` attempt-ID tuple (use `null` for absent IDs).
+A mismatch rejects startup before changing the environment. `sourceFile` records an absolute input
+path for dashboard editing; it grants no access and does not prove that the file is unchanged.
+CLI and MCP file startups supply it automatically.
+
+The management client also provides `configureBindings(name, attemptId, changes, options, { signal }?)`.
+Each change is `{ service?, key, value }`; `null` removes a binding. Untouched literals remain in the owner.
+Choose `options.operation`: `inspect` returns redacted bindings and findings; `save` creates root YAML;
+`secrets` opens existing private setup; `apply` requires `expected` and uses normal start/replacement.
+Apply does not edit an existing file. Changed direct declarations no longer claim that file as their origin.
 
 Logs use one bounded store per attempt: 65,536 captured UTF-8 bytes and at most 1,024
 output chunks. Filtering does not create another buffer. Source labels in **All output**

@@ -115,7 +115,7 @@
 }
 /* One focus indicator, including buttons composed as Radix triggers. Input groups
    put it on the group; menus use their highlighted row instead. */
-:focus-visible:not([data-slot="input-group-control"]):not([role^="menuitem"]):not([role="option"]),
+:focus-visible:not([data-slot="input-group-control"]):not([role^="menuitem"]):not([role="option"]):not([role="dialog"]):not([role="alertdialog"]),
 [data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible) {
   outline: 2px solid var(--t4);
   outline-offset: 2px;
@@ -719,6 +719,7 @@
   text-align: left;
 }
 .overview-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.overview-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .overview-summary [data-slot="button"] { height: 24px; padding: 0; color: var(--t4); font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
 .overview-summary [data-slot="button"]:hover,
 .overview-summary [data-slot="button"][aria-pressed="true"] { color: var(--t1); }
@@ -938,6 +939,46 @@
   font-family: var(--font-mono);
   -webkit-text-security: disc;
   min-height: 100px;
+}
+.workflow-dialog[data-slot="dialog-content"] {
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.workflow-form { display: flex; flex-direction: column; gap: 20px; min-height: 0; }
+.workflow-body { min-height: 0; overflow: auto; padding: 2px; }
+.workflow-body > [data-slot="alert"] { margin: 16px 0; }
+.workflow-origin, .configuration-help { color: var(--t4); font-size: 12px; line-height: 1.6; }
+.workflow-command { padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.workflow-command + .workflow-command { border-top: 1px solid var(--border); }
+.workflow-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.workflow-consent { margin: 20px 0 4px; align-items: flex-start; }
+.workflow-consent [data-slot="field-label"] { font-weight: 400; line-height: 1.6; }
+.workflow-consent [data-slot="checkbox"] { margin-top: 4px; }
+.spec-input { min-height: 210px; font-family: var(--font-mono); font-size: 12px; }
+.configuration-body { flex: 1; min-height: 0; }
+.configuration-toolbar [data-slot="select-trigger"] { font-family: var(--font-sans); font-size: 13px; }
+.configuration-source { display: flex; flex-direction: column; gap: 6px; padding-bottom: 24px; }
+.configuration-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.configuration-section-heading h2 { font-size: 14px; font-weight: 500; }
+.configuration-service { max-width: 360px; margin-bottom: 16px; }
+.configuration-help { margin-top: 12px; }
+.configuration-feedback { margin-top: 20px; color: var(--t2); }
+.editable-env-table th:first-child { width: 28%; }
+.editable-env-table th:nth-child(2) { width: 130px; }
+.editable-env-table th:last-child { width: 146px; }
+.editable-env-table td { overflow-wrap: anywhere; }
+.env-change { display: block; color: var(--t4); font-size: 11px; padding-top: 4px; }
+.configuration-save-row { gap: 8px; }
+.configuration-save-row p { flex-basis: 180px; }
+@media (max-width: 767px) {
+  .workflow-dialog[data-slot="dialog-content"] { padding: 20px; }
+  .workflow-dialog [data-slot="dialog-footer"] { margin: 0 -20px -20px; padding: 16px 20px; }
+  .configuration-save-row [data-slot="button"] { margin-left: 0; }
+  .configuration-save-row [data-slot="button"]:last-child { margin-left: auto; }
+  .editable-env-table [data-slot="table-cell"]:nth-child(3) { grid-column: 1 / -1; }
+  .editable-env-table .row-actions { justify-content: flex-end; }
 }
 @media (max-width: 1100px) {
   .preview-metadata { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }

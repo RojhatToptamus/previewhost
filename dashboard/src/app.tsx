@@ -15,6 +15,8 @@ import { Preview } from "./preview";
 import { SecretManager } from "./secrets";
 import { Navigation } from "./navigation";
 import { Overview } from "./overview";
+import { NewPreview } from "./new-preview";
+import type { LaunchResult } from "./preview-workflow";
 import { useSelection } from "./lib/view-state";
 import brandSvg from "../../assets/previewhost.svg?raw";
 
@@ -36,6 +38,7 @@ export function App() {
   const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
   const [acting, setActing] = useState(false);
+  const [creating, setCreating] = useState(false);
   const mutation = useRef(false);
   const selectedOwner = typeof selection === "object" ? selection.owner : undefined;
   useEffect(() => {
@@ -149,6 +152,11 @@ export function App() {
     typeof selection === "object"
       ? owners.find((owner) => owner.id === selection.owner)
       : undefined;
+  function previewStarted(result: LaunchResult) {
+    setCreating(false);
+    setRevision(value => value + 1);
+    select({ owner: result.owner, name: result.name });
+  }
   const group = selected && projectGroups(owners).find(group => group.entries.some(entry => entry.owner.id === selected.id));
   const selectedEntry = group?.entries.find(entry => entry.owner.id === selected?.id && entry.name === (typeof selection === "object" ? selection.name : undefined));
   const label = selectedEntry && group ? entryLabel(selectedEntry, group) : undefined;
@@ -250,6 +258,7 @@ export function App() {
                 mutate={mutate}
                 acting={acting}
                 revision={revision}
+                onStarted={previewStarted}
               />
             ) : (
               <div className="page">
@@ -270,9 +279,11 @@ export function App() {
             <Overview owners={owners} loading={!loaded}
               query={query} setQuery={setQuery} filter={filter} setFilter={setFilter}
               mutate={mutate} acting={acting}
+              onNewPreview={() => setCreating(true)}
               select={entry => select({ owner: entry.owner.id, name: entry.name })} />
           )}
         </main>
+        {creating && <NewPreview onClose={() => setCreating(false)} onStarted={previewStarted} />}
         <Toaster
           theme={dark ? "dark" : "light"}
           position="bottom-right"

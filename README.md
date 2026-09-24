@@ -51,7 +51,7 @@ previewhost dashboard
 ```
 
 `--allow-exec` permits trusted commands and managed database operations with your user permissions, without a sandbox.
-The dashboard opens in your browser and needs its terminal to remain open. Closing it does not stop previews.
+The dashboard opens in your browser. Use **New preview** to select a local folder and configuration, or **Configuration** to edit bindings and apply changes. Keep its terminal open; closing the dashboard does not stop previews.
 
 ## Documentation
 

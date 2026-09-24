@@ -12,6 +12,7 @@ import { readBody } from './daemon.js';
 import { failure, PreviewError, throwIfAborted } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
 import { reviewStaleProject, removeStaleProject, projectRecordSchema, deleteOfflineData, offlinePreviews, removeOfflineProject, discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
+import { DashboardWorkflows } from './dashboard-workflows.js';
 import { Keystore, secretListSchema, unlockSchema } from './keystore.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
@@ -37,7 +38,7 @@ const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('secretsOpen'), owner: ownerId, id: z.uuid() }),
 ]);
 
-/** An authenticated browser client of existing project operations. It never starts application owners. */
+/** Authenticated local management UI; startup uses the same project operations as CLI and MCP. */
 export async function startDashboard(options: {
   discover?: typeof discoverProjectOwners;
   openBrowser?: typeof openLocalBrowser;
@@ -83,6 +84,8 @@ export async function startDashboard(options: {
     } finally { clearTimeout(timer); clients.delete(client); await client.close(); }
   }
 
+  const workflows = new DashboardWorkflows(discover, withOwner);
+
   async function readOwner(owner: Awaited<ReturnType<typeof discover>>[number]) {
     const project = (owner.connection ?? owner.retained)?.projectDirectory;
     const identity = { id: owner.id, project, git: project ? await readProjectGit(project, controller.signal) : undefined };
@@ -114,6 +117,11 @@ export async function startDashboard(options: {
   }
 
   async function dispatch(input: unknown, signal: AbortSignal) {
+    const work = workflows.dispatch(input, signal);
+    updates.add(work);
+    let workflow;
+    try { workflow = await work; } finally { updates.delete(work); }
+    if (workflow) return workflow.result;
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
     const p = parsed.data;
@@ -275,6 +283,7 @@ export async function startDashboard(options: {
     close: () => closing ??= (async () => {
       controller.abort();
       await Promise.all([Promise.allSettled(updates), ...[...clients].map(client => client.close())]);
+      workflows.close();
       store.close();
       await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
     })(),

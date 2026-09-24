@@ -81,6 +81,152 @@ test("repository groups keep clone identity, subprojects and multiple previews d
   ]);
 });
 
+test("New preview keeps configuration through review and preserves unsaved service edits across tabs", async ({ page }) => {
+  test.setTimeout(60_000);
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "previewhost-create-ui-")));
+  const project = join(directory, "existing-worktree-with-long-source-folder-name-for-layout-review");
+  await mkdir(project);
+  await writeFile(join(project, "server.cjs"), "require('http').createServer((q,r)=>r.end(process.env.APPLICATION_MODE)).listen(+process.env.PORT,process.env.HOST)");
+  const runtime = await createPreviewRuntime({ allowedRoots: [project], authorize: () => true });
+  const tokenFile = join(directory, "owner/token");
+  const daemon = await startDaemon({ runtime, tokenFile, port: 0, owner: {
+    projectDirectory: project, pid: process.pid, allowedRoots: [project], allowExec: true, inputKeys: [], secretIds: [],
+  } });
+  let launch = "";
+  const dashboard = await startDashboard({
+    discover: async () => [{ id: createHash("sha256").update(project).digest("hex"), tokenFile, connection: { endpoint: daemon.endpoint, pid: process.pid, projectDirectory: project } }],
+    openBrowser: async url => { launch = url; },
+  });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    const jobs = Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`prepare-${index}`, {
+      type: "job" as const, cwd: project, command: [process.execPath, "-e", `console.log('Preparation ${index}: ${"long command argument for review ".repeat(8)}')`],
+      env: { JOB_MODE: "fixture" },
+    }]));
+    const spec: PreviewSpec = { name: "from-dashboard", type: "environment", primary: "web", services: {
+      ...jobs,
+      web: { type: "command", cwd: project, command: [process.execPath, "server.cjs"], dependsOn: Object.keys(jobs), env: {
+        APPLICATION_MODE: "initial", ...Object.fromEntries(Array.from({ length: 28 }, (_, index) => [`OPTION_${index}`, "fixture"])),
+      } },
+    } };
+    const text = JSON.stringify(spec, null, 2);
+    await dashboard.open();
+    await page.goto(launch);
+    await expect(page).toHaveTitle("Previews · Previewhost");
+    const create = page.getByRole("button", { name: "New preview", exact: true });
+    await create.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "New preview", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Project folder", exact: true })).toBeFocused();
+    await dialog.getByRole("combobox", { name: "Project folder", exact: true }).click();
+    await page.getByRole("option", { name: project, exact: true }).click();
+    await expect(dialog.getByRole("textbox", { name: "Absolute project folder" })).toHaveValue(project);
+    await dialog.getByRole("button", { name: "Review preview", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toBeVisible();
+    await dialog.getByRole("combobox", { name: "Configuration", exact: true }).click();
+    await page.getByRole("option", { name: "YAML or JSON without a file", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await dialog.getByRole("combobox", { name: "Format", exact: true }).click();
+    await page.getByRole("option", { name: "JSON", exact: true }).click();
+    await dialog.getByRole("textbox", { name: "Preview configuration", exact: true }).fill(text);
+    await dialog.getByRole("button", { name: "Review preview", exact: true }).press("Enter");
+    await expect(dialog.getByRole("heading", { name: "Start preview", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Start preview", exact: true })).toBeDisabled();
+    expect((await runtime.list())).toHaveLength(0);
+    for (const theme of ["light", "dark"]) {
+      // Theme changes use the existing control before reopening the review.
+      if (theme === "dark") {
+        await dialog.getByRole("button", { name: "Back", exact: true }).click();
+        await expect(dialog.getByRole("textbox", { name: "Preview configuration", exact: true })).toHaveValue(text);
+        await page.keyboard.press("Escape");
+        await expect(create).toBeFocused();
+        await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+        await create.click();
+        await dialog.getByRole("textbox", { name: "Absolute project folder" }).fill(project);
+        await dialog.getByRole("combobox", { name: "Configuration", exact: true }).click();
+        await page.getByRole("option", { name: "YAML or JSON without a file", exact: true }).click();
+        await dialog.getByRole("textbox", { name: "Preview configuration", exact: true }).fill(text);
+        await dialog.getByRole("button", { name: "Review preview", exact: true }).click();
+        await expect(dialog.getByRole("heading", { name: "Start preview", exact: true })).toBeVisible();
+      }
+      for (const width of [1360, 390]) {
+        await page.setViewportSize({ width, height: 700 });
+        await expect(dialog.getByRole("button", { name: "Start preview", exact: true })).toBeInViewport();
+        await expect(dialog.getByRole("button", { name: "Back", exact: true })).toBeInViewport();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        const body = dialog.locator(".workflow-body");
+        expect(await body.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+        await dialog.locator('.workflow-consent').scrollIntoViewIfNeeded();
+        await expect(dialog.getByRole("checkbox")).toBeInViewport();
+        await expect.poll(() => body.evaluate(element => {
+          const consent = element.querySelector('.workflow-consent')!;
+          return consent.getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom + 1;
+        })).toBe(true);
+        await page.screenshot({ path: `/tmp/previewhost-create-${width}-${theme}.png`, animations: "disabled" });
+      }
+    }
+    await dialog.getByRole("checkbox").focus();
+    await page.keyboard.press("Space");
+    await expect(dialog.getByRole("button", { name: "Start preview", exact: true })).toBeEnabled();
+    await dialog.getByRole("button", { name: "Start preview", exact: true }).press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Open app", exact: true })).toBeVisible();
+    const ready = await runtime.get(spec.name);
+    expect(await (await fetch(ready.url!)).text()).toBe("initial");
+    await expect(readFile(join(project, "preview.yaml"))).rejects.toMatchObject({ code: "ENOENT" });
+    await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit JOB_MODE", exact: true })).toBeVisible();
+    expect((await page.locator(".editable-env-table").boundingBox())!.height).toBeLessThan(180);
+    await page.screenshot({ path: "/tmp/previewhost-config-short-390-dark.png", animations: "disabled" });
+    await page.getByRole("combobox", { name: "Service or job", exact: true }).click();
+    await page.getByRole("option", { name: "web · command", exact: true }).click();
+    const viewport = page.locator('.editable-env-table [data-slot="scroll-area-viewport"]');
+    expect(await viewport.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    await page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Keep change", exact: true })).toBeDisabled();
+    await dialog.getByRole("checkbox", { name: "Replace the existing value", exact: true }).check();
+    await dialog.getByRole("textbox", { name: "Replacement value", exact: true }).fill("edited");
+    await dialog.getByRole("button", { name: "Keep change", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Remove OPTION_0", exact: true }).click();
+    await page.getByRole("tab", { name: "Logs", exact: true }).click();
+    await expect(page.locator(".logs")).toBeVisible();
+    await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+    await expect(page.getByText("2 unsaved changes.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Undo removal of OPTION_0", exact: true }).click();
+    await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+    expect(await (await fetch(ready.url!)).text()).toBe("initial");
+    for (const theme of ["dark", "light"]) {
+      if (theme === "light") await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+      for (const width of [1360, 390]) {
+        await page.setViewportSize({ width, height: 700 });
+        await expect(page.getByRole("button", { name: "Review and apply", exact: true })).toBeInViewport();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await page.locator('.configuration-source').scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `/tmp/previewhost-config-${width}-${theme}.png`, animations: "disabled" });
+      }
+    }
+    await page.getByRole("button", { name: "Review and apply", exact: true }).click();
+    await expect(dialog.getByRole("heading", { name: "Apply configuration", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Review and apply", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("heading", { name: "Apply configuration", exact: true })).toBeVisible();
+    await dialog.getByRole("checkbox").check();
+    await dialog.getByRole("button", { name: "Apply configuration", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => (await fetch(ready.url!)).text()).toBe("edited");
+    expect(errors).toEqual([]);
+  } finally {
+    await dashboard.close();
+    await daemon.close();
+    await runtime.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("React dashboard preserves attempt isolation, logs, configuration and safe controls", async ({
   page,
   context,
@@ -185,6 +331,9 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
         },
       });
       if (folder === "first") {
+        if (spec.services.web.type === "command") {
+          spec.services.web.env = { ...spec.services.web.env, FAILED_UPDATE_ONLY: "disposable" };
+        }
         spec.services.migrate = {
           type: "job",
           cwd: project,
@@ -350,6 +499,18 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("tab", { name: "Configuration", exact: true }),
     ).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".logs")).toHaveCount(0);
+    await page.getByRole("combobox", { name: "Configuration source" }).click();
+    await page.getByRole("option", { name: "Failed update configuration", exact: true }).click();
+    await page.getByRole("combobox", { name: "Service or job" }).click();
+    await page.getByRole("option", { name: "web · command", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit FAILED_UPDATE_ONLY", exact: true })).toBeVisible();
+    await page.getByRole("combobox", { name: "Configuration source" }).click();
+    await page.getByRole("option", { name: "Current configuration", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit FAILED_UPDATE_ONLY", exact: true })).toHaveCount(0);
+    await page.getByRole("combobox", { name: "Configuration source" }).click();
+    await page.getByRole("option", { name: "Recorded attempt", exact: true }).click();
+    await expect(page.getByRole("button", { name: /^Edit APPLICATION/ })).toHaveCount(0);
     const configuration = page.getByRole("button", { name: "Requested configuration", exact: true });
     await configuration.focus();
     await page.keyboard.press("Enter");

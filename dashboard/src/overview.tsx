@@ -7,7 +7,7 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from ".
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "./components/ui/select";
 import { PreviewMenu } from "./preview-actions";
 
-export function Overview({ owners, loading, query, setQuery, filter, setFilter, select, mutate, acting }: {
+export function Overview({ owners, loading, query, setQuery, filter, setFilter, select, mutate, acting, onNewPreview }: {
   owners: Owner[];
   loading: boolean;
   query: string;
@@ -17,6 +17,7 @@ export function Overview({ owners, loading, query, setQuery, filter, setFilter, 
   select(entry: Entry): void;
   mutate: Mutate;
   acting: boolean;
+  onNewPreview(): void;
 }) {
   const all = owners.flatMap(entries);
   const previews = all.filter(entry => entry.name !== undefined).length;
@@ -32,7 +33,7 @@ export function Overview({ owners, loading, query, setQuery, filter, setFilter, 
   }
   return (
     <div className="page">
-      <h1>Previews</h1>
+      <div className="overview-heading"><h1>Previews</h1><Button onClick={onNewPreview} disabled={acting}>New preview</Button></div>
       <div className="summary overview-summary">
         <Button variant="link" aria-pressed={filter === "all"} onClick={() => show("all")}>{previews} {previews === 1 ? "preview" : "previews"}</Button>
         <span aria-hidden="true">·</span>
@@ -54,7 +55,7 @@ export function Overview({ owners, loading, query, setQuery, filter, setFilter, 
         </Select>
       </div>
       {!list.length ? loading ? <Loading>Checking projects…</Loading> : !all.length ? (
-        <EmptyState title="No previews yet">Ask your agent to preview an application with Previewhost.</EmptyState>
+        <EmptyState title="No previews yet">Use New preview to start from an existing project folder or worktree.</EmptyState>
       ) : (
         <EmptyState title="No matching previews">Try another folder, preview name, or status.</EmptyState>
       ) : (

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { AttemptSummary } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import { attempts, hint, shortProject, state, type Entry } from "./lib/model";
@@ -7,6 +8,8 @@ import { AppLink, CopyButton, Notice, Path, Status } from "./components/shared";
 import { previewActions, PreviewMenu } from "./preview-actions";
 import { Activity } from "./activity";
 import { Diagnostics } from "./diagnostics";
+import { ConfigurationPanel } from "./configuration";
+import type { LaunchResult } from "./preview-workflow";
 import { usePreviewView, type PreviewView } from "./lib/view-state";
 
 export function Preview({
@@ -14,17 +17,20 @@ export function Preview({
   mutate,
   acting,
   revision,
+  onStarted,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
   revision: number;
+  onStarted(result: LaunchResult): void;
 }) {
   const [view, updateView] = usePreviewView(entry.owner.id, entry.name);
+  const [configurationVisited, setConfigurationVisited] = useState(view.tab === "configuration");
   const { attemptId, clearAfter, source, query, wrapLogs, showContext } = view;
   const { owner, preview: p } = entry;
   const retained = attempts(p);
-  const tab = retained.length ? view.tab : "activity";
+  const tab = !retained.length && view.tab === "logs" ? "activity" : view.tab;
   const selected = attemptId
     ? retained.find((attempt) => attempt.id === attemptId)
     : retained[0];
@@ -127,6 +133,7 @@ export function Preview({
           className="preview-tabs"
           value={tab}
           onValueChange={(value) => {
+            if (value === "configuration") setConfigurationVisited(true);
             updateView({
               tab: value as PreviewView["tab"],
               ...(value !== "activity" && selected ? { attemptId: selected.id } : {}),
@@ -146,11 +153,9 @@ export function Preview({
                 Logs
               </TabsTrigger>
             )}
-            {!!retained.length && (
-              <TabsTrigger value="configuration" id="tab-configuration">
-                Configuration
-              </TabsTrigger>
-            )}
+            <TabsTrigger value="configuration" id="tab-configuration">
+              Configuration
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="activity" className="activity-panel scroll-panel">
             <Activity
@@ -161,8 +166,16 @@ export function Preview({
             />
           </TabsContent>
           {(["logs", "configuration"] as const).map((view) => (
-            <TabsContent key={view} value={view} className="diagnostics-panel">
-              {tab === view && !selected && (
+            <TabsContent key={view} value={view} className="diagnostics-panel" forceMount={view === "configuration" && configurationVisited ? true : undefined}>
+              {view === "configuration" && configurationVisited ? <ConfigurationPanel
+                entry={entry} attemptId={p?.active?.id ?? p?.latest?.id ?? p?.candidate?.id} revision={revision} onStarted={onStarted}
+                snapshot={selected && <Diagnostics entry={entry} revision={revision} clearAfter={clearAfter}
+                  setClearAfter={clearAfter => updateView({ clearAfter })} tab="configuration" selected={selected}
+                  retained={retained} selectAttempt={id => updateView({ attemptId: id, clearAfter: undefined, source: "" })}
+                  source={source} setSource={source => updateView({ source })} query={query} setQuery={query => updateView({ query })}
+                  wrapLogs={wrapLogs} setWrapLogs={wrapLogs => updateView({ wrapLogs })}
+                  showContext={showContext} setShowContext={showContext => updateView({ showContext })} mutate={mutate} acting={acting} />}
+              /> : tab === view && !selected && (
                 <div className="diagnostic-body">
                   <Notice title="Attempt no longer retained">
                     <Button
@@ -176,7 +189,7 @@ export function Preview({
                   </Notice>
                 </div>
               )}
-              {tab === view && selected && (
+              {tab === view && view === "logs" && selected && (
                 <Diagnostics
                   entry={entry}
                   revision={revision}

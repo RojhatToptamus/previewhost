@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { isAbsolute } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { AttemptLog } from './logs.js';
 import {
   limits, nameSchema, requestSchemas, type AttemptResult, type AttemptSummary, type EffectiveSpec, type Failure,
-  type LogResult, type LogOptions, type DeleteDataOptions, type PreviewDescription, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StopOptions, type SecretSetupContext,
+  type LogResult, type LogOptions, type DeleteDataOptions, type PreviewDescription, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StartOptions, type StopOptions, type SecretSetupContext,
+  type ConfigurationBindingChange, type ConfigurationBindingsInspection, type ConfigureBindingsOptions, type ConfigureBindingsResult, type SecretSetupApi,
 } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
 import { attachmentTarget, canonicalDirectory, describeSpec, environmentDependencies, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
@@ -15,12 +18,13 @@ import { startEnvironment } from './environment.js';
 import { createDataOwner, type DataOwner } from './data.js';
 import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
 import { Keystore } from './keystore.js';
-import { savePreviewSpec } from './config.js';
+import { changeConfigurationBindings, configurationBindings, savePreviewSpec } from './config.js';
 import { inspectPreviewSpec, runtimeContext } from './inspection.js';
 
 interface Attempt {
   summary: AttemptSummary;
   declaration: EffectiveSpec;
+  sourceFile?: string;
   controller: AbortController;
   completed: boolean;
   waiters: Set<() => void>;
@@ -41,6 +45,11 @@ interface Slot {
   cleanup: Set<Attempt>;
   control?: AbortController;
 }
+interface ConfigureBindingsContext {
+  projectDirectory?: string;
+  signal?: AbortSignal;
+  secretsSetup?: SecretSetupApi['secretsSetup'];
+}
 
 export interface PreviewRuntime extends PreviewApi {
   readonly keystore: Keystore;
@@ -53,6 +62,8 @@ export interface PreviewRuntime extends PreviewApi {
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
   /** The serving owner supplies the destination; control callers cannot choose a path. */
   saveConfiguration(name: string, attemptId: string, projectDirectory: string, signal?: AbortSignal): Promise<{ file: string; externalSources: string[] }>;
+  configureBindings<T extends ConfigureBindingsOptions>(name: string, attemptId: string, changes: ConfigurationBindingChange[], options: T,
+    context?: ConfigureBindingsContext): Promise<ConfigureBindingsResult<T>>;
   /** Excludes an owner's private directory from current and future static previews. */
   protectDirectory(directory: string): Promise<void>;
   /** Validates and authorizes a private form without reading values or starting code. */
@@ -161,10 +172,14 @@ class Runtime implements PreviewRuntime {
     };
   }
 
-  async start(input: PreviewSpec): Promise<PreviewStatus> {
+  async start(input: PreviewSpec, options: StartOptions = {}): Promise<PreviewStatus> {
     this.assertOpen();
     const spec = parseSpec(input);
+    if (!requestSchemas.start.safeParse({ ...options, spec }).success || options.sourceFile !== undefined && !isAbsolute(options.sourceFile)) {
+      throw new PreviewError('INVALID_INPUT', 'Use valid start options and an absolute source file path.');
+    }
     const previous = this.slots.get(spec.name);
+    checkExpectedSlot(previous, options.expected);
     if (previous?.operation || previous?.stopping) throw new PreviewError('BUSY', 'This preview already has an operation in progress.');
     if (previous?.cleanup.size || previous?.gateway && !previous.active) throw new PreviewError('CLEANUP_INCOMPLETE', 'Retry stop to resolve the remaining cleanup before starting this name.');
     if (previous?.active) throw new PreviewError('ALREADY_EXISTS', 'This name is active. Use replace to start a candidate.');
@@ -176,13 +191,17 @@ class Runtime implements PreviewRuntime {
     const slot: Slot = { name: spec.name, cleanup: new Set() };
     this.slots.delete(spec.name);
     this.slots.set(spec.name, slot);
-    return this.begin(slot, spec, 'start');
+    return this.begin(slot, spec, 'start', options.sourceFile);
   }
 
-  async replace(name: string, input: PreviewSpec): Promise<PreviewStatus> {
+  async replace(name: string, input: PreviewSpec, options: StartOptions = {}): Promise<PreviewStatus> {
     this.assertOpen();
-    const slot = this.slot(name);
     const spec = parseSpec(input);
+    if (!requestSchemas.replace.safeParse({ ...options, name, spec }).success || options.sourceFile !== undefined && !isAbsolute(options.sourceFile)) {
+      throw new PreviewError('INVALID_INPUT', 'Use valid replacement options and an absolute source file path.');
+    }
+    checkExpectedSlot(this.slots.get(name), options.expected);
+    const slot = this.slot(name);
     if (spec.name !== name) throw new PreviewError('INVALID_INPUT', 'The replacement spec must use the same preview name.');
     if (slot.operation || slot.stopping) throw new PreviewError('BUSY', 'This preview already has an operation in progress.');
     if (slot.cleanup.size) throw new PreviewError('CLEANUP_INCOMPLETE', 'Resolve remaining cleanup with stop before replacing this preview.');
@@ -191,7 +210,7 @@ class Runtime implements PreviewRuntime {
       throw new PreviewError('INVALID_INPUT', 'Stop before changing between an environment and a single preview.');
     }
     this.checkNodeCapacity(spec);
-    return this.begin(slot, spec, 'replace');
+    return this.begin(slot, spec, 'replace', options.sourceFile);
   }
 
   isEmpty(): boolean { return this.slots.size === 0; }
@@ -214,9 +233,10 @@ class Runtime implements PreviewRuntime {
   async get(name: string): Promise<PreviewStatus> { return this.status(this.slot(name)); }
 
   async describe(name: string, attemptId: string) {
-    const spec = this.attempt(this.slot(name), attemptId).declaration;
+    const attempt = this.attempt(this.slot(name), attemptId);
+    const spec = attempt.declaration;
     const secrets = secretRequirements(spec, this.secretIds);
-    return structuredClone({ ...describeSpec(spec), ...(secrets.length ? { secrets } : {}) });
+    return structuredClone({ ...describeSpec(spec), ...(secrets.length ? { secrets } : {}), ...(attempt.sourceFile ? { sourceFile: attempt.sourceFile } : {}) });
   }
 
   async startAgain(name: string, attemptId: string): Promise<PreviewStatus> {
@@ -226,7 +246,7 @@ class Runtime implements PreviewRuntime {
       throw new PreviewError('STALE_ATTEMPT', 'Select the current stopped, failed, or canceled attempt before starting again.');
     }
     // start admits synchronously; its normal startup path revalidates sources and authority.
-    return this.start(attempt.declaration);
+    return this.start(attempt.declaration, { sourceFile: attempt.sourceFile });
   }
 
   async rerunJob(name: string, attemptId: string, job: string): Promise<PreviewStatus> {
@@ -242,13 +262,54 @@ class Runtime implements PreviewRuntime {
     if ([...this.slots.values()].filter(isLive).length >= limits.livePreviews) throw new PreviewError('BUSY', 'The live preview limit was reached.');
     this.checkNodeCapacity(spec);
     // Normal start authorization, source checks and secret approvals apply again.
-    return this.begin(slot, spec, 'start', job);
+    return this.begin(slot, spec, 'start', attempt.sourceFile, job);
   }
 
   async saveConfiguration(name: string, attemptId: string, projectDirectory: string, signal?: AbortSignal) {
     this.assertOpen();
     const spec = this.attempt(this.slot(name), attemptId).declaration;
     return savePreviewSpec(spec, { projectDirectory, allowedRoots: this.roots, signal });
+  }
+
+  configureBindings<T extends ConfigureBindingsOptions>(name: string, attemptId: string, changes: ConfigurationBindingChange[], options: T,
+    context?: ConfigureBindingsContext): Promise<ConfigureBindingsResult<T>>;
+  async configureBindings(name: string, attemptId: string, changes: ConfigurationBindingChange[], options: ConfigureBindingsOptions,
+    context: ConfigureBindingsContext = {}): Promise<ConfigureBindingsResult> {
+    this.assertOpen();
+    if (!requestSchemas.configureBindings.safeParse({ name, attemptId, changes, options }).success) {
+      throw new PreviewError('INVALID_INPUT', 'Invalid configuration binding changes.');
+    }
+    if (context.signal) throwIfAborted(context.signal);
+    const slot = this.slot(name);
+    if (options.operation === 'apply') checkExpectedSlot(slot, options.expected);
+    const attempt = this.attempt(slot, attemptId);
+    const spec = changeConfigurationBindings(attempt.declaration, changes);
+    if (options.operation === 'inspect') {
+      const secrets = secretRequirements(spec, this.secretIds);
+      const result: ConfigurationBindingsInspection = {
+        description: { ...describeSpec(spec), ...(secrets.length ? { secrets } : {}), ...(attempt.sourceFile ? { sourceFile: attempt.sourceFile } : {}) },
+        bindings: configurationBindings(spec),
+      };
+      try {
+        const inspected = await this.inspect(spec);
+        result.inspection = { ...(inspected.prerequisites ? { prerequisites: inspected.prerequisites } : {}) };
+      } catch (error) { result.inspection = { error: redactedFailure(error, spec, this.inputs) }; }
+      return result;
+    }
+    if (options.operation === 'secrets') {
+      if (!context.secretsSetup) throw new PreviewError('INVALID_INPUT', 'Private secret setup requires an owner connection.');
+      return context.secretsSetup(spec, { reopen: options.reopen, signal: context.signal });
+    }
+    if (options.operation === 'save') {
+      if (!context.projectDirectory) throw new PreviewError('INVALID_INPUT', 'This owner has no project directory. Save the original spec through the CLI, MCP, or library.');
+      return savePreviewSpec(spec, { projectDirectory: context.projectDirectory, allowedRoots: this.roots, signal: context.signal });
+    }
+    if (attempt !== slot.active && (attempt !== slot.latest || !['failed', 'canceled', 'stopped'].includes(attempt.summary.state))) {
+      throw new PreviewError('STALE_ATTEMPT', 'Select the current serving or latest stopped, failed, or canceled configuration before applying changes.');
+    }
+    // Edited declarations are direct inputs until a caller saves and reloads a file.
+    const launch = { expected: options.expected, ...(isDeepStrictEqual(spec, attempt.declaration) ? { sourceFile: attempt.sourceFile } : {}) };
+    return slot.active ? this.replace(name, spec, launch) : this.start(spec, launch);
   }
 
   async wait(name: string, attemptId: string, options: WaitOptions = {}): Promise<AttemptResult> {
@@ -286,10 +347,7 @@ class Runtime implements PreviewRuntime {
   async stop(name: string, options: StopOptions = {}): Promise<PreviewStatus> {
     if (!requestSchemas.stop.safeParse({ ...options, name }).success) throw new PreviewError('INVALID_INPUT', 'Invalid stop options.');
     const slot = this.slot(name);
-    if (options.expected && (options.expected.active !== (slot.active?.summary.id ?? null) ||
-        options.expected.candidate !== (slot.candidate?.summary.id ?? null) || options.expected.latest !== (slot.latest?.summary.id ?? null))) {
-      throw new PreviewError('STALE_ATTEMPT', 'This preview changed. Review its current state before stopping it.');
-    }
+    checkExpectedSlot(slot, options.expected);
     if (options.afterEngineRestart && (slot.active || slot.candidate || slot.operation || slot.stopping)) {
       throw new PreviewError('BUSY', 'Engine-restart recovery requires a stopped environment with no operation in progress.');
     }
@@ -357,10 +415,10 @@ class Runtime implements PreviewRuntime {
     catch (error) { this.closing = undefined; throw error; }
   }
 
-  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace', rerunJob?: string): PreviewStatus {
+  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace', sourceFile?: string, rerunJob?: string): PreviewStatus {
     const attempt: Attempt = {
       summary: { id: randomUUID(), type: spec.type, state: 'starting', startedAt: new Date().toISOString(), sources: sourceDirectories(spec) },
-      declaration: structuredClone(spec), controller: new AbortController(), completed: false, waiters: new Set(),
+      declaration: structuredClone(spec), ...(sourceFile ? { sourceFile } : {}), controller: new AbortController(), completed: false, waiters: new Set(),
       log: new AttemptLog(), nodes: nodeCost(spec),
     };
     slot.candidate = attempt;
@@ -658,6 +716,12 @@ class Runtime implements PreviewRuntime {
   }
 }
 
+function checkExpectedSlot(slot: Slot | undefined, expected: StopOptions['expected']): void {
+  if (expected && (expected.active !== (slot?.active?.summary.id ?? null) ||
+      expected.candidate !== (slot?.candidate?.summary.id ?? null) || expected.latest !== (slot?.latest?.summary.id ?? null))) {
+    throw new PreviewError('STALE_ATTEMPT', 'This preview changed. Review its current state before applying this action.');
+  }
+}
 function isLive(slot: Slot): boolean { return !!(slot.active || slot.candidate || slot.operation || slot.stopping || slot.gateway || slot.cleanup.size); }
 function copySummary(attempt: Attempt): AttemptSummary {
   const summary = structuredClone(attempt.summary);
