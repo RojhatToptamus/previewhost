@@ -179,7 +179,7 @@ export function App() {
             <Breadcrumb>
               <BreadcrumbList>
                 {selection && <>
-                  <BreadcrumbItem className="breadcrumb-parent">
+                  <BreadcrumbItem className="breadcrumb-parent shrink-0">
                     <BreadcrumbLink asChild><button onClick={() => select(undefined)}>Previews</button></BreadcrumbLink>
                   </BreadcrumbItem>
                   <BreadcrumbSeparator className="breadcrumb-parent" />

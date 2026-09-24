@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckIcon, CopyIcon, SearchIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CopyIcon, SearchIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Alert, AlertTitle, AlertDescription } from "./ui/alert";
@@ -10,6 +10,7 @@ import {
   InputGroupAddon,
   InputGroupButton,
 } from "./ui/input-group";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./ui/collapsible";
 import { Spinner } from "./ui/spinner";
 import { cn } from "../lib/utils";
 
@@ -123,6 +124,18 @@ export function Section({
       <h2 className="section-label">{title}</h2>
       {children}
     </section>
+  );
+}
+export function Disclosure({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Collapsible className="disclosure">
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" size="sm" className="disclosure-trigger">
+          <ChevronRightIcon data-icon="inline-start" />{title}
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="disclosure-content">{children}</CollapsibleContent>
+    </Collapsible>
   );
 }
 export function Notice({

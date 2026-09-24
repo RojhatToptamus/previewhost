@@ -52,60 +52,69 @@ export function Preview({
   return (
     <article className="preview-detail" aria-label="Preview details">
       <div className="preview-header">
-        <div className="preview-identity">
+        <div className="preview-heading">
           <div className="preview-title">
             <h1>{entry.name ?? shortProject(owner)}</h1>
             <Status tone={owner.error ? "error" : state(entry).tone}>
               {owner.error ? "Unavailable" : state(entry).label}
             </Status>
           </div>
-          {owner.project && (
-            <div className="identity-path">
-              <Path value={owner.project} />
-              <CopyButton value={owner.project} />
-            </div>
-          )}
-          {addresses.map(({ label, url }) => (
-            <div className="preview-address" key={url}>
-              <span className="address-label">{label}</span>
-              <AppLink url={url} variant="link">
-                {url.replace(/^http:\/\//, "")}
-              </AppLink>
-              <CopyButton value={url} label={`Copy ${label.toLowerCase()} URL`} />
-            </div>
-          ))}
-          {context && <p className="context-note">{context}</p>}
+          <div className="header-actions">
+            {canOpen && <AppLink url={p!.url!} variant="default" />}
+            {actions.map((action) => (
+              <Button
+                key={action.label}
+                title={
+                  action.label === "Stop"
+                    ? "Stop this preview and keep its database data"
+                    : undefined
+                }
+                disabled={acting || Boolean(owner.error)}
+                variant={
+                  action === primary
+                    ? "default"
+                    : action.danger
+                      ? "destructive"
+                      : "outline"
+                }
+                onClick={() => void mutate(action.body, action.message)}
+              >
+                {action.label}
+              </Button>
+            ))}
+            <PreviewMenu
+              entry={entry}
+              mutate={mutate}
+              acting={acting}
+              managementOnly
+            />
+          </div>
         </div>
-        <div className="header-actions">
-          {canOpen && <AppLink url={p!.url!} variant="default" />}
-          {actions.map((action) => (
-            <Button
-              key={action.label}
-              title={
-                action.label === "Stop"
-                  ? "Stop this preview and keep its database data"
-                  : undefined
-              }
-              disabled={acting || Boolean(owner.error)}
-              variant={
-                action === primary
-                  ? "default"
-                  : action.danger
-                    ? "destructive"
-                    : "outline"
-              }
-              onClick={() => void mutate(action.body, action.message)}
-            >
-              {action.label}
-            </Button>
-          ))}
-          <PreviewMenu
-            entry={entry}
-            mutate={mutate}
-            acting={acting}
-            managementOnly
-          />
-        </div>
+        {(owner.project || addresses.length > 0) && (
+          <dl className="preview-metadata">
+            {owner.project && (
+              <div className="preview-project">
+                <dt>Project folder</dt>
+                <dd>
+                  <Path value={owner.project} />
+                  <CopyButton value={owner.project} />
+                </dd>
+              </div>
+            )}
+            {addresses.map(({ label, url }) => (
+              <div className="preview-address" key={url}>
+                <dt>{label}</dt>
+                <dd>
+                  <AppLink url={url} variant="link">
+                    {url.replace(/^http:\/\//, "")}
+                  </AppLink>
+                  <CopyButton value={url} label={`Copy ${label.toLowerCase()} URL`} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {context && <p className="context-note">{context}</p>}
       </div>
       {owner.error ? (
         <div className="page">

@@ -1,5 +1,3 @@
-import { ChevronRightIcon } from "lucide-react";
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./components/ui/collapsible";
 import type { AttemptSummary, ServiceStatus } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import {
@@ -19,7 +17,7 @@ import {
   TableCell,
 } from "./components/ui/table";
 import { ConfirmAction } from "./components/confirm-action";
-import { AppLink, Notice, Path, Section, Status } from "./components/shared";
+import { AppLink, CopyButton, Disclosure, Notice, Path, Section, Status } from "./components/shared";
 
 type Props = {
   entry: Entry;
@@ -383,18 +381,16 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
         </Table>
       </div>
       {!!attempt?.sources?.length && (
-        <Collapsible className="source-disclosure">
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="disclosure-trigger">
-              <ChevronRightIcon data-icon="inline-start" />Source folders
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="source-folders">
+        <Disclosure title="Source folders">
+          <div className="source-folders">
             {attempt.sources.map((source) => (
-              <Path key={source} value={source} />
+              <div className="source-folder" key={source}>
+                <Path value={source} />
+                <CopyButton value={source} />
+              </div>
             ))}
-          </CollapsibleContent>
-        </Collapsible>
+          </div>
+        </Disclosure>
       )}
     </Section>
   );

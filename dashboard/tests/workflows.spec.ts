@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -274,6 +274,10 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.keyboard.press("Enter");
     await expect(folders).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator(".source-folders")).toContainText(join(directory, "first"));
+    await page.locator(".source-folders").getByRole("button", { name: "Copy path" }).first().click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(await realpath(join(directory, "first")));
+    await folders.focus();
     await page.keyboard.press("Space");
     await expect(folders).toHaveAttribute("aria-expanded", "false");
     await page.getByRole("button", { name: "Copy hostname URL" }).click();
@@ -344,6 +348,14 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("tab", { name: "Configuration", exact: true }),
     ).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".logs")).toHaveCount(0);
+    const configuration = page.getByRole("button", { name: "Requested configuration", exact: true });
+    await configuration.focus();
+    await page.keyboard.press("Enter");
+    await expect(configuration).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("pre.configuration")).toContainText('"type": "environment"');
+    await page.keyboard.press("Space");
+    await expect(configuration).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("pre.configuration")).toBeHidden();
     slowLogs = false;
     // Reference content needs real reading room, not an action column's minimum width.
     const bindingRow = page

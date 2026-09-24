@@ -24,6 +24,7 @@ import {
   FieldError,
 } from "./components/ui/field";
 import { Input } from "./components/ui/input";
+import { Checkbox } from "./components/ui/checkbox";
 import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Spinner } from "./components/ui/spinner";
@@ -272,7 +273,6 @@ function SecretManagerHeader({ status, onUnlock }: { status?: StoreStatus; onUnl
   const [error, setError] = useState("");
   const password = useRef<HTMLInputElement>(null);
   const confirmation = useRef<HTMLInputElement>(null);
-  const remember = useRef<HTMLInputElement>(null);
   const creating = status?.state === "new";
   useEffect(() => {
     const clear = () => {
@@ -286,7 +286,7 @@ function SecretManagerHeader({ status, onUnlock }: { status?: StoreStatus; onUnl
     event.preventDefault();
     if (busy) return;
     const input = { action: "unlockKeystore", create: creating, password: password.current!.value,
-      confirmation: confirmation.current?.value, remember: remember.current?.checked ?? false };
+      confirmation: confirmation.current?.value, remember: new FormData(event.currentTarget).has("remember") };
     password.current!.value = "";
     if (confirmation.current) confirmation.current.value = "";
     setBusy(true); setError("");
@@ -333,7 +333,10 @@ function SecretManagerHeader({ status, onUnlock }: { status?: StoreStatus; onUnl
         <Input id="vault-password" ref={password} type="password" autoComplete={creating ? "new-password" : "current-password"} required maxLength={4096} disabled={busy} /></Field>
       {creating && <Field><FieldLabel htmlFor="vault-confirm">Confirm password</FieldLabel>
         <Input id="vault-confirm" ref={confirmation} type="password" autoComplete="new-password" required maxLength={4096} disabled={busy} /></Field>}
-      {status.canRemember && <label className="flex items-center gap-2"><input type="checkbox" ref={remember} disabled={busy} />Remember unlock on this Mac</label>}
+      {status.canRemember && <Field orientation="horizontal">
+        <Checkbox id="remember-unlock" name="remember" disabled={busy} />
+        <FieldLabel htmlFor="remember-unlock">Remember unlock on this Mac</FieldLabel>
+      </Field>}
       <Button type="submit" disabled={busy} className="self-start">{busy ? "Working…" : creating ? "Create keystore" : "Unlock"}</Button>
     </form>}
     {(message || status?.warning) && <p role="status">{message || status?.warning}</p>}

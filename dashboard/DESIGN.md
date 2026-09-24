@@ -134,13 +134,13 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 | Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yaml outside the scrolling body when no default file exists. Otherwise identify the existing file. |
 | Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
 
-Long lists need bounded scrolling without burying actions. The environment table uses a 320px height capped at 45% of viewport height, with its own scrollbar and sticky header. Secret lists use the existing bounded scroll area. Short lists should not gain artificial filler rows.
+Long lists need bounded scrolling without burying actions. The environment table uses a 320px height capped at 45% of viewport height, with its own scrollbar and sticky header. Secret lists use the existing bounded scroll area. An empty environment list uses a short message without a scroll box. Short lists should not gain artificial filler rows.
 
 Tables compare values. Give each column enough room for its content; do not squeeze references into an action-width column. Reserve compact right columns for actions. Use row separators without extra lines above the first row or below the last.
 
 At narrow widths, stack controls in reading order and preserve the primary action. Reduce secondary detail before shrinking text. Long paths, names, and output must not widen the entire page. Horizontal scrolling is appropriate for machine output or a table that cannot retain meaning when compressed.
 
-Display the serving application's runtime-provided hostname and numeric localhost URL on separate labeled rows, each with an open link and copy action. Omit unsupported aliases. Keep the existing Open app destination; these origins can have different cookies and CORS behavior. Never construct an alias from a preview name or show a candidate's address as serving.
+Keep the preview name, status, and lifecycle actions together in the detail header. Group the project folder and serving application addresses below as labeled metadata; stack these fields on narrow screens. Show the runtime-provided hostname and numeric localhost URL, each with an open link and copy action. Omit unsupported aliases. Keep the existing Open app destination; these origins can have different cookies and CORS behavior. Never construct an alias from a preview name or show a candidate's address as serving.
 
 Log source means the process or job that emitted the output. Frameworks can forward browser messages into that same output. Do not silently hide lines or classify their origin from text prefixes. Source selection and search provide reliable ways to narrow output.
 
@@ -167,8 +167,7 @@ Compose the maintained components in `dashboard/src/components/ui/`. Reuse view-
 | Destructive confirmation | `ConfirmAction` / `AlertDialog` |
 | Loading / empty / failure | `Loading`, `EmptyState`, `Notice` |
 | Theme choice | Existing `Toggle` |
-| Source folders | `Collapsible` with a ghost button and aligned chevron |
-| Secondary diagnostic disclosure | Native `details` and `summary` |
+| Source folders / requested configuration | Shared `Disclosure`: `Collapsible` with a ghost button and aligned chevron |
 
 Do not add a component merely to replace working native behavior. Shared CSS owns consistent sizing; page components own content and placement.
 

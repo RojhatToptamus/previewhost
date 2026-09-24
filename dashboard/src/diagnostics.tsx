@@ -25,6 +25,7 @@ import { searchLogs } from "./lib/log-search";
 import { Spinner } from "./components/ui/spinner";
 import { ScrollArea } from "./components/ui/scroll-area";
 import {
+  Disclosure,
   Loading,
   Notice,
   Path,
@@ -366,77 +367,74 @@ function Configuration({
   return (
     <>
       <Section title="Environment variables">
-        <ScrollArea
-          className="data-table env-table"
-          type="always"
-          aria-label="Environment variables"
-        >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Reference</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {[...keys].map((key) => {
-                const secret = description.secrets?.find((secret) =>
-                  secret.bindings.some(
-                    (binding) =>
-                      (binding.service ? binding.service + "." : "") +
-                        binding.key ===
-                      key,
-                  ),
-                );
-                const [service, envKey] = key.split(".");
-                const binding =
-                  spec.type === "environment"
-                    ? spec.services[service]?.bindings?.[envKey]
-                    : undefined;
-                return (
-                  <TableRow key={key}>
-                    <TableCell>
-                      <code>{key}</code>
-                    </TableCell>
-                    <TableCell>
-                      {secret
-                        ? "Secret"
-                        : binding
-                          ? bindingLabels[Object.keys(binding)[0]]
-                          : "Literal"}
-                    </TableCell>
-                    <TableCell>
-                      {secret ? (
-                        <>
-                          <code>{secret.id}</code>
-                          <p className="text-muted-foreground">
-                            {secret.selected
-                              ? "Approved for this owner"
-                              : "Approval required"}
-                          </p>
-                        </>
-                      ) : binding ? (
-                        <code>{String(Object.values(binding)[0])}</code>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          Not included
-                        </span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {!keys.size && (
+        {keys.size ? (
+          <ScrollArea
+            className="data-table env-table"
+            type="always"
+            aria-label="Environment variables"
+          >
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={3}>
-                    No environment variables declared.
-                  </TableCell>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Reference</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </ScrollArea>
+              </TableHeader>
+              <TableBody>
+                {[...keys].map((key) => {
+                  const secret = description.secrets?.find((secret) =>
+                    secret.bindings.some(
+                      (binding) =>
+                        (binding.service ? binding.service + "." : "") +
+                          binding.key ===
+                        key,
+                    ),
+                  );
+                  const [service, envKey] = key.split(".");
+                  const binding =
+                    spec.type === "environment"
+                      ? spec.services[service]?.bindings?.[envKey]
+                      : undefined;
+                  return (
+                    <TableRow key={key}>
+                      <TableCell>
+                        <code>{key}</code>
+                      </TableCell>
+                      <TableCell>
+                        {secret
+                          ? "Secret"
+                          : binding
+                            ? bindingLabels[Object.keys(binding)[0]]
+                            : "Literal"}
+                      </TableCell>
+                      <TableCell>
+                        {secret ? (
+                          <>
+                            <code>{secret.id}</code>
+                            <p className="text-muted-foreground">
+                              {secret.selected
+                                ? "Approved for this owner"
+                                : "Approval required"}
+                            </p>
+                          </>
+                        ) : binding ? (
+                          <code>{String(Object.values(binding)[0])}</code>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Not included
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+        ) : (
+          <p className="text-muted-foreground">No variables declared.</p>
+        )}
       </Section>
       <Section title="Service definitions">
         {spec.type === "environment" && (
@@ -469,10 +467,9 @@ function Configuration({
             ))}
           </div>
         )}
-        <details>
-          <summary>Full requested configuration</summary>
+        <Disclosure title="Requested configuration">
           <pre className="configuration">{JSON.stringify(spec, null, 2)}</pre>
-        </details>
+        </Disclosure>
       </Section>
     </>
   );
