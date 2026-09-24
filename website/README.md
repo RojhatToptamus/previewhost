@@ -44,10 +44,12 @@ Product screenshots are in `assets/` at the repository root.
 The homepage demonstration is rendered in `src/product-demo.tsx` and
 `src/product-demo.css`. The shared-notes configuration comes directly from
 `examples/multi-repo/environment.yaml`; the static preview uses the documented
-static spec. The demo stays in the browser and does not start local services.
+static spec. Repository groups include separate worktrees and two named previews
+in one worktree. The demo stays in the browser and does not start local services.
 Startup and migration messages come from the example; ongoing request lines are
-illustrative application output. Playback pauses outside the visible Logs view
-and can be paused manually. The real dashboard retrieves captured logs on demand.
+illustrative application output with demo timestamps. Playback pauses outside the
+visible Logs view and can be paused manually. The real dashboard retrieves captured
+logs on demand.
 Keep bindings, labels, and replacement behavior aligned with the dashboard.
 Secret Manager contains representative reference names only, never stored values.
 Dropdowns reuse the dashboard Select component with site-scoped styles.

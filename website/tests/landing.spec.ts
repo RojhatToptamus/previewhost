@@ -5,17 +5,22 @@ async function choose(page: Page, label: string, option: string) {
   await page.getByRole('option', { name: option, exact: true }).click();
 }
 
-async function selectPreview(page: Page, id: 'notes-main' | 'notes-export' | 'docs-main' | 'overview' | 'secrets') {
+async function selectPreview(page: Page, id: 'notes-main' | 'notes-styleguide' | 'notes-export' | 'docs-main' | 'overview' | 'secrets') {
   if (await page.getByRole('combobox', { name: 'Choose preview', exact: true }).isVisible()) {
-    const labels = { 'notes-main': 'shared-notes / main', 'notes-export': 'shared-notes / feature/export', 'docs-main': 'docs-site / main', overview: 'Overview', secrets: 'Secret Manager' };
+    const labels = { 'notes-main': 'shared-notes / main · shared-notes', 'notes-styleguide': 'shared-notes / main · styleguide', 'notes-export': 'shared-notes / feature/export', 'docs-main': 'docs-site / main', overview: 'Overview', secrets: 'Secret Manager' };
     await choose(page, 'Choose preview', labels[id]);
   } else {
-    const names = { 'notes-main': 'shared-notes main Ready', 'notes-export': 'shared-notes feature/export Update failed', 'docs-main': 'docs-site main Ready', overview: 'Overview', secrets: 'Secret Manager' };
+    const names = { 'notes-main': 'shared-notes main · shared-notes Ready', 'notes-styleguide': 'shared-notes main · styleguide Ready', 'notes-export': 'shared-notes feature/export Update failed', 'docs-main': 'docs-site main Ready', overview: 'Overview', secrets: 'Secret Manager' };
+    if (id !== 'overview' && id !== 'secrets') {
+      const group = page.locator('.demo-project-toggle').filter({ hasText: id === 'docs-main' ? 'docs-site' : 'shared-notes' });
+      if (await group.getAttribute('aria-expanded') === 'false') await group.click();
+    }
     await page.getByRole('button', { name: names[id], exact: id !== 'overview' }).click();
   }
 }
 
-test('previews expose separate stacks without app launch or tutorial controls', async ({ page }) => {
+test('previews expose separate stacks without app launch or tutorial controls', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const writes: string[] = [];
   page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()); });
   await page.goto('/');
@@ -24,13 +29,25 @@ test('previews expose separate stacks without app launch or tutorial controls', 
   await expect(page.locator('.demo-address')).toContainText(':49837');
   await expect(page.getByRole('button', { name: /Open app|Play startup|Start demo/ })).toHaveCount(0);
   await expect(page.locator('.product-demo a, .product-demo dialog, .product-demo select:visible')).toHaveCount(0);
+  await expect(page.locator('.demo-project-toggle').filter({ hasText: 'shared-notes' })).toHaveText('shared-notes3');
+  await page.getByRole('button', { name: 'Copy hostname URL', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('http://shared-notes--frontend.localhost:49837');
+  await page.getByRole('button', { name: 'Copy localhost URL', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('http://127.0.0.1:49837');
+  await selectPreview(page, 'notes-styleguide');
+  await expect(page.locator('.demo-identity')).toContainText('styleguide');
+  await expect(page.locator('.demo-project-path code')).toHaveText('~/code/shared-notes');
+  await expect(page.locator('.demo-localhost code')).toHaveText('127.0.0.1:49838');
+  await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
+  await page.getByText('YAML', { exact: true }).click();
+  await expect(page.getByLabel('styleguide configuration', { exact: true })).toContainText('directory: ./storybook-static');
   await selectPreview(page, 'notes-export');
   await expect(page.locator('.demo-identity')).toContainText('feature/export');
   await expect(page.locator('.demo-address')).toContainText(':49902');
   await expect(page.locator('.demo-attempts')).toContainText('Previous preview still serving.');
   await expect(page.locator('.demo-services [data-tone="success"]')).toHaveCount(5);
   await selectPreview(page, 'docs-main');
-  await expect(page.locator('.demo-address')).toHaveText('127.0.0.1:49961');
+  await expect(page.locator('.demo-localhost code')).toHaveText('127.0.0.1:49961');
   await expect(page.locator('.demo-services')).toHaveCount(0);
   await page.getByRole('tab', { name: 'Logs', exact: true }).click();
   await expect(page.locator('.demo-log-output')).toHaveText('No process output.');
@@ -54,6 +71,9 @@ test('demo logs update, pause, filter and remain bounded without changing failed
   await page.getByRole('button', { name: 'Resume demo log playback' }).click();
   await page.clock.runFor(2200);
   await expect(page.locator('.demo-log-line')).toHaveCount(9);
+  await page.clock.runFor(2200);
+  await expect(page.locator('.demo-log-line').last()).toContainText('note saved; cache updated');
+  await expect(page.locator('.demo-log-line time').last()).toHaveText('09:41:20');
   await choose(page, 'Log source', 'api');
   await expect(page.locator('.demo-log-output')).toContainText('POST /notes 201');
   await expect(page.locator('.demo-log-output')).not.toContainText('frontend');
@@ -75,6 +95,17 @@ test('demo logs update, pause, filter and remain bounded without changing failed
 
 test('logs, configuration, overview and reference search have meaningful keyboard behavior', async ({ page }) => {
   await page.goto('/');
+  const docs = page.locator('.demo-project-toggle').filter({ hasText: 'docs-site' });
+  const notes = page.locator('.demo-project-toggle').filter({ hasText: 'shared-notes' });
+  await docs.press('Enter');
+  await expect(docs).toHaveAttribute('aria-expanded', 'true');
+  await expect(notes).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'docs-site main Ready', exact: true })).toBeVisible();
+  await docs.press('Space');
+  await expect(docs).toHaveAttribute('aria-expanded', 'false');
+  await expect(docs).toBeFocused();
+  await notes.press('Enter');
+  await expect(notes).toHaveAttribute('aria-expanded', 'true');
   const views = page.getByRole('tablist', { name: 'Example product views' });
   await views.getByRole('tab', { name: 'Activity', exact: true }).press('ArrowRight');
   await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();
@@ -128,9 +159,43 @@ test('logs, configuration, overview and reference search have meaningful keyboar
   await expect(page.locator('.demo-empty')).toHaveText('No matching references.');
   await expect(page.locator('.demo-secret-manager input:not([type="search"])')).toHaveCount(0);
   await selectPreview(page, 'overview');
-  await expect(page.locator('.demo-overview-list button')).toHaveCount(3);
+  await expect(page.locator('.demo-overview-list button')).toHaveCount(4);
   await page.locator('.demo-overview-list button').first().press('Enter');
   await expect(views.getByRole('tab', { name: 'Activity', exact: true })).toBeFocused();
+});
+
+test('demo scrollbars and open dropdowns preserve content positions', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.install();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto('/');
+    const geometry = () => page.evaluate(() => {
+      const demo = document.querySelector('.demo-window')!.getBoundingClientRect();
+      const content = document.querySelector('.demo-view-content')!.getBoundingClientRect();
+      return { demoX: demo.x, demoWidth: demo.width, contentX: content.x, contentWidth: content.width };
+    });
+    const initial = await geometry();
+    await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
+    await page.getByText('YAML', { exact: true }).click();
+    expect(await page.locator('.demo-panel').evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    expect(await geometry()).toEqual(initial);
+    await page.getByRole('tab', { name: 'Logs', exact: true }).click();
+    expect(await geometry()).toEqual(initial);
+    await page.getByRole('combobox', { name: 'Log source', exact: true }).click();
+    await expect(page.getByRole('listbox')).toBeVisible();
+    expect(await geometry()).toEqual(initial);
+    await page.keyboard.press('Escape');
+    const search = page.getByRole('searchbox', { name: 'Search example logs' });
+    await search.fill('Notes schema ready.');
+    const lineWidth = (await page.locator('.demo-log-line').boundingBox())!.width;
+    await search.fill('');
+    await page.locator('.demo-log-output').scrollIntoViewIfNeeded();
+    await page.clock.runFor(2200 * 20);
+    expect(await page.locator('.demo-log-output').evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    expect((await page.locator('.demo-log-line').first().boundingBox())!.width).toBe(lineWidth);
+    expect(await geometry()).toEqual(initial);
+  }
 });
 
 test('all four setup interfaces have correct copyable instructions and links', async ({ page, context }) => {
@@ -182,10 +247,12 @@ test('all demo views and setup interfaces fit desktop and mobile in both themes'
       await page.setViewportSize({ width, height: 900 });
       await page.goto('/');
       if (await page.locator('html').getAttribute('data-site-theme') !== theme) await page.getByRole('button', { name: 'Toggle color theme' }).click();
-      await expect(page.locator('.landing-hero-copy')).toHaveCSS('animation-name', 'none');
+      await expect(page.locator('#hero-heading, .product-demo')).toHaveCount(2);
+      await expect(page.locator('#hero-heading')).toHaveCSS('animation-name', 'none');
+      await expect(page.locator('.product-demo')).toHaveCSS('animation-name', 'none');
       const demo = page.locator('.demo-window');
       const height = (await demo.boundingBox())!.height;
-      for (const preview of ['notes-main', 'notes-export', 'docs-main'] as const) {
+      for (const preview of ['notes-main', 'notes-styleguide', 'notes-export', 'docs-main'] as const) {
         await selectPreview(page, preview);
         for (const name of ['Activity', 'Logs', 'Configuration']) {
           await page.getByRole('tab', { name, exact: true }).click();
@@ -205,7 +272,7 @@ test('all demo views and setup interfaces fit desktop and mobile in both themes'
       await selectPreview(page, 'secrets');
       await expect(page.getByRole('searchbox', { name: 'Search secret references' })).toBeVisible();
       await selectPreview(page, 'overview');
-      await expect(page.locator('.demo-overview-list button')).toHaveCount(3);
+      await expect(page.locator('.demo-overview-list button')).toHaveCount(4);
       for (const name of ['CLI', 'Codex', 'Claude Code', 'Cursor']) {
         await page.getByRole('tab', { name, exact: true }).click();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${theme} ${width} setup ${name}`).toBe(true);
@@ -232,6 +299,8 @@ test('copy failure and JavaScript-free reading remain useful', async ({ page, br
   await page.goto('/');
   await page.getByRole('button', { name: 'Copy quick install command' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Copy failed.' })).toHaveText('Copy failed. Select the text and copy it manually.');
+  await page.getByRole('button', { name: 'Copy project folder', exact: true }).click();
+  await expect(page.locator('.demo-project-path [role="status"]')).toHaveText('Copy failed. Select and copy the text.');
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
   const staticPage = await context.newPage();
   await staticPage.goto('http://127.0.0.1:4173/');

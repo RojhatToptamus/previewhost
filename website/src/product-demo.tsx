@@ -1,16 +1,18 @@
-import { ArrowRight, ChevronRight, Code2, Database, FileCode2, GitBranch, Grid2X2, KeyRound, Layers, Pause, Play, Search, Terminal } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, Code2, Copy, Database, FileCode2, GitBranch, Grid2X2, KeyRound, Layers, Pause, Play, Search, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import brandSvg from "../../assets/previewhost.svg?raw";
 import exampleYaml from "../../examples/multi-repo/environment.yaml?raw";
 import { LandingTabs } from "./landing-tabs";
 import { DemoSelect } from "./demo-select";
+import { copyText } from "./clipboard";
 import "./product-demo.css";
 
 const mark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
 const previews = [
-  { id: "notes-main", project: "shared-notes", branch: "main", path: "~/code/shared-notes", port: 49837, failed: false, static: false },
-  { id: "notes-export", project: "shared-notes", branch: "feature/export", path: "~/worktrees/shared-notes-export", port: 49902, failed: true, static: false },
-  { id: "docs-main", project: "docs-site", branch: "main", path: "~/code/docs-site", port: 49961, failed: false, static: true },
+  { id: "notes-main", name: "shared-notes", project: "shared-notes", branch: "main", path: "~/code/shared-notes", port: 49837, failed: false, static: false },
+  { id: "notes-styleguide", name: "styleguide", project: "shared-notes", branch: "main", path: "~/code/shared-notes", port: 49838, directory: "./storybook-static", failed: false, static: true },
+  { id: "notes-export", name: "shared-notes", project: "shared-notes", branch: "feature/export", path: "~/worktrees/shared-notes-export", port: 49902, failed: true, static: false },
+  { id: "docs-main", name: "docs-site", project: "docs-site", branch: "main", path: "~/code/docs-site", port: 49961, directory: "./site", failed: false, static: true },
 ] as const;
 type Preview = (typeof previews)[number];
 type Selection = Preview["id"] | "overview" | "secrets";
@@ -36,21 +38,34 @@ const initialOutput: LogLine[] = [
 // Representative application output; the website never contacts a preview runtime.
 const incomingOutput = [
   { source: "frontend", text: "GET / 200" },
-  { source: "api", text: "POST /notes 201" },
+  { source: "frontend", text: "GET /config 200" },
+  { source: "api", text: "POST /notes 201 · note saved; cache updated" },
   { source: "api", text: "GET /notes 200" },
   { source: "reporting", text: "GET /summary 200" },
-  { source: "frontend", text: "GET /style.css 200" },
 ];
 const failedOutput: LogLine[] = [
   { id: 1, source: "migrate", text: "Migration failed. Inspect the local database before retrying.", stream: "stderr" },
   { id: 2, source: "migrate", text: "Job exited (1). Database writes are not rolled back.", stream: "stderr" },
 ];
 const references = ["notes/dev/api-token", "notes/export/api-token"];
-const address = (preview: Preview) => preview.static ? `127.0.0.1:${preview.port}` : `${preview.project}--frontend.localhost:${preview.port}`;
+const address = (preview: Preview) => preview.static ? `127.0.0.1:${preview.port}` : `${preview.name}--frontend.localhost:${preview.port}`;
+const previewLabel = (preview: Preview) => previews.filter(item => item.path === preview.path).length > 1 ? `${preview.branch} · ${preview.name}` : preview.branch;
+const logTime = (id: number, failed: boolean) => new Date(Date.UTC(2026, 0, 1, 9, failed ? 46 : 41, id * 2)).toISOString().slice(11, 19);
 const previewStatus = (preview: Preview) => preview.failed ? "Update failed" : "Ready";
 
 function Status({ value }: { value: string }) {
   return <span className="demo-status" data-tone={value === "Ready" || value === "Succeeded" ? "success" : value === "Failed" || value === "Update failed" ? "error" : "muted"}>{value}</span>;
+}
+
+function CopyValue({ value, label }: { value: string; label: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return <span className="demo-copy-value"><button type="button" title={status === "copied" ? "Copied" : label} aria-label={label} onClick={async () => {
+    clearTimeout(timer.current);
+    try { await copyText(value); setStatus("copied"); timer.current = setTimeout(() => setStatus("idle"), 2000); }
+    catch { setStatus("error"); }
+  }}>{status === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}</button><span role="status" className={status === "error" ? "demo-copy-error" : "landing-sr-only"}>{status === "copied" ? "Copied." : status === "error" ? "Copy failed. Select and copy the text." : ""}</span></span>;
 }
 
 function SecretManager() {
@@ -68,11 +83,11 @@ function SecretManager() {
 }
 
 function Configuration({ preview }: { preview: Preview }) {
-  const yaml = preview.static ? "name: docs-site\ntype: static\ndirectory: ./site\n" : exampleYaml;
+  const yaml = preview.static ? `name: ${preview.name}\ntype: static\ndirectory: ${preview.directory}\n` : exampleYaml;
   return <div className="demo-configuration">
-    <div className="demo-config-heading"><span><FileCode2 aria-hidden="true" />preview.yaml</span></div>
+    <div className="demo-config-heading"><span><FileCode2 aria-hidden="true" />Requested configuration</span></div>
     <p className="demo-section-label">Source directories</p>
-    <dl className="demo-source-list">{(preview.static ? ["site"] : ["frontend", "api", "reporting"]).map(source => <div key={source}><dt>{source}</dt><dd><code>{preview.path}/{source}</code></dd></div>)}</dl>
+    <dl className="demo-source-list">{(preview.static ? [preview.directory.slice(2)] : ["frontend", "api", "reporting"]).map(source => <div key={source}><dt>{source}</dt><dd><code>{preview.path}/{source}</code></dd></div>)}</dl>
     {!preview.static && <>
       <p className="demo-section-label">Environment bindings</p>
       <table className="demo-binding-table"><thead><tr><th>Name</th><th>Type</th><th>Reference</th></tr></thead><tbody>
@@ -82,7 +97,7 @@ function Configuration({ preview }: { preview: Preview }) {
         <tr><th scope="row"><code>api.<wbr />REDIS_URL</code></th><td>Service URL</td><td><code>cache</code></td></tr>
       </tbody></table>
     </>}
-    <details className="demo-yaml"><summary>YAML</summary><pre tabIndex={0} aria-label={`${preview.project} configuration`}><code>{yaml}</code></pre></details>
+    <details className="demo-yaml"><summary>YAML</summary><pre tabIndex={0} aria-label={`${preview.name} configuration`}><code>{yaml}</code></pre></details>
   </div>;
 }
 
@@ -115,7 +130,7 @@ function PreviewDetail({ preview }: { preview: Preview }) {
   }, [view, isServing, paused]);
   useEffect(() => {
     if (followOutput.current) logBody.current?.scrollTo({ top: logBody.current.scrollHeight });
-  }, [records]);
+  }, [records, view]);
 
   function showLogs(name: string, nextAttempt = "serving") {
     setSource(name); setQuery(""); setAttempt(nextAttempt); setView("logs");
@@ -123,16 +138,20 @@ function PreviewDetail({ preview }: { preview: Preview }) {
   }
   return <>
     <div className="demo-preview-header">
-      <div className="demo-identity"><div><h2>{preview.project}</h2><Status value={previewStatus(preview)} /></div><span className="demo-branch"><GitBranch aria-hidden="true" />{preview.branch}</span></div>
+      <div className="demo-identity"><div><h2>{preview.name}</h2><Status value={previewStatus(preview)} /></div><span className="demo-branch"><GitBranch aria-hidden="true" />{preview.branch}</span></div>
     </div>
-    <dl className="demo-metadata"><div><dt>Project</dt><dd><code>{preview.path}</code></dd></div><div><dt>{preview.static ? "Localhost" : "Hostname"}</dt><dd className="demo-address"><code>{address(preview)}</code></dd></div></dl>
+    <dl className="demo-metadata">
+      <div className="demo-project-path"><dt>Project folder</dt><dd><code title={preview.path}>{preview.path}</code><CopyValue value={preview.path} label="Copy project folder" /></dd></div>
+      {!preview.static && <div><dt>Hostname</dt><dd className="demo-address"><code title={address(preview)}>{address(preview)}</code><CopyValue value={`http://${address(preview)}`} label="Copy hostname URL" /></dd></div>}
+      <div><dt>Localhost</dt><dd className="demo-localhost"><code>127.0.0.1:{preview.port}</code><CopyValue value={`http://127.0.0.1:${preview.port}`} label="Copy localhost URL" /></dd></div>
+    </dl>
     <LandingTabs id="example-view" label="Example product views" items={views} selected={view} onSelect={setView} />
     <div ref={panel} className="demo-panel" id="example-view-panel" role="tabpanel" aria-labelledby={`example-view-${view}`} tabIndex={0}>
       <div key={view} className="demo-view-content">
         {view === "activity" && <>
           {preview.failed ? <div className="demo-attempts"><div><span>Serving</span><Status value="Ready" /></div><div><span>Latest update</span><Status value="Failed" /><button type="button" onClick={() => showLogs("migrate", "latest")}>Migration logs<ArrowRight aria-hidden="true" /></button></div><p>Migration failed. Previous preview still serving.</p></div> : <div className="demo-attempt-line"><span>Serving</span><Status value="Ready" /></div>}
           <p className="demo-section-label">{preview.static ? "Static files" : "Services · Serving"}</p>
-          {preview.static ? <div className="demo-static"><FileCode2 aria-hidden="true" /><strong>./site</strong><Status value="Ready" /></div> : <>
+          {preview.static ? <div className="demo-static"><FileCode2 aria-hidden="true" /><strong>{preview.directory}</strong><Status value="Ready" /></div> : <>
             <table className="demo-services"><thead><tr><th>Service</th><th>Type</th><th>Status</th><th className="demo-connection">Connection</th><th><span className="landing-sr-only">Actions</span></th></tr></thead><tbody>{services.map(service => <tr key={service.name}>
               <th scope="row"><service.icon aria-hidden="true" /><span>{service.name}</span></th><td>{service.type}</td><td><Status value="Ready" /></td>
               <td className="demo-connection"><code>{service.type === "HTTP" ? `shared-notes--${service.name}.localhost:${preview.port}` : "Managed · this environment"}</code></td>
@@ -152,7 +171,7 @@ function PreviewDetail({ preview }: { preview: Preview }) {
             const element = event.currentTarget;
             followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32;
           }}>
-            {filtered.length ? filtered.map(line => <div key={line.id} className="demo-log-line" data-stream={line.stream}><span>{String(line.id).padStart(2, "0")}</span><code>{line.source}</code><pre>{line.text}</pre></div>) : <p className="demo-empty">{preview.static ? "No process output." : "No matching output."}</p>}
+            {filtered.length ? filtered.map(line => <div key={line.id} className="demo-log-line" data-stream={line.stream}><time>{logTime(line.id, !isServing)}</time><code>{line.source}</code><pre>{line.text}</pre></div>) : <p className="demo-empty">{preview.static ? "No process output." : "No matching output."}</p>}
           </div>
         </div>}
         {view === "configuration" && <Configuration preview={preview} />}
@@ -163,8 +182,11 @@ function PreviewDetail({ preview }: { preview: Preview }) {
 
 export function ProductDemo() {
   const [selection, setSelection] = useState<Selection>("notes-main");
+  const [openProject, setOpenProject] = useState<string | undefined>("shared-notes");
   function selectPreview(id: Selection, focus = false) {
     setSelection(id);
+    const selectedPreview = previews.find(preview => preview.id === id);
+    if (selectedPreview) setOpenProject(selectedPreview.project);
     if (focus) requestAnimationFrame(() => document.getElementById("example-view-activity")?.focus({ preventScroll: true }));
   }
   const preview = previews.find(preview => preview.id === selection) ?? previews[0];
@@ -172,13 +194,18 @@ export function ProductDemo() {
     <div className="demo-window">
       <aside className="demo-sidebar" aria-label="Example preview navigation">
         <div className="demo-brand"><span aria-hidden="true" dangerouslySetInnerHTML={{ __html: mark }} /><strong>Previewhost</strong></div>
-        <button className="demo-overview-button" type="button" aria-pressed={selection === "overview"} onClick={() => selectPreview("overview")}><Grid2X2 aria-hidden="true" />Overview<span>3</span></button>
+        <button className="demo-overview-button" type="button" aria-pressed={selection === "overview"} onClick={() => selectPreview("overview")}><Grid2X2 aria-hidden="true" />Overview<span>{previews.length}</span></button>
         <button className="demo-overview-button" type="button" aria-pressed={selection === "secrets"} onClick={() => selectPreview("secrets")}><KeyRound aria-hidden="true" />Secret Manager</button>
-        {["shared-notes", "docs-site"].map(project => <div className="demo-project-group" key={project}><p className="demo-sidebar-label">{project}</p>{previews.filter(preview => preview.project === project).map(preview => <button key={preview.id} type="button" className="demo-preview-button" aria-label={`${preview.project} ${preview.branch} ${previewStatus(preview)}`} aria-pressed={selection === preview.id} onClick={() => selectPreview(preview.id)}><span><GitBranch aria-hidden="true" />{preview.branch}</span><Status value={previewStatus(preview)} /></button>)}</div>)}
+        <div className="demo-projects">{["docs-site", "shared-notes"].map(project => <div className="demo-project-group" key={project}>
+          <button type="button" className="demo-project-toggle" aria-expanded={openProject === project} aria-controls={`demo-project-${project}`} onClick={() => setOpenProject(openProject === project ? undefined : project)}><ChevronRight aria-hidden="true" /><span>{project}</span><span>{previews.filter(preview => preview.project === project).length}</span></button>
+          <div id={`demo-project-${project}`} hidden={openProject !== project}>
+            {previews.filter(preview => preview.project === project).sort((a, b) => previewLabel(a).localeCompare(previewLabel(b))).map(preview => <button key={preview.id} type="button" className="demo-preview-button" aria-label={`${preview.project} ${previewLabel(preview)} ${previewStatus(preview)}`} aria-pressed={selection === preview.id} onClick={() => selectPreview(preview.id)}><span>{previewLabel(preview)}</span><Status value={previewStatus(preview)} /></button>)}
+          </div>
+        </div>)}</div>
       </aside>
       <div className="demo-workspace">
-        <div className="demo-mobile-select"><DemoSelect label="Choose preview" value={selection} onChange={selectPreview} options={[{ id: "overview", label: "Overview" }, ...previews.map(preview => ({ id: preview.id, label: `${preview.project} / ${preview.branch}` })), { id: "secrets", label: "Secret Manager" }]} /></div>
-        {selection === "overview" ? <div className="demo-overview"><h2>Overview</h2><div className="demo-overview-list">{previews.map(preview => <button key={preview.id} type="button" onClick={() => selectPreview(preview.id, true)}><span><strong>{preview.project}</strong><span className="demo-branch"><GitBranch aria-hidden="true" />{preview.branch}</span><code>{preview.path}</code></span><Status value={previewStatus(preview)} /><ChevronRight aria-hidden="true" /></button>)}</div></div>
+        <div className="demo-mobile-select"><DemoSelect label="Choose preview" value={selection} onChange={selectPreview} options={[{ id: "overview", label: "Overview" }, ...previews.map(preview => ({ id: preview.id, label: `${preview.project} / ${previewLabel(preview)}` })), { id: "secrets", label: "Secret Manager" }]} /></div>
+        {selection === "overview" ? <div className="demo-overview"><h2>Overview</h2><div className="demo-overview-list">{previews.map(preview => <button key={preview.id} type="button" onClick={() => selectPreview(preview.id, true)}><span><strong>{preview.project}</strong><span className="demo-branch"><GitBranch aria-hidden="true" />{previewLabel(preview)}</span><code>{preview.path}</code></span><Status value={previewStatus(preview)} /><ChevronRight aria-hidden="true" /></button>)}</div></div>
           : selection === "secrets" ? <SecretManager /> : <PreviewDetail key={preview.id} preview={preview} />}
       </div>
     </div>
