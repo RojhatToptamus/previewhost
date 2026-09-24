@@ -215,7 +215,7 @@ test('all four setup interfaces have correct copyable instructions and links', a
   await page.getByRole('button', { name: 'Copy Cursor configuration' }).click();
   expect(JSON.parse(await page.evaluate(() => navigator.clipboard.readText()))).toEqual({ mcpServers: { previewhost: { type: 'stdio', command: 'previewhost', args: ['mcp', '--allow-exec'] } } });
   await page.getByRole('button', { name: 'Copy agent prompt', exact: true }).click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Preview this application with Previewhost. Read its instructions and start commands,\nreuse the project configuration if present, and verify the returned URL in a browser.');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Preview this application with Previewhost. Read its instructions and start commands, reuse the project configuration if present, and verify the returned URL in a browser.');
   await page.getByRole('tab', { name: 'Cursor', exact: true }).press('Home');
   await expect(page.getByRole('tab', { name: 'CLI', exact: true })).toBeFocused();
   const localLinks = await page.locator('.landing a[href^="/"]').evaluateAll(elements => [...new Set(elements.map(el => (el as HTMLAnchorElement).pathname))]);

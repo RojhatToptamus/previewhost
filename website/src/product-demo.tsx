@@ -191,7 +191,7 @@ export function ProductDemo() {
     if (focus) requestAnimationFrame(() => document.getElementById("example-view-activity")?.focus({ preventScroll: true }));
   }
   const preview = previews.find(preview => preview.id === selection) ?? previews[0];
-  return <section id="product-demo" className="product-demo" aria-label="Interactive Previewhost example" aria-describedby="demo-disclosure">
+  return <section id="product-demo" className="product-demo" aria-label="Interactive Previewhost example" aria-describedby="demo-disclosure" data-nosnippet="">
     <div className="demo-window">
       <aside className="demo-sidebar" aria-label="Example preview navigation">
         <div className="demo-brand"><span aria-hidden="true" dangerouslySetInnerHTML={{ __html: mark }} /><strong>Previewhost</strong></div>

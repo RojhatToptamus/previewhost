@@ -25,11 +25,11 @@ function TextLink({ href, children, className = "" }: { href: string; children: 
   return <a className={`landing-text-link ${className}`} href={href}>{children}<ArrowRight aria-hidden="true" /></a>;
 }
 
-function CopyCommand({ command, label }: { command: string; label: string }) {
+function CopyCommand({ command, label, prose = false }: { command: string; label: string; prose?: boolean }) {
   const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  return <div className="landing-command-wrap"><div className="landing-command"><code>{command}</code><button type="button" aria-label={`Copy ${label}`} onClick={async () => {
+  return <div className="landing-command-wrap"><div className="landing-command">{prose ? <span className="landing-prompt-text">{command}</span> : <code>{command}</code>}<button type="button" aria-label={`Copy ${label}`} onClick={async () => {
     clearTimeout(timer.current);
     try { await copyText(command); setStatus("copied"); timer.current = setTimeout(() => setStatus("idle"), 1800); }
     catch { setStatus("error"); }
@@ -51,15 +51,15 @@ function DependencyDiagram() {
     return () => observer.disconnect();
   }, []);
   const connections = [
-    { name: "database", path: "M110 56V82" },
-    { name: "cache", path: "M330 56V142Q330 152 320 152H230Q220 152 220 162V164" },
-    { name: "migration", path: "M110 138V142Q110 152 120 152H210Q220 152 220 162V164" },
-    { name: "frontend", path: "M220 220V246" },
+    "M110 56V82",
+    "M330 56V142Q330 152 320 152H230Q220 152 220 162V164",
+    "M110 138V142Q110 152 120 152H210Q220 152 220 162V164",
+    "M220 220V246",
   ];
   return <div ref={diagram} className="landing-dependencies" data-entered={hasEntered} role="img" aria-label="Example startup dependencies: PostgreSQL before migrate; migrate and Redis before the FastAPI API; the API before the Next.js frontend. The frontend receives the preview URL.">
     <span className="landing-diagram-label">Startup order</span>
     <div className="landing-dependency-grid" aria-hidden="true">
-      <svg className="dependency-connections" viewBox="0 0 440 302" preserveAspectRatio="none" aria-hidden="true">{connections.map(connection => <g key={connection.name} data-connection={connection.name}><path d={connection.path} className="dependency-path" /><path d={connection.path} className="dependency-signal" pathLength="1" /></g>)}</svg>
+      <svg className="dependency-connections" viewBox="0 0 440 302" preserveAspectRatio="none" aria-hidden="true">{connections.map(path => <path key={path} d={path} />)}</svg>
       <div className="dependency-node dependency-db"><Database /><div><strong>database</strong><span>PostgreSQL</span></div></div>
       <div className="dependency-node dependency-cache"><Layers /><div><strong>cache</strong><span>Redis</span></div></div>
       <div className="dependency-down dependency-db-arrow"><ArrowDown /></div>
@@ -114,7 +114,12 @@ function GetStarted() {
       <LandingTabs id="setup" label="Setup interface" items={interfaces} selected={selected} onSelect={setSelected} />
       <div id="setup-panel" role="tabpanel" aria-labelledby={`setup-${selected}`} tabIndex={0}>
         {selected === "cli" ? <div className="landing-setup-content"><div><h3>Start from your project directory.</h3><p>Install your app’s dependencies and <a href={pageHref("configuration")}>create preview.yaml</a> with its start commands and connections.</p><p>For managed databases or stored secrets, first complete private setup:</p><CopyCommand label="private setup command" command="previewhost secrets setup --allow-exec" /><TextLink href={pageHref("first-preview")}>Follow the CLI quickstart</TextLink></div><div className="landing-setup-commands"><p>Inspect the configuration, then start:</p><CopyCommand label="inspect and start commands" command={'previewhost inspect\npreviewhost start --allow-exec'} /><p>Open the returned URL. In another terminal, inspect your environments:</p><CopyCommand label="dashboard command" command="previewhost dashboard" /><p className="landing-small">Keep the dashboard terminal open while using it.</p></div></div>
-          : <div className="landing-setup-content landing-agent-setup"><div><h3>{selected === "cursor" ? "Add Previewhost to Cursor." : `Register Previewhost with ${name}.`}</h3>{selected === "cursor" ? <p>Add this entry to <code>~/.cursor/mcp.json</code>, preserving other servers. Enable Previewhost in Cursor’s MCP settings.</p> : <p>Run the registration command in your terminal. One registration works across your projects.</p>}</div><div className="landing-setup-commands"><p>{selected === "cursor" ? "~/.cursor/mcp.json" : "Register the MCP server:"}</p><CopyCommand key={selected} label={`${name} ${selected === "cursor" ? "configuration" : "MCP command"}`} command={agentCommands[selected]} /></div><div className="landing-setup-next"><h3>Then ask for a preview.</h3><p>In your project chat:</p><CopyCommand label="agent prompt" command={'Preview this application with Previewhost. Read its instructions and start commands,\nreuse the project configuration if present, and verify the returned URL in a browser.'} /><p>Approve project access. Complete private setup if asked, then tell your agent to continue.</p><TextLink href={pageHref("mcp")}>MCP setup guide</TextLink></div><p className="landing-agent-capabilities">Your agent can start previews, inspect status and captured logs, and stop previews. They keep running when the agent pauses.</p></div>}
+          : <div className="landing-setup-content landing-agent-setup">
+            <div><h3>{selected === "cursor" ? "Add Previewhost to Cursor." : `Register Previewhost with ${name}.`}</h3>{selected === "cursor" ? <p>Add this entry to <code>~/.cursor/mcp.json</code>, preserving other servers. Enable Previewhost in Cursor’s MCP settings.</p> : <p>Run the registration command in your terminal. One registration works across your projects.</p>}</div>
+            <div className="landing-setup-commands"><p>{selected === "cursor" ? "~/.cursor/mcp.json" : "Register the MCP server:"}</p><CopyCommand key={selected} label={`${name} ${selected === "cursor" ? "configuration" : "MCP command"}`} command={agentCommands[selected]} /></div>
+            <div><h3>Then ask for a preview.</h3><p>Your agent can start previews, inspect status and captured logs, and stop previews. They keep running when the agent pauses.</p></div>
+            <div className="landing-setup-commands"><p>In your project chat:</p><CopyCommand label="agent prompt" prose command="Preview this application with Previewhost. Read its instructions and start commands, reuse the project configuration if present, and verify the returned URL in a browser." /><p>Approve project access. Complete private setup if asked, then tell your agent to continue.</p><TextLink href={pageHref("mcp")}>MCP setup guide</TextLink></div>
+          </div>}
       </div>
       <p className="landing-permissions"><code>--allow-exec</code> permits trusted commands with your user permissions. It does not sandbox code or approve secrets.</p>
     </div>
