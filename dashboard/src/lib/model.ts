@@ -4,7 +4,10 @@ import type {
   SecretSetupSummary,
 } from "../../../src/contracts";
 
+import type { ProjectGit } from "../../../src/dashboard-identity";
+
 export type Owner = {
+  git?: ProjectGit;
   id: string;
   project?: string;
   previews?: PreviewStatus[];
@@ -108,11 +111,88 @@ export function state(entry: Entry) {
           : "",
   };
 }
-export function shortProject(owner: Owner) {
-  return (
-    owner.project?.split("/").filter(Boolean).at(-1) ?? "Unavailable owner"
-  );
+function pathSegments(path?: string) {
+  return path?.split(path.startsWith("/") ? "/" : /[\\/]/).filter(Boolean) ?? [];
 }
+
+export function shortProject(owner: Owner) {
+  return pathSegments(owner.project).at(-1) ?? "Unavailable owner";
+}
+export type ProjectLabel = { name: string; qualifier: string };
+
+/** Display labels only. Matching paths never merge owners or grant access. */
+export function projectLabels(owners: Owner[]): Map<string, ProjectLabel> {
+  const parts = owners.map(owner => pathSegments(owner.project));
+  return new Map(owners.map((owner, index) => {
+    const path = parts[index];
+    if (!path.length) return [owner.id, { name: "Unverified project", qualifier: owner.id.slice(0, 12) }];
+    let depth = 1;
+    while (depth < path.length && parts.some((other, i) =>
+      i !== index && other.slice(-depth).join("/") === path.slice(-depth).join("/"),
+    )) depth++;
+    return [owner.id, { name: path.at(-1)!, qualifier: path.slice(-depth, -1).join("/") }];
+  }));
+}
+
+export type ProjectGroup = { id: string; label: ProjectLabel; directory?: string; entries: Entry[] };
+
+/** Git common directories group linked worktrees; names and remotes never merge projects. */
+export function projectGroups(owners: Owner[], list: Entry[] = owners.flatMap(entries)): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  for (const owner of owners) {
+    const id = owner.git?.commonDirectory ?? owner.id;
+    if (groups.has(id)) continue;
+    const common = pathSegments(owner.git?.commonDirectory);
+    const directory = owner.git
+      ? (common.at(-1) === ".git" ? owner.git.commonDirectory.slice(0, -5) : owner.git.commonDirectory)
+      : owner.project;
+    groups.set(id, { id, directory, label: { name: "", qualifier: "" }, entries: [] });
+  }
+  const labels = projectLabels([...groups.values()].map(group => ({ id: group.id, project: group.directory })));
+  for (const group of groups.values()) group.label = labels.get(group.id)!;
+  // Preserve active / attention / recent ordering, including the order of the groups.
+  const ordered = new Map<string, ProjectGroup>();
+  for (const entry of list) {
+    const id = entry.owner.git?.commonDirectory ?? entry.owner.id;
+    const group = groups.get(id)!;
+    group.entries.push(entry);
+    ordered.set(id, group);
+  }
+  return [...ordered.values()];
+}
+
+function sourceSubdirectory(owner: Owner) {
+  if (!owner.git || !owner.project) return;
+  const separator = owner.git.root.startsWith("/") ? "/" : "\\";
+  return owner.project.startsWith(owner.git.root + separator)
+    ? owner.project.slice(owner.git.root.length + 1) : undefined;
+}
+
+export function entryLabel(entry: Entry, group: ProjectGroup): ProjectLabel {
+  const { owner, name } = entry;
+  const multiple = entries(owner).length > 1;
+  const branch = owner.git?.branch;
+  const subdirectory = sourceSubdirectory(owner);
+  const duplicate = branch && group.entries.some(other => other.owner.id !== owner.id &&
+    other.owner.git?.branch === branch && sourceSubdirectory(other.owner) === subdirectory);
+  const worktree = [branch, subdirectory].filter(Boolean).join(" / ");
+  if (branch && !duplicate) {
+    return { name: [worktree, multiple ? name : undefined].filter(Boolean).join(" · "), qualifier: "" };
+  }
+  const owners = [...new Map(group.entries.map(item => [item.owner.id, item.owner])).values()];
+  const folder = projectLabels(owners).get(owner.id)!;
+  const path = [folder.qualifier, folder.name].filter(Boolean).join("/");
+  return {
+    name: branch ? [worktree, multiple ? name : undefined].filter(Boolean).join(" · ")
+      : owner.git ? [`${path} (folder)`, multiple ? name : undefined].filter(Boolean).join(" · ") : name ?? folder.name,
+    qualifier: duplicate ? path : "",
+  };
+}
+
+export function lastAttempt(entry: Entry) {
+  return entry.preview?.candidate ?? entry.preview?.latest ?? entry.preview?.active;
+}
+
 export function entries(owner: Owner): Entry[] {
   const names = [
     ...new Set([
@@ -151,13 +231,13 @@ export function hint(entry: Entry) {
   if (p?.candidate)
     return p.active ? "Your previous app is still running." : "";
   if (p?.busy) return "";
-  if (p?.active && p.latest?.state === "failed")
-    return "Your previous app is still running.";
+  if (p?.active && p.latest && ["failed", "canceled"].includes(p.latest.state))
+    return "Your previous app is still running. Source edits and database writes are not rolled back.";
   if (p?.active) return "";
   if (p?.latest?.state === "failed")
     return "Fix the startup error, then retry.";
   if (p?.latest?.state === "canceled")
-    return "Startup was canceled; ask your agent to start again only when you want to continue.";
+    return "Start preview uses the same configuration and current source.";
   if (!p)
     return "Ask your agent to continue when setup is complete and you want to start this worktree.";
   return p?.data
@@ -190,11 +270,13 @@ export function visibleEntries(
     isActive(entry) ? 0 : needsAttention(entry) ? 1 : 2;
   return owners
     .flatMap(entries)
-    .filter(
-      (entry) =>
-        `${entry.owner.project ?? ""} ${entry.name ?? ""}`
-          .toLowerCase()
-          .includes(search) &&
+    .filter((entry) => {
+      const sources = [
+        ...attempts(entry.preview).flatMap(attempt => attempt.sources),
+        ...(entry.preview?.cleanup?.flatMap(item => item.sources) ?? []),
+      ];
+      const searchable = [entry.owner.project ?? entry.owner.id, entry.owner.git?.branch, entry.owner.git?.commonDirectory, entry.name, ...sources].join(" ");
+      return searchable.toLowerCase().includes(search) &&
         (filter === "all" ||
           (filter === "active" && isActive(entry)) ||
           (filter === "attention" && needsAttention(entry)) ||
@@ -202,11 +284,12 @@ export function visibleEntries(
             !entry.owner.error &&
             !isActive(entry) &&
             !pending(entry).length &&
-            !needsCleanup(entry.preview))),
-    )
+            !needsCleanup(entry.preview)));
+    })
     .sort(
       (a, b) =>
         rank(a) - rank(b) ||
+        (lastAttempt(b)?.startedAt ?? "").localeCompare(lastAttempt(a)?.startedAt ?? "") ||
         (a.owner.project ?? a.owner.id).localeCompare(
           b.owner.project ?? b.owner.id,
         ) ||

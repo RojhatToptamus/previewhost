@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { AttemptSummary } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import { attempts, hint, shortProject, state, type Entry } from "./lib/model";
@@ -8,49 +7,44 @@ import { AppLink, CopyButton, Notice, Path, Status } from "./components/shared";
 import { previewActions, PreviewMenu } from "./preview-actions";
 import { Activity } from "./activity";
 import { Diagnostics } from "./diagnostics";
+import { usePreviewView, type PreviewView } from "./lib/view-state";
 
-export type Tab = "activity" | "logs" | "configuration";
 export function Preview({
   entry,
   mutate,
   acting,
   revision,
-  refresh,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
   revision: number;
-  refresh: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("activity");
-  const [attemptId, setAttemptId] = useState<string>();
-  const [clearAfter, setClearAfter] = useState<number>();
-  const [source, setSource] = useState("");
-  const [query, setQuery] = useState("");
-  const [wrapLogs, setWrapLogs] = useState(false);
+  const [view, updateView] = usePreviewView(entry.owner.id, entry.name);
+  const { attemptId, clearAfter, source, query, wrapLogs, showContext } = view;
   const { owner, preview: p } = entry;
   const retained = attempts(p);
+  const tab = retained.length ? view.tab : "activity";
   const selected = attemptId
     ? retained.find((attempt) => attempt.id === attemptId)
     : retained[0];
   const actions = previewActions(entry);
   const canOpen = Boolean(p?.active && p.url);
-  const address = canOpen
-    ? (Object.values(p?.active?.services ?? {}).find(
-        (service) => service.url === p?.url,
-      )?.browserUrl ?? p?.url)
+  const hostnameUrl = canOpen
+    ? Object.values(p?.active?.services ?? {}).find(service => service.url === p?.url)?.browserUrl
     : undefined;
+  const addresses = canOpen ? [
+    ...(hostnameUrl && hostnameUrl !== p!.url ? [{ label: "Hostname", url: hostnameUrl }] : []),
+    { label: "Localhost", url: p!.url! },
+  ] : [];
   const primary = !canOpen
     ? actions.find((action) => !action.danger)
     : undefined;
   const context = hint(entry);
   function openLogs(attempt: AttemptSummary, name = "") {
-    setAttemptId(attempt.id);
-    setClearAfter(undefined);
-    setSource(name);
-    setQuery("");
-    setTab("logs");
+    updateView({
+      attemptId: attempt.id, clearAfter: undefined, source: name, query: "", tab: "logs",
+    });
     requestAnimationFrame(() =>
       document.getElementById("tab-logs")?.focus({ preventScroll: true }),
     );
@@ -58,69 +52,69 @@ export function Preview({
   return (
     <article className="preview-detail" aria-label="Preview details">
       <div className="preview-header">
-        <div className="preview-identity">
+        <div className="preview-heading">
           <div className="preview-title">
             <h1>{entry.name ?? shortProject(owner)}</h1>
             <Status tone={owner.error ? "error" : state(entry).tone}>
               {owner.error ? "Unavailable" : state(entry).label}
             </Status>
           </div>
-          {owner.project && (
-            <div className="identity-path">
-              <Path value={owner.project} />
-              <CopyButton value={owner.project} />
-            </div>
-          )}
-          {address && (
-            <div className="preview-address">
-              <AppLink url={address} variant="link">
-                {address.replace(/^http:\/\//, "")}
-              </AppLink>
-              <CopyButton
-                value={address}
-                label={address === p?.url ? "Copy URL" : "Copy hostname URL"}
-              />
-            </div>
-          )}
-          {context && <p className="context-note">{context}</p>}
+          <div className="header-actions">
+            {canOpen && <AppLink url={p!.url!} variant="default" />}
+            {actions.map((action) => (
+              <Button
+                key={action.label}
+                title={
+                  action.label === "Stop"
+                    ? "Stop this preview and keep its database data"
+                    : undefined
+                }
+                disabled={acting || Boolean(owner.error)}
+                variant={
+                  action === primary
+                    ? "default"
+                    : action.danger
+                      ? "destructive"
+                      : "outline"
+                }
+                onClick={() => void mutate(action.body, action.message)}
+              >
+                {action.label}
+              </Button>
+            ))}
+            <PreviewMenu
+              entry={entry}
+              mutate={mutate}
+              acting={acting}
+              managementOnly
+            />
+          </div>
         </div>
-        <div className="header-actions">
-          {canOpen && (
-            <>
-              <AppLink url={p!.url!} variant="default" />
-              {address !== p!.url && (
-                <CopyButton value={p!.url!} label="Copy URL" />
-              )}
-            </>
-          )}
-          {actions.map((action) => (
-            <Button
-              key={action.label}
-              title={
-                action.label === "Stop"
-                  ? "Stop this preview and keep its database data"
-                  : undefined
-              }
-              disabled={acting || Boolean(owner.error)}
-              variant={
-                action === primary
-                  ? "default"
-                  : action.danger
-                    ? "destructive"
-                    : "outline"
-              }
-              onClick={() => void mutate(action.body, action.message)}
-            >
-              {action.label}
-            </Button>
-          ))}
-          <PreviewMenu
-            entry={entry}
-            mutate={mutate}
-            acting={acting}
-            managementOnly
-          />
-        </div>
+        {(owner.project || addresses.length > 0) && (
+          <dl className="preview-metadata">
+            {owner.project && (
+              <div className="preview-project">
+                <dt>Project folder</dt>
+                <dd>
+                  <Path value={owner.project} />
+                  <CopyButton value={owner.project} />
+                </dd>
+              </div>
+            )}
+            {addresses.map(({ label, url }) => (
+              <div className="preview-address" key={url}>
+                <dt>{label}</dt>
+                <dd>
+                  <AppLink url={url} variant="link">
+                    {url.replace(/^http:\/\//, "")}
+                  </AppLink>
+                  <CopyButton value={url} label={`Copy ${label.toLowerCase()} URL`} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {context && <p className="context-note">{context}</p>}
       </div>
       {owner.error ? (
         <div className="page">
@@ -133,8 +127,10 @@ export function Preview({
           className="preview-tabs"
           value={tab}
           onValueChange={(value) => {
-            if (value !== "activity" && selected) setAttemptId(selected.id);
-            setTab(value as Tab);
+            updateView({
+              tab: value as PreviewView["tab"],
+              ...(value !== "activity" && selected ? { attemptId: selected.id } : {}),
+            });
           }}
         >
           <TabsList
@@ -172,9 +168,7 @@ export function Preview({
                     <Button
                       variant="outline"
                       onClick={() => {
-                        setAttemptId(retained[0]?.id);
-                        setClearAfter(undefined);
-                        setSource("");
+                        updateView({ attemptId: retained[0]?.id, clearAfter: undefined, source: "" });
                       }}
                     >
                       Show latest attempt
@@ -186,23 +180,22 @@ export function Preview({
                 <Diagnostics
                   entry={entry}
                   revision={revision}
-                  refresh={refresh}
                   clearAfter={clearAfter}
-                  setClearAfter={setClearAfter}
+                  setClearAfter={(clearAfter) => updateView({ clearAfter })}
                   tab={view}
                   selected={selected}
                   retained={retained}
                   selectAttempt={(id) => {
-                    setAttemptId(id);
-                    setClearAfter(undefined);
-                    setSource("");
+                    updateView({ attemptId: id, clearAfter: undefined, source: "" });
                   }}
                   source={source}
-                  setSource={setSource}
+                  setSource={(source) => updateView({ source })}
                   query={query}
-                  setQuery={setQuery}
+                  setQuery={(query) => updateView({ query })}
                   wrapLogs={wrapLogs}
-                  setWrapLogs={setWrapLogs}
+                  setWrapLogs={(wrapLogs) => updateView({ wrapLogs })}
+                  showContext={showContext}
+                  setShowContext={(showContext) => updateView({ showContext })}
                   mutate={mutate}
                   acting={acting}
                 />

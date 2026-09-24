@@ -4,6 +4,7 @@ await chmod(new URL('../dist/cli.js', import.meta.url), 0o755);
 
 // Both compiled entry points use the same bundled presentation assets.
 for (const output of ['dist', '.local/test-build']) {
+  await cp(new URL('../assets/favicon.png', import.meta.url), new URL(`../${output}/favicon.png`, import.meta.url));
   await cp(new URL('../assets/previewhost.svg', import.meta.url), new URL(`../${output}/previewhost.svg`, import.meta.url));
   await cp(new URL('../src/ui-tokens.css', import.meta.url), new URL(`../${output}/ui-tokens.css`, import.meta.url));
   await cp(new URL('../src/fonts/', import.meta.url), new URL(`../${output}/fonts/`, import.meta.url), { recursive: true });

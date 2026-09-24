@@ -1,65 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LayoutGridIcon, KeyRoundIcon, MoonIcon } from "lucide-react";
+import { MoonIcon } from "lucide-react";
 import { toast } from "sonner";
 import { authenticated, call, errorMessage, type Mutate } from "./lib/api";
-import {
-  entries,
-  shortProject,
-  state,
-  visibleEntries,
-  type PreviewFilter,
-  type Entry,
-  type Owner,
-} from "./lib/model";
+import { entries, entryLabel, projectGroups, shortProject, type PreviewFilter, type Owner } from "./lib/model";
 import { Button } from "./components/ui/button";
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from "./components/ui/breadcrumb";
+import { Separator } from "./components/ui/separator";
 import { Toggle } from "./components/ui/toggle";
 import { Toaster } from "./components/ui/sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
-import {
-  Sidebar,
-  SidebarProvider,
-  SidebarHeader,
-  SidebarContent,
-  SidebarGroup,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarTrigger,
-  useSidebar,
-} from "./components/ui/sidebar";
-import {
-  AppLink,
-  EmptyState,
-  Loading,
-  Notice,
-  Path,
-  SearchField,
-  Status,
-} from "./components/shared";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from "./components/ui/table";
+import { SidebarProvider, SidebarTrigger } from "./components/ui/sidebar";
+import { EmptyState, Loading, Notice, Path } from "./components/shared";
 import { Preview } from "./preview";
-import { PreviewMenu } from "./preview-actions";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-} from "./components/ui/select";
 import { SecretManager } from "./secrets";
+import { Navigation } from "./navigation";
+import { Overview } from "./overview";
+import { useSelection } from "./lib/view-state";
 import brandSvg from "../../assets/previewhost.svg?raw";
 
 const brandMark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
-
-type Selection = { owner: string; name?: string } | "secrets" | undefined;
 
 export function App() {
   const [dark, setDark] = useState(() => {
@@ -72,12 +31,13 @@ export function App() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
-  const [selection, setSelection] = useState<Selection>();
+  const [selection, select] = useSelection();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
   const [acting, setActing] = useState(false);
   const mutation = useRef(false);
+  const selectedOwner = typeof selection === "object" ? selection.owner : undefined;
   useEffect(() => {
     document.body.classList.toggle("ph-dark", dark);
     try {
@@ -90,10 +50,22 @@ export function App() {
     if (!authenticated) return;
     const controller = new AbortController();
     let pending = false;
+    setLoaded(false);
     async function refresh() {
       if (pending || document.hidden) return;
       pending = true;
       try {
+        // A selected preview should not wait behind unrelated, unreachable owners.
+        if (selectedOwner) {
+          try {
+            const owner = await call<Owner>({ action: "recheck", owner: selectedOwner }, controller.signal);
+            if (!controller.signal.aborted) setOwners(current => mergeOwners(current, [owner]));
+          } catch (error) {
+            if (!controller.signal.aborted) {
+              setOwners(current => ownerReadFailed(current, selectedOwner, error));
+            }
+          }
+        }
         const result: Owner[] = [];
         let after: string | undefined;
         do {
@@ -104,8 +76,7 @@ export function App() {
           result.push(...page.owners);
           after = page.next;
           if (!controller.signal.aborted && after) {
-            setOwners((current) => (current.length ? current : [...result]));
-            setLoaded(true);
+            setOwners(current => mergeOwners(current, page.owners));
           }
         } while (after && !controller.signal.aborted);
         if (!controller.signal.aborted) {
@@ -130,7 +101,7 @@ export function App() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [revision]);
+  }, [revision, selectedOwner]);
   const mutate: Mutate = useCallback(
     async <T,>(body: object, success?: string | ((result: T) => string)) => {
       if (mutation.current)
@@ -145,6 +116,9 @@ export function App() {
       const id = success === undefined ? undefined : toast.loading("Working…");
       try {
         const result = await call<T>(body);
+        if ("action" in body && body.action === "recheck") {
+          setOwners(current => mergeOwners(current, [result as Owner]));
+        }
         if (success !== undefined)
           toast.success(
             typeof success === "function" ? success(result) : success,
@@ -152,6 +126,10 @@ export function App() {
           );
         return { ok: true, result };
       } catch (error) {
+        if ("action" in body && body.action === "recheck" && "owner" in body && typeof body.owner === "string") {
+          const ownerId = body.owner;
+          setOwners(current => ownerReadFailed(current, ownerId, error));
+        }
         const message =
           error instanceof Error && error.cause
             ? errorMessage(error)
@@ -167,15 +145,18 @@ export function App() {
     },
     [],
   );
-  function select(value: Selection) {
-    setSelection(value);
-  }
-  const all = owners.flatMap(entries);
-  const filtered = visibleEntries(owners, query, filter);
   const selected =
     typeof selection === "object"
       ? owners.find((owner) => owner.id === selection.owner)
       : undefined;
+  const group = selected && projectGroups(owners).find(group => group.entries.some(entry => entry.owner.id === selected.id));
+  const selectedEntry = group?.entries.find(entry => entry.owner.id === selected?.id && entry.name === (typeof selection === "object" ? selection.name : undefined));
+  const label = selectedEntry && group ? entryLabel(selectedEntry, group) : undefined;
+  const location = selected
+    ? [...new Set([group?.label.name ?? shortProject(selected), group?.label.qualifier, label?.name, label?.qualifier].filter(Boolean))].join(" · ")
+    : "Preview";
+  const pageTitle = selection === "secrets" ? "Secret Manager" : typeof selection === "object" ? location : "Previews";
+  useEffect(() => { document.title = `${pageTitle} · Previewhost`; }, [pageTitle]);
   return (
     <TooltipProvider>
       <SidebarProvider className="app-shell">
@@ -193,7 +174,25 @@ export function App() {
               />
               previewhost
             </Button>
+          </div>
+          <div className="header-navigation">
             <SidebarTrigger size="icon" />
+            <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                {selection && <>
+                  <BreadcrumbItem className="breadcrumb-parent shrink-0">
+                    <BreadcrumbLink asChild><button onClick={() => select(undefined)}>Previews</button></BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="breadcrumb-parent" />
+                </>}
+                <BreadcrumbItem>
+                  <BreadcrumbPage title={selected ? location : undefined}>
+                    {selection === "secrets" ? "Secret Manager" : selection ? location : "Previews"}
+                  </BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
           </div>
           <div className="header-controls">
             <Toggle
@@ -217,11 +216,6 @@ export function App() {
           owners={owners}
           selection={selection}
           select={select}
-          query={query}
-          setQuery={setQuery}
-          list={filtered}
-          filter={filter}
-          setFilter={setFilter}
           mutate={mutate}
           acting={acting}
         />
@@ -243,7 +237,7 @@ export function App() {
             </div>
           ) : selection ? (
             selected &&
-            entries(selected).some((entry) => entry.name === selection.name) ? (
+            (selected.error || entries(selected).some((entry) => entry.name === selection.name)) ? (
               <Preview
                 key={selected.id + "/" + (selection.name ?? "")}
                 entry={{
@@ -256,56 +250,27 @@ export function App() {
                 mutate={mutate}
                 acting={acting}
                 revision={revision}
-                refresh={() => setRevision((value) => value + 1)}
               />
             ) : (
               <div className="page">
-                <Notice title="Preview no longer listed">
+                {selected && selection.name === undefined ? <>
+                  <h1>{shortProject(selected)}</h1>
+                  <Path value={selected.project ?? selected.id} />
+                  <p className="summary">Choose a preview</p>
+                  <div className="flex flex-wrap gap-2">
+                    {entries(selected).map(entry => <Button key={entry.name} variant="outline"
+                      onClick={() => select({ owner: selected.id, name: entry.name })}>{entry.name}</Button>)}
+                  </div>
+                </> : !loaded ? <Loading /> : <Notice title="Preview no longer listed">
                   Start through your agent or CLI to reconnect.
-                </Notice>
+                </Notice>}
               </div>
             )
           ) : (
-            <div className="page">
-              <h1>Previews</h1>
-              {!loaded ? (
-                <Loading>Connecting to local previews…</Loading>
-              ) : !all.length ? (
-                <EmptyState title="No previews running">
-                  Ask your agent to preview an application with Previewhost.
-                </EmptyState>
-              ) : (
-                <>
-                  <p className="summary">
-                    {all.filter((e) => e.preview?.active).length} running ·{" "}
-                    {all.filter((e) => e.preview?.candidate).length} starting ·{" "}
-                    {
-                      all.filter(
-                        (e) =>
-                          e.owner.error ||
-                          e.owner.configuration?.error ||
-                          ["error", "warning"].includes(state(e).tone),
-                      ).length
-                    }{" "}
-                    to review
-                  </p>
-                  {!filtered.length ? (
-                    <EmptyState title="No matching previews">
-                      Try another project or preview name.
-                    </EmptyState>
-                  ) : (
-                    <Overview
-                      entries={filtered}
-                      mutate={mutate}
-                      acting={acting}
-                      select={(entry) =>
-                        select({ owner: entry.owner.id, name: entry.name })
-                      }
-                    />
-                  )}
-                </>
-              )}
-            </div>
+            <Overview owners={owners} loading={!loaded}
+              query={query} setQuery={setQuery} filter={filter} setFilter={setFilter}
+              mutate={mutate} acting={acting}
+              select={entry => select({ owner: entry.owner.id, name: entry.name })} />
           )}
         </main>
         <Toaster
@@ -319,194 +284,21 @@ export function App() {
   );
 }
 
-function Navigation({
-  owners,
-  list,
-  selection,
-  select,
-  query,
-  setQuery,
-  filter,
-  setFilter,
-  mutate,
-  acting,
-}: {
-  owners: Owner[];
-  list: Entry[];
-  selection: Selection;
-  select: (value: Selection) => void;
-  query: string;
-  setQuery: (value: string) => void;
-  filter: PreviewFilter;
-  setFilter: (value: PreviewFilter) => void;
-  mutate: Mutate;
-  acting: boolean;
-}) {
-  const { setOpenMobile } = useSidebar();
-  function navigate(value: Selection) {
-    select(value);
-    setOpenMobile(false);
-  }
-  return (
-    <Sidebar>
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={!selection}
-              onClick={() => navigate(undefined)}
-            >
-              <LayoutGridIcon />
-              All previews
-              <span className="ml-auto text-muted-foreground">
-                {owners.flatMap(entries).length}
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={selection === "secrets"}
-              onClick={() => navigate("secrets")}
-            >
-              <KeyRoundIcon />
-              Secret Manager
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        <div className="sidebar-find">
-          <SearchField
-            value={query}
-            onChange={setQuery}
-            label="Search previews"
-          />
-          <Select
-            value={filter}
-            onValueChange={(value) => setFilter(value as PreviewFilter)}
-          >
-            <SelectTrigger
-              aria-label="Filter previews"
-              className="sidebar-filter"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="start">
-              <SelectGroup>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="attention">Needs attention</SelectItem>
-                <SelectItem value="stopped">Stopped / offline</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-      </SidebarHeader>
-      <SidebarContent aria-label="Projects and previews">
-        <SidebarGroup>
-          <SidebarMenu>
-            {list.map((entry) => (
-              <SidebarMenuItem
-                key={entry.owner.id + "/" + (entry.name ?? "")}
-                className="preview-nav-row"
-                data-active={
-                  typeof selection === "object" &&
-                  selection.owner === entry.owner.id &&
-                  selection.name === entry.name
-                }
-              >
-                <SidebarMenuButton
-                  className="preview-nav"
-                  isActive={
-                    typeof selection === "object" &&
-                    selection.owner === entry.owner.id &&
-                    selection.name === entry.name
-                  }
-                  onClick={() =>
-                    navigate({ owner: entry.owner.id, name: entry.name })
-                  }
-                >
-                  <span className="nav-name">
-                    {entry.name ?? shortProject(entry.owner)}
-                  </span>
-                  <Status
-                    tone={entry.owner.error ? "error" : state(entry).tone}
-                  >
-                    {entry.owner.error ? "Unavailable" : state(entry).label}
-                  </Status>
-                  <Path value={entry.owner.project ?? "Unverified record"} />
-                </SidebarMenuButton>
-                <PreviewMenu entry={entry} mutate={mutate} acting={acting} />
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-          {!list.length && (
-            <p className="sidebar-empty">
-              No matching previews
-            </p>
-          )}
-        </SidebarGroup>
-      </SidebarContent>
-    </Sidebar>
-  );
+function mergeOwners(current: Owner[], page: Owner[]) {
+  const byId = new Map(current.map(owner => [owner.id, owner]));
+  for (const owner of page) byId.set(owner.id, owner);
+  return [...byId.values()];
 }
 
-function Overview({
-  entries,
-  select,
-  mutate,
-  acting,
-}: {
-  entries: Entry[];
-  select: (entry: Entry) => void;
-  mutate: Mutate;
-  acting: boolean;
-}) {
-  return (
-    <div className="data-table overview-table">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Preview / worktree</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {entries.map((entry) => (
-            <TableRow key={entry.owner.id + "/" + (entry.name ?? "")}>
-              <TableCell>
-                <Button
-                  variant="link"
-                  className="preview-name"
-                  onClick={() => select(entry)}
-                >
-                  {entry.name ?? shortProject(entry.owner)}
-                </Button>
-                <Path value={entry.owner.project ?? "Unverified record"} />
-              </TableCell>
-              <TableCell>
-                <Status tone={entry.owner.error ? "error" : state(entry).tone}>
-                  {entry.owner.error ? "Unavailable" : state(entry).label}
-                </Status>
-                {(entry.owner.error || state(entry).note) && (
-                  <p className="text-xs text-muted-foreground">
-                    {entry.owner.error
-                      ? "Owner did not respond"
-                      : state(entry).note}
-                  </p>
-                )}
-              </TableCell>
-              <TableCell>
-                <div className="row-actions">
-                  {entry.preview?.active && entry.preview.url && (
-                    <AppLink url={entry.preview.url} />
-                  )}
-                  <PreviewMenu entry={entry} mutate={mutate} acting={acting} />
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
+function ownerReadFailed(current: Owner[], id: string, error: unknown) {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause && typeof cause === "object" && "code" in cause && cause.code === "NOT_FOUND") {
+    return current.filter(owner => owner.id !== id);
+  }
+  return mergeOwners(current, [{
+    id,
+    project: current.find(owner => owner.id === id)?.project,
+    git: current.find(owner => owner.id === id)?.git,
+    error: { message: errorMessage(error) },
+  }]);
 }

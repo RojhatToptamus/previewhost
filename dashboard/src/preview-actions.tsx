@@ -79,7 +79,7 @@ export function previewActions(entry: Entry): PreviewAction[] {
     !p.active &&
     !p.busy &&
     !p.candidate &&
-    ["stopped", "failed"].includes(p.latest?.state ?? "") &&
+    ["stopped", "failed", "canceled"].includes(p.latest?.state ?? "") &&
     !needsCleanup(p)
   )
     result.push({
@@ -101,7 +101,7 @@ function resetRequest(entry: Entry): Confirmation | undefined {
   if (
     !p?.data?.resources.length ||
     !p.latest ||
-    !(p.active || ["stopped", "failed"].includes(p.latest.state)) ||
+    !(p.active || ["stopped", "failed", "canceled"].includes(p.latest.state)) ||
     p.busy ||
     p.candidate ||
     (needsCleanup(p) && !deletionNeedsRetry(p))
@@ -151,11 +151,13 @@ export function PreviewMenu({
   mutate,
   acting,
   managementOnly = false,
+  label,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
   managementOnly?: boolean;
+  label?: string;
 }) {
   const [review, setReview] = useState<Confirmation>();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -163,18 +165,22 @@ export function PreviewMenu({
 
   const actions =
     managementOnly || owner.offline || owner.error ? [] : previewActions(entry);
+  const hasPreviews = name === undefined && !!owner.previews?.length;
+  const hasPendingSetup = name === undefined
+    ? owner.requests?.some(request => request.state === "pending" || request.state === "saving")
+    : !!pending(entry).length;
   const idle =
     !p?.active &&
     !p?.candidate &&
     !p?.busy &&
     !p?.url &&
-    !pending(entry).length;
+    !hasPendingSetup;
   const canDelete =
     !owner.error &&
     idle &&
     p?.data &&
     (!needsCleanup(p) || deletionNeedsRetry(p));
-  const canRemove = idle && !p?.data && !needsCleanup(p);
+  const canRemove = !hasPreviews && idle && !p?.data && !needsCleanup(p);
   const reset = owner.error ? undefined : resetRequest(entry);
   const [checking, setChecking] = useState(false);
   async function reviewRemoval() {
@@ -198,13 +204,15 @@ export function PreviewMenu({
         ...request,
         blocked: canRemove
           ? undefined
-          : pending(entry).length
-            ? "Finish or cancel private setup first."
-            : !idle
-              ? "Stop this preview before removing its entry."
-              : needsCleanup(p)
-                ? "Resolve incomplete cleanup before removing this entry."
-                : "Delete the retained managed data before removing this entry.",
+          : hasPreviews
+            ? "Open this project's previews to manage or remove their entries first."
+            : hasPendingSetup
+              ? "Finish or cancel private setup first."
+              : !idle
+                ? "Stop this preview before removing its entry."
+                : needsCleanup(p)
+                  ? "Resolve incomplete cleanup before removing this entry."
+                  : "Delete the retained managed data before removing this entry.",
       });
       return;
     }
@@ -247,7 +255,8 @@ export function PreviewMenu({
             variant="ghost"
             size="icon-sm"
             disabled={acting || checking}
-            aria-label={`Actions for ${name ?? shortProject(owner)}`}
+            aria-label={`Actions for ${label ?? name ?? shortProject(owner)}`}
+            title="Preview actions"
           >
             <MoreHorizontalIcon />
           </Button>
@@ -288,7 +297,7 @@ export function PreviewMenu({
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             {reset && (
-              <DropdownMenuItem onSelect={() => setReview(reset)}>
+              <DropdownMenuItem variant="destructive" onSelect={() => setReview(reset)}>
                 Reset data…
               </DropdownMenuItem>
             )}
@@ -318,7 +327,7 @@ export function PreviewMenu({
                 Delete data…
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onSelect={() => void reviewRemoval()}>
+            <DropdownMenuItem variant="destructive" onSelect={() => void reviewRemoval()}>
               Remove entry…
             </DropdownMenuItem>
           </DropdownMenuGroup>

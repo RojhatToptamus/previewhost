@@ -1,7 +1,6 @@
 import type { AttemptSummary, ServiceStatus } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import {
-  attempts,
   deletionNeedsRetry,
   needsCleanup,
   pending,
@@ -18,7 +17,7 @@ import {
   TableCell,
 } from "./components/ui/table";
 import { ConfirmAction } from "./components/confirm-action";
-import { AppLink, Notice, Path, Section, Status } from "./components/shared";
+import { AppLink, CopyButton, Disclosure, Notice, Path, Section, Status } from "./components/shared";
 
 type Props = {
   entry: Entry;
@@ -77,11 +76,6 @@ export function Activity(props: Props) {
           Approve access or enter missing values in the private form. Cancel
           there.
         </Notice>
-      ) : !p?.candidate && latest?.state === "canceled" ? (
-        <Notice title={p?.active ? "Update canceled" : "Startup canceled"}>
-          Nothing was started again automatically. Ask your agent to continue
-          only when you are ready.
-        </Notice>
       ) : null}
       {p && (
         <>
@@ -99,6 +93,7 @@ export function Activity(props: Props) {
                   <Status tone={tone(attempt.state)}>
                     {capitalize(attempt.state)}
                   </Status>
+                  <AttemptTime attempt={attempt} />
                   <AttemptFailure attempt={attempt} openLogs={openLogs} />
                 </div>
               ))}
@@ -112,6 +107,7 @@ export function Activity(props: Props) {
                 <code title={(p.active ?? latest)!.id}>
                   {(p.active ?? latest)!.id.slice(0, 8)}
                 </code>
+                <AttemptTime attempt={(p.active ?? latest)!} />
               </div>
             )
           )}
@@ -128,26 +124,6 @@ export function Activity(props: Props) {
           {p?.active ? " The running app is unchanged." : ""}
         </Notice>
       )}
-      <Section title="Recent attempts">
-        {attempts(p).map((attempt) => (
-          <div className="activity-row" key={attempt.id}>
-            <time>{new Date(attempt.startedAt).toLocaleTimeString()}</time>
-            <div>
-              <strong>
-                {attempt.id === p?.active?.id
-                  ? "Serving now"
-                  : "Attempt " + attempt.state}
-              </strong>
-              <code className="attempt-id">{attempt.id}</code>
-            </div>
-          </div>
-        ))}
-        {!attempts(p).length && (
-          <p className="text-muted-foreground">
-            No retained attempts. Start through your agent or CLI.
-          </p>
-        )}
-      </Section>
       {(p?.cleanup?.length || p?.data?.cleanup) && (
         <Notice title="Cleanup needs attention" error>
           <p>
@@ -234,6 +210,15 @@ function attemptScope(
   return preview.active ? "latest update" : "latest attempt";
 }
 
+function AttemptTime({ attempt }: { attempt: AttemptSummary }) {
+  const started = new Date(attempt.startedAt);
+  return (
+    <time className="attempt-time" dateTime={attempt.startedAt} title={started.toLocaleString()}>
+      {started.toLocaleTimeString()}
+    </time>
+  );
+}
+
 function AttemptFailure({
   attempt,
   openLogs,
@@ -276,9 +261,6 @@ function AttemptFailure({
           </Button>
         </div>
       )}
-      <p className="text-muted-foreground">
-        Source edits and database writes are not rolled back.
-      </p>
     </div>
   );
 }
@@ -340,6 +322,11 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
                     {service.error && (
                       <p className="error">{service.error.message}</p>
                     )}
+                    {!!service.waitingFor?.length && (
+                      <p className="text-muted-foreground">
+                        Waiting for <code>{service.waitingFor.join(", ")}</code>
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell>{types[service.type]}</TableCell>
                   <TableCell>
@@ -394,14 +381,16 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
         </Table>
       </div>
       {!!attempt?.sources?.length && (
-        <details>
-          <summary>Source folders</summary>
+        <Disclosure title="Source folders">
           <div className="source-folders">
             {attempt.sources.map((source) => (
-              <Path key={source} value={source} />
+              <div className="source-folder" key={source}>
+                <Path value={source} />
+                <CopyButton value={source} />
+              </div>
             ))}
           </div>
-        </details>
+        </Disclosure>
       )}
     </Section>
   );
@@ -430,6 +419,11 @@ function Jobs({ entry, mutate, acting, openLogs }: Props) {
               <TableRow key={name}>
                 <TableCell>
                   <strong>{name}</strong>
+                  {!!job.waitingFor?.length && (
+                    <p className="text-muted-foreground">
+                      Waiting for <code>{job.waitingFor.join(", ")}</code>
+                    </p>
+                  )}
                   {job.error ? (
                     <p className="text-muted-foreground">{job.error.message}</p>
                   ) : (

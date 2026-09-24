@@ -51,8 +51,10 @@ test('dashboard authenticates browser access, discovers isolated owners, and con
   assert.match(shell.headers.get('content-security-policy')!, /font-src 'self';/);
   const html = await shell.text();
   assert.ok(!html.includes(capability));
+  assert.match(html, /<meta name="robots" content="noindex, nofollow"/);
+  assert.match(shell.headers.get('content-security-policy')!, /img-src 'self';/);
   assert.match(shell.headers.get('content-security-policy')!, /script-src 'self';/);
-  for (const file of ['dashboard.js', 'dashboard.css']) {
+  for (const file of ['dashboard.js', 'dashboard.css', 'dashboard.svg', 'dashboard.png']) {
     assert.ok(html.includes('/' + file));
     const asset = await fetch(`${dashboard.endpoint}/${file}`);
     assert.equal(asset.status, 200);

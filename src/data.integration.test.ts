@@ -100,10 +100,6 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
   const docker = await Docker.connect(dockerSocket!);
   const marker = randomBytes(16).toString('hex');
   try {
-    const otherBindings = await other.open('neighbor', { cache: { type: 'redis' } }, { signal: signal(), onFailure(error) { assert.fail(error); } });
-    const neighbor = createClient({ url: otherBindings.cache.url, socket: { reconnectStrategy: false } });
-    neighbor.on('error', () => {});
-    await neighbor.connect(); await neighbor.set('neighbor-marker', marker); neighbor.destroy();
     const script = `
       ${keystoreFixture.installSource}
       import {createDataOwner} from ${JSON.stringify(new URL('./data.js', import.meta.url).href)};
@@ -118,7 +114,17 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
       setInterval(()=>{},10000);
     `;
     child = spawn(process.execPath, ['--input-type=module', '-e', script, directory, dockerSocket!, marker], { stdio: ['ignore', 'pipe', 'pipe'] });
-    await childReady(child, t.signal);
+    // These owners are independent. Join both starts before cleanup if either fails.
+    const [childSetup, neighborSetup] = await Promise.allSettled([
+      childReady(child, t.signal),
+      other.open('neighbor', { cache: { type: 'redis' } }, { signal: signal(), onFailure(error) { assert.fail(error); } }),
+    ]);
+    if (childSetup.status === 'rejected') throw childSetup.reason;
+    if (neighborSetup.status === 'rejected') throw neighborSetup.reason;
+    const otherBindings = neighborSetup.value;
+    const neighbor = createClient({ url: otherBindings.cache.url, socket: { reconnectStrategy: false } });
+    neighbor.on('error', () => {});
+    await neighbor.connect(); await neighbor.set('neighbor-marker', marker); neighbor.destroy();
     await assert.rejects(createDataOwner({ directory, dockerSocket }), { code: 'BUSY' });
     const before = JSON.parse(await readFile(join(directory, 'sample.json'), 'utf8'));
     child.kill('SIGKILL'); await once(child, 'close');

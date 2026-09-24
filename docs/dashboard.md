@@ -20,8 +20,25 @@ It does not start owners or grant execution permissions.
 
 ![Preview overview with separate Storefront worktrees](../assets/dashboard-worktrees.png)
 
-Use search and the status filter to narrow the list. Active previews appear first. Each row has its own action menu.
-Use the source path to distinguish worktrees. **Open app** opens the serving attempt, even if a later update failed.
+**Overview** groups linked Git worktrees under their repository. Branch names open preview
+details; **Open app** opens the serving application, even if a later update failed.
+Preview details show its hostname and numeric localhost URL when available, with open
+and copy actions. They are different browser origins; switching does not bypass CORS.
+Search by branch, folder, preview name, or source path. Filter for active work or failures.
+
+The sidebar keeps projects in alphabetical order. Expand a project to browse its worktrees;
+one project opens at a time. Its heading stays visible as you scroll. Opening a preview reveals
+its selected row. Each preview has its own actions, and status changes do not reorder navigation.
+
+Use the counts above Overview to show active previews or those needing attention. These
+shortcuts clear search; the status dropdown keeps it. Overview filters do not hide the sidebar.
+Separate clones and non-Git folders stay separate. Matching names show a distinguishing path.
+When Git metadata is unavailable, folder labels remain usable. Branch labels reflect current
+source; a preview spanning repositories stays under its owner's project.
+
+The list fills as project checks finish. Refresh checks the selected project before the rest.
+Browser Back returns to the previous view. Each preview keeps its diagnostic selections
+for this browser session, including after reload. Runtime information is fetched again.
 
 ## Inspect services and updates
 
@@ -29,6 +46,7 @@ Open a preview's **Activity** tab to see services, setup jobs, and available rec
 **Serving** identifies the active application. **Latest update** identifies the replacement attempt.
 Services and setup jobs identify the attempt they belong to. A failed resource's **Logs** action
 selects that exact attempt and source. Failed updates do not roll back source edits or database writes.
+Waiting resources name their unfinished dependencies. Managed databases show Starting while being prepared.
 
 ![Failed update beside the serving attempt and its ready services](../assets/dashboard-update.png)
 
@@ -37,7 +55,7 @@ selects that exact attempt and source. Failed updates do not roll back source ed
 | Diagnose a failure | Open the failed job's **Logs**, or choose its attempt in the Logs tab. |
 | Abandon a pending update | **Cancel update** leaves the previous application running. |
 | Stop the preview | **Stop** ends owned processes and retains managed data. |
-| Start after stop | **Start preview** uses retained configuration and current source. Its URL can change. |
+| Start after stop or cancellation | **Start preview** uses retained configuration and current source. Its URL can change. |
 | Retry a failed initial start | **Retry start** reruns that attempt after you fix its cause. |
 | Start with fresh managed data | In the preview menu, **Reset data** names the databases before confirmation, then starts the preview again. |
 | Delete data without restarting | After stop, **Delete data** removes the selected managed databases. Deletion cannot be undone. |
@@ -62,21 +80,23 @@ Choose the attempt before comparing output. A failed replacement and a serving a
 Then select a service or job, or use **All output**.
 Logs are bounded tails, not a permanent archive.
 
-Either **Refresh** button retrieves current logs and environment status. Search, source, attempt,
+The header's **Refresh** retrieves current logs and environment status. Search, source, attempt,
 and scroll position remain selected; logs do not update automatically.
-**Clear view** hides output through the current cursor in this view only. Refresh shows newer output.
+The **Log options** menu offers line wrapping and surrounding lines for search matches.
+Its **Clear view** action hides output through the current cursor in this view only. Refresh shows newer output.
 **Show earlier logs** restores what is still retained. Changing attempts opens that attempt normally.
 Other windows, agents, and the stored log buffer are unchanged.
 
 ## Save configuration and manage secrets
 
 In **Configuration**, **Save as preview.yaml** writes the selected attempt's recipe to the project root.
-Saving fails if `preview.yaml` or `preview.yml` already exists. It does not change the running application.
+If `preview.yaml` or `preview.yml` already exists, the footer identifies it instead of offering Save.
+The displayed configuration still belongs to the selected attempt. Saving never overwrites a file or changes the running application.
 Secret references remain references. Stored values do not appear in this view.
 
 **Secret Manager** creates or unlocks the dashboard’s keystore session, then lists references for editing.
 Search covers all stored reference names. Use **Next** and **Previous** to browse bounded pages.
-It also offers automatic unlock controls on macOS. Project owners unlock separately through private setup.
+Its **Keystore options** menu offers automatic unlock controls on macOS. Project owners unlock separately through private setup.
 **Open private form** handles missing values and access approval.
 **Private setup** shows pending forms or the latest request result.
 Completing setup does not start the app.

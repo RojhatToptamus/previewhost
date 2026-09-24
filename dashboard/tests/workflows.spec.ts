@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -13,6 +13,73 @@ const { startDashboard } = (await import(
   new URL("../../dist/dashboard.js", import.meta.url).href
 )) as typeof import("../../src/dashboard");
 import type { PreviewSpec } from "../../src/contracts";
+import { projectLabels, entryLabel, projectGroups, visibleEntries, type Owner } from "../src/lib/model";
+import { searchLogs } from "../src/lib/log-search";
+
+test("log search retains ordered, nonduplicated context around case-insensitive matches", () => {
+  const text = "start\na\nError one\nb\nError two\nc\nd\ne\nf\ng\nh\nError three\nend";
+  expect(searchLogs(text, "ERROR", false)).toEqual({ count: 3, text: "Error one\nError two\nError three" });
+  expect(searchLogs(text, "ERROR", true)).toEqual({ count: 3, text: "start\na\nError one\nb\nError two\nc\nd\n…\ng\nh\nError three\nend" });
+  expect(searchLogs(text, "absent", true)).toEqual({ count: 0, text: "" });
+});
+
+test("navigation labels distinguish folders without merging owners and keep cleanup sources searchable", () => {
+  const owners: Owner[] = [
+    { id: "main", project: "/work/store/app" },
+    { id: "tree", project: "/work/feature/app" },
+    { id: "unrelated", project: "/other/store/app" },
+    { id: "posix", project: "/work/my\\project" },
+    { id: "windows", project: "C:\\work\\checkout\\app" },
+    { id: "unknown" },
+  ];
+  const labels = projectLabels(owners);
+  expect(labels.size).toBe(owners.length);
+  expect(labels.get("main")).toEqual({ name: "app", qualifier: "work/store" });
+  expect(labels.get("unrelated")).toEqual({ name: "app", qualifier: "other/store" });
+  expect(labels.get("tree")).toEqual({ name: "app", qualifier: "feature" });
+  expect(labels.get("posix")).toEqual({ name: "my\\project", qualifier: "" });
+  expect(labels.get("windows")).toEqual({ name: "app", qualifier: "checkout" });
+  expect(labels.get("unknown")!.qualifier).toBe("unknown");
+  const owner: Owner = { id: "multi", project: "/work/app", previews: [
+    { name: "app", busy: false, cleanup: [{ attemptId: "old", error: { code: "CLEANUP_INCOMPLETE", message: "Process still exists" }, sources: ["/old/backend"] }] },
+    { name: "comparison", busy: false },
+  ] };
+  expect(entryLabel({ owner, name: "app" }, projectGroups([owner], visibleEntries([owner], "", "all"))[0]).name).toBe("app");
+  expect(visibleEntries([owner], "OLD/BACKEND", "attention").map(entry => entry.name)).toEqual(["app"]);
+});
+
+test("repository groups keep clone identity, subprojects and multiple previews distinct", () => {
+  const main: Owner = { id: "main", project: "/work/shop", git: { root: "/work/shop", commonDirectory: "/work/shop/.git", branch: "main" }, previews: [{ name: "app", busy: false }] };
+  const tree: Owner = { id: "tree", project: "/trees/shop", git: { ...main.git!, root: "/trees/shop", branch: "checkout" }, previews: [{ name: "review", busy: false }, { name: "compare", busy: false }] };
+  const clone: Owner = { ...main, id: "clone", project: "/client/shop", git: { ...main.git!, root: "/client/shop", commonDirectory: "/client/shop/.git" } };
+  const nested: Owner = { ...main, id: "nested", project: "/work/shop/apps/api" };
+  const duplicate: Owner = { ...main, id: "duplicate", project: "/forced/shop", git: { ...main.git!, root: "/forced/shop" } };
+  const owners = [main, tree, clone, nested, duplicate];
+  const groups = projectGroups(owners, visibleEntries(owners, "", "all"));
+  expect(groups).toHaveLength(2);
+  const group = groups.find(group => group.id === main.git!.commonDirectory)!;
+  expect(group.entries).toHaveLength(5);
+  const label = (id: string, name: string) => entryLabel(group.entries.find(entry => entry.owner.id === id && entry.name === name)!, group);
+  expect(label("tree", "review")).toEqual({ name: "checkout · review", qualifier: "" });
+  expect(label("tree", "compare")).toEqual({ name: "checkout · compare", qualifier: "" });
+  expect(label("nested", "app")).toEqual({ name: "main / apps/api", qualifier: "" });
+  expect(label("main", "app").qualifier).toBe("work/shop");
+  expect(label("duplicate", "app").qualifier).toBe("forced/shop");
+  expect(groups.map(group => group.label.qualifier).sort()).toEqual(["client", "work"]);
+  expect(visibleEntries(owners, "checkout", "all").map(entry => entry.name).sort()).toEqual(["compare", "review"]);
+  const root: Owner = { ...main, previews: [{ name: "api", busy: false }, { name: "web", busy: false }] };
+  const subproject: Owner = { ...main, id: "subproject", project: "/work/shop/web" };
+  const monorepo = projectGroups([root, subproject])[0];
+  const names = monorepo.entries.map(entry => entryLabel(entry, monorepo).name);
+  expect(new Set(names).size).toBe(3);
+  expect(names).toContain("main · web");
+  expect(names).toContain("main / web");
+  const detached: Owner = { ...main, id: "detached", project: "/trees/main", git: { ...main.git!, root: "/trees/main", branch: undefined } };
+  const sameName = projectGroups([main, detached])[0];
+  expect(sameName.entries.map(entry => entryLabel(entry, sameName))).toEqual([
+    { name: "main", qualifier: "" }, { name: "main (folder)", qualifier: "" },
+  ]);
+});
 
 test("React dashboard preserves attempt isolation, logs, configuration and safe controls", async ({
   page,
@@ -29,6 +96,10 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
   const urls: string[] = [];
   const hostnames: string[] = [];
   let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
+  const logOption = async (name: string, checkbox = false) => {
+    await page.getByRole("button", { name: "Log options", exact: true }).click();
+    await page.getByRole(checkbox ? "menuitemcheckbox" : "menuitem", { name, exact: true }).click();
+  };
   try {
     for (const folder of [
       "first",
@@ -164,11 +235,9 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       throw new Error("The authenticated dashboard could not open.");
     });
     await expect(page.locator(".overview-table .preview-name")).toHaveCount(2);
-    await page
-      .locator(".overview-table")
-      .getByRole("button", { name: "app", exact: true })
-      .first()
-      .click();
+    await expect(page).toHaveTitle("Previews · Previewhost");
+    await page.locator('.overview-table .preview-name[title$="/first"]').click();
+    await expect(page).toHaveTitle(/first.* · Previewhost$/);
     await expect(page.locator(".preview-title")).toContainText("Update failed");
     await expect(page.locator(".attempt-split")).toContainText("Serving");
     await expect(page.getByRole("heading", { name: "Services · serving", exact: true })).toBeVisible();
@@ -182,7 +251,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("link", { name: "Open app", exact: true }),
     ).toHaveAttribute("href", urls[0]);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.getByRole("button", { name: "Copy URL", exact: true }).click();
+    await page.getByRole("button", { name: "Copy localhost URL", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Copied", exact: true }),
     ).toBeVisible();
@@ -191,22 +260,45 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     );
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Copy URL", exact: true }),
+      page.getByRole("button", { name: "Copy localhost URL", exact: true }),
     ).toBeVisible();
-    await expect(page.locator(".preview-address a")).toHaveAttribute(
-      "href",
-      hostnames[0],
-    );
+    await expect(page.locator(".preview-address a")).toHaveCount(2);
+    await expect(page.locator(".preview-address a").nth(0)).toHaveAttribute("href", hostnames[0]);
+    await expect(page.locator(".preview-address a").nth(1)).toHaveAttribute("href", urls[0]);
+    await page.keyboard.press("Tab");
+    await page.locator(".preview-address a").first().focus();
+    expect(await page.locator(".preview-address a").first().evaluate(element => {
+      const css = getComputedStyle(element);
+      return { outline: css.outlineWidth, border: css.borderWidth, shadow: css.boxShadow };
+    })).toEqual({ outline: "2px", border: "0px", shadow: "none" });
+    const folders = page.getByRole("button", { name: "Source folders", exact: true });
+    await folders.focus();
+    await page.keyboard.press("Enter");
+    await expect(folders).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".source-folders")).toContainText(join(directory, "first"));
+    await page.locator(".source-folders").getByRole("button", { name: "Copy path" }).first().click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(await realpath(join(directory, "first")));
+    await folders.focus();
+    await page.keyboard.press("Space");
+    await expect(folders).toHaveAttribute("aria-expanded", "false");
     await page.getByRole("button", { name: "Copy hostname URL" }).click();
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toBe(hostnames[0]);
-    const app = await context.newPage();
-    await app.goto(urls[0]);
-    await expect(app.locator("body")).toHaveText("first");
-    await app.goto(hostnames[0]);
+    const [app] = await Promise.all([
+      context.waitForEvent("page"),
+      page.locator(".preview-address a").nth(1).click(),
+    ]);
     await expect(app.locator("body")).toHaveText("first");
     await app.close();
+    const [hostnameApp] = await Promise.all([
+      context.waitForEvent("page"),
+      page.locator(".preview-address a").nth(0).click(),
+    ]);
+    await expect(hostnameApp.locator("body")).toHaveText("first");
+    expect(hostnameApp.url()).toBe(hostnames[0] + "/");
+    await hostnameApp.close();
     await page
       .locator(".attempt-split .attempt-failure")
       .getByRole("button", { name: "Logs", exact: true })
@@ -258,6 +350,14 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("tab", { name: "Configuration", exact: true }),
     ).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".logs")).toHaveCount(0);
+    const configuration = page.getByRole("button", { name: "Requested configuration", exact: true });
+    await configuration.focus();
+    await page.keyboard.press("Enter");
+    await expect(configuration).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("pre.configuration")).toContainText('"type": "environment"');
+    await page.keyboard.press("Space");
+    await expect(configuration).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("pre.configuration")).toBeHidden();
     slowLogs = false;
     // Reference content needs real reading room, not an action column's minimum width.
     const bindingRow = page
@@ -293,21 +393,18 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     const yml = join(directory, "first/preview.yml");
     await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
     await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(page.getByText("preview.yml exists.", { exact: false })).toBeVisible();
-    await page.getByRole("button", { name: "Save as preview.yaml" }).click();
-    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "preview.yml" })).toBeVisible();
+    await expect(page.locator(".save-row")).toContainText("preview.yml");
+    await expect(page.getByRole("button", { name: "Save as preview.yaml" })).toHaveCount(0);
     await expect(readFile(join(directory, "first/preview.yaml"))).rejects.toMatchObject({ code: "ENOENT" });
     await rm(yml);
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("button", { name: "Save as preview.yaml" }).click();
     await expect
       .poll(() =>
         readFile(join(directory, "first/preview.yaml"), "utf8").catch(() => ""),
       )
       .toContain("name: app");
-    await page.getByRole("button", { name: "Save as preview.yaml" }).click();
-    await expect(
-      page.locator("[data-sonner-toast]").filter({ hasText: "already exists" }).filter({ hasText: "preview.yaml" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save as preview.yaml" })).toHaveCount(0);
     await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
     await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
@@ -342,21 +439,19 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
         ),
       ).toBe(true);
       await expect(
-        page.getByRole("button", { name: "Save as preview.yaml" }),
+        page.locator(".save-row"),
       ).toBeInViewport();
     }
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();
     await page
-      .getByRole("button", { name: "All previews", exact: false })
+      .getByRole("button", { name: "Overview", exact: true })
       .click();
-    for (const path of await page.locator(".overview-table .path").all()) {
-      expect((await path.boundingBox())!.height).toBeLessThan(24);
-    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.setViewportSize({ width: 1360, height: 900 });
     await page
-      .getByRole("button", { name: "All previews", exact: false })
+      .getByRole("button", { name: "Overview", exact: true })
       .click();
-    await page.locator(".overview-table .preview-name").nth(1).click();
+    await page.locator(".overview-table .preview-name").filter({ hasText: "checkout-feature-with-long-address-layout-review" }).click();
     for (const width of [820, 320, 1360]) {
       await page.setViewportSize({ width, height: 900 });
       for (const selector of [".preview-address", ".service-address"]) {
@@ -384,15 +479,15 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     expect(
       await logPanel.evaluate((el) => el.scrollWidth > el.clientWidth),
     ).toBe(true);
-    await page.getByRole("button", { name: "Wrap lines", exact: true }).click();
+    await logOption("Wrap lines", true);
     expect(
       await logPanel.evaluate((el) => el.scrollWidth <= el.clientWidth),
     ).toBe(true);
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
     await page.getByRole("tab", { name: "Logs", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "Wrap lines" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Log options", exact: true }).click();
+    await expect(page.getByRole("menuitemcheckbox", { name: "Wrap lines" })).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
     await expect(page.locator(".logs")).toContainText("[browser] request failed");
     const current = await runtimes[1].get("checkout-feature-with-long-address-layout-review");
     const currentUrl = current.url!;
@@ -411,7 +506,11 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(page.locator(".logs")).toContainText("refresh marker");
     expect(await logPanel.evaluate(el => el.scrollTop)).toBe(scrollTop);
     await page.getByRole("searchbox", { name: "Search logs" }).fill("marker");
-    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    await logOption("Include surrounding lines", true);
+    await expect(page.locator(".logs")).toContainText("before clear 99");
+    await logOption("Include surrounding lines", true);
+    await expect(page.locator(".logs")).not.toContainText("before clear 99");
+    await logOption("Clear view");
     await expect(page.locator(".logs")).not.toContainText("refresh marker");
     await emit("after clear marker 🙂");
     await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
@@ -422,13 +521,29 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.screenshot({ path: "/tmp/previewhost-clear-logs-dark.png" });
     await page.setViewportSize({ width: 320, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await expect(page.getByRole("button", { name: "Clear view", exact: true })).toBeInViewport();
-    await expect(page.getByRole("button", { name: "Show earlier logs", exact: true })).toBeInViewport();
-    await page.getByRole("button", { name: "Clear view", exact: true }).focus();
-    await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Wrap lines", exact: true })).toBeFocused();
+    const attemptBox = (await page.getByRole("combobox", { name: "Diagnostic attempt" }).boundingBox())!;
+    expect(attemptBox.width).toBeGreaterThan(220);
+    await page.getByRole("button", { name: "Log options", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitemcheckbox", { name: "Wrap lines" })).toBeFocused();
+    await expect(page.getByRole("menuitem", { name: "Clear view", exact: true })).toBeInViewport();
+    await expect(page.getByRole("menuitem", { name: "Show earlier logs", exact: true })).toBeInViewport();
+    await page.screenshot({ path: "/tmp/previewhost-log-options-narrow.png", animations: "disabled" });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Log options", exact: true })).toBeFocused();
     await page.screenshot({ path: "/tmp/previewhost-clear-logs-narrow.png" });
     await page.setViewportSize({ width: 1360, height: 900 });
+    // Compare another worktree, then restore this diagnostic view through Back and reload.
+    await page.getByRole("navigation", { name: "Projects", exact: true }).getByRole("button", { name: "first", exact: true }).click();
+    await page.locator('.preview-nav[title$="/first · app"]').click();
+    await page.goBack();
+    await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");
+    await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText("web");
+    await expect(page.locator(".logs")).not.toContainText("refresh marker");
+    await page.reload();
+    await expect(page.getByRole("tab", { name: "Logs", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator(".logs")).toContainText("after clear marker");
+    await expect(page.locator(".logs")).not.toContainText("refresh marker");
     await page.getByRole("combobox", { name: "Log source" }).click();
     await page.getByRole("option", { name: "All output", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("after clear marker");
@@ -440,21 +555,21 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     expect((await runtimes[1].logs(current.name, currentId)).text).toContain("refresh marker");
     const independent = await context.newPage();
     await independent.goto(launch);
-    await independent.locator(".overview-table .preview-name").filter({ hasText: current.name }).click();
+    await independent.locator(".overview-table .preview-name").filter({ hasText: "checkout-feature-with-long-address-layout-review" }).click();
     await independent.getByRole("tab", { name: "Logs", exact: true }).click();
     await expect(independent.locator(".logs")).toContainText("refresh marker");
     await independent.close();
-    await page.getByRole("button", { name: "Show earlier logs", exact: true }).click();
+    await logOption("Show earlier logs");
     await expect(page.locator(".logs")).toContainText("refresh marker");
-    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    await logOption("Clear view");
     await emit("x".repeat(70000) + "retained marker 🙂");
     await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Earlier output omitted" })).toBeVisible();
     await expect(page.locator(".logs")).toContainText("retained marker 🙂");
-    await page.getByRole("button", { name: "Show earlier logs", exact: true }).click();
+    await logOption("Show earlier logs");
     await expect(page.getByRole("status").filter({ hasText: "Earlier output omitted" })).toBeVisible();
     // An agent's replacement must not silently move the currently inspected attempt.
-    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    await logOption("Clear view");
     const failedApi = await runtimes[1].replace(current.name, {
       name: current.name, type: "environment", primary: "web",
       services: {
@@ -474,11 +589,13 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(page.getByRole("combobox", { name: "Diagnostic attempt" })).toContainText(failedApi.candidate!.id.slice(0, 8));
     await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText("api");
     await expect(page.locator(".logs")).toContainText("API startup failed");
-    await page.getByRole("button", { name: "Clear view", exact: true }).click();
+    await logOption("Clear view");
     await expect(page.locator(".logs")).not.toContainText("API startup failed");
     await page.getByRole("combobox", { name: "Diagnostic attempt" }).click();
     await page.getByRole("option", { name: `Serving · ${currentId.slice(0, 8)}` }).click();
-    await expect(page.getByRole("button", { name: "Show earlier logs", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Log options", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Show earlier logs", exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await expect(page.locator(".logs")).toContainText("retained marker");
     expect(
       await page.evaluate(() => (window as any).untrusted),
@@ -486,6 +603,40 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     expect(await page.evaluate(() => (window as any).policyViolations)).toEqual(
       [],
     );
+    expect(errors).toEqual([]);
+    // A canceled dependency chain can be started explicitly through the same workflow.
+    const project = owners[0].connection.projectDirectory;
+    await writeFile(join(project, "index.html"), "onboarding complete");
+    const pipeline: PreviewSpec = {
+      name: "onboarding", type: "environment", primary: "web",
+      services: {
+        prepare: { type: "job", cwd: project, command: [process.execPath, "-e",
+          "const fs=require('fs');const timer=setInterval(()=>{if(fs.existsSync('continue')){clearInterval(timer);console.log('Dependencies ready')}},20)"] },
+        migrate: { type: "job", cwd: project, dependsOn: ["prepare"], command: [process.execPath, "-e", "console.log('Schema ready')"] },
+        web: { type: "static", directory: project, dependsOn: ["migrate"] },
+      },
+    };
+    const preparing = await runtimes[0].start(pipeline);
+    await expect.poll(async () => (await runtimes[0].get(pipeline.name)).candidate?.services?.prepare.state).toBe("starting");
+    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page.locator('.overview-table .preview-name[aria-label$=" · onboarding"]').click();
+    await expect(page.getByRole("row").filter({ hasText: "migrate" }).last()).toContainText("prepare");
+    await page.screenshot({ path: "/tmp/previewhost-progress-dark.png", animations: "disabled" });
+    await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: "/tmp/previewhost-progress-narrow.png", animations: "disabled" });
+    await page.getByRole("button", { name: "Cancel startup", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Start preview", exact: true })).toBeVisible();
+    expect((await runtimes[0].wait(pipeline.name, preparing.candidate!.id)).state).toBe("canceled");
+    await page.screenshot({ path: "/tmp/previewhost-canceled-narrow.png", animations: "disabled" });
+    await writeFile(join(project, "continue"), "ready");
+    await page.getByRole("button", { name: "Start preview", exact: true }).click();
+    await expect(page.getByRole("link", { name: "Open app", exact: true })).toBeVisible();
+    const resumed = await runtimes[0].get(pipeline.name);
+    expect(resumed.active?.id).not.toBe(preparing.candidate!.id);
+    expect(await (await fetch(resumed.url!)).text()).toBe("onboarding complete");
     expect(errors).toEqual([]);
   } finally {
     await dashboard?.close();

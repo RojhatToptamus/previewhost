@@ -3,7 +3,8 @@ import { uiStyle, themeScript, brandMark } from './ui.js';
 // Fixed first-party assets. Request labels are inserted as text by the script.
 export const secretsPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>previewhost · Secrets</title><link rel="stylesheet" href="/secrets.css"><script src="/secrets.js" defer></script></head>
+<meta name="robots" content="noindex, nofollow">
+<title>Private setup · Previewhost</title><link rel="icon" type="image/png" sizes="64x64" href="/favicon.png"><link rel="icon" type="image/svg+xml" sizes="any" href="/previewhost.svg"><link rel="stylesheet" href="/secrets.css"><script src="/secrets.js" defer></script></head>
 <body><header><span class="brand"><span class="brand-icon" aria-hidden="true">${brandMark}</span>previewhost</span><span class="slash">/</span><span id="crumb">Private setup</span><button id="theme" aria-label="Switch to dark theme">Dark</button></header><main><h1 id="title">Private secret setup</h1>
 <p id="message" role="status" aria-live="polite">Loading this request…</p>
 <dl id="context"></dl><form id="form" hidden autocomplete="off"><div id="fields"></div>

@@ -344,6 +344,9 @@ from the URL immediately. The dashboard keeps it in per-tab `sessionStorage` to 
 Browser session restore can preserve this storage. Tab closure is not a guaranteed
 revocation boundary. Stopping the dashboard process ends the capability's authority.
 If browser storage is unavailable, the fresh launch works only in page memory.
+Browser history stores the selected owner and preview name. Per-tab session storage
+also keeps diagnostic selections, search text, and the Clear view cursor. It stores
+no log output, configuration, secret values, or owner approvals.
 
 The React dashboard loads only bundled scripts and fonts. Its CSP permits the inline
 presentation styles used by Radix and Sonner, but does not permit inline scripts,
