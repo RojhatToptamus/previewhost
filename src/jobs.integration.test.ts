@@ -180,7 +180,7 @@ async function databaseFixture(t: test.TestContext, authorize: RuntimeOptions['a
   return { directory, spec, keys, options, get runtime() { return runtime; }, async reconnect() { await runtime.close(); runtime = await createPreviewRuntime(options); } };
 }
 
-test('real PostgreSQL jobs: startup, retained seeds, replacement, explicit rerun, owner restart and reset', database, async t => {
+test('real PostgreSQL jobs: startup, retained seeds, replacement, explicit rerun and owner restart', database, async t => {
   const f = await databaseFixture(t);
   let ready = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(ready.state, 'ready', JSON.stringify(ready));
   assert.equal((await rows(ready.url!)).length, 1);
@@ -201,12 +201,9 @@ test('real PostgreSQL jobs: startup, retained seeds, replacement, explicit rerun
   await f.reconnect();
   ready = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(ready.state, 'ready', JSON.stringify(ready));
   assert.equal(ready.services?.seed.state, 'skipped'); assert.equal((await rows(ready.url!)).length, 3);
-  await f.runtime.stop(f.spec.name); await f.runtime.deleteData(f.spec.name);
-  ready = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(ready.state, 'ready', JSON.stringify(ready));
-  assert.equal(ready.services?.seed.state, 'succeeded'); assert.equal((await rows(ready.url!)).length, 1);
 });
 
-test('failed and canceled seeds retain partial writes and block implicit retries across owner restart', database, async t => {
+test('failed seeds retain partial writes and block implicit retries across owner restart', database, async t => {
   const f = await databaseFixture(t);
   await writeFile(join(f.directory, 'mode'), 'fail');
   let failed = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(failed.state, 'failed', JSON.stringify(failed));
@@ -214,9 +211,16 @@ test('failed and canceled seeds retain partial writes and block implicit retries
   await writeFile(join(f.directory, 'mode'), ''); await f.reconnect();
   failed = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(failed.state, 'failed');
   assert.match(failed.services!.seed.error!.message, /explicitly rerun/);
-  let ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, failed.id, 'seed'), t.signal);
+  const ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, failed.id, 'seed'), t.signal);
   assert.equal(ready.state, 'ready', JSON.stringify(ready));
   assert.equal(((await (await fetch(ready.url!)).json()) as unknown[]).length, 2, 'partial seed was not rolled back');
+});
+
+test('canceling a previously successful seed blocks implicit retries across owner restart', database, async t => {
+  const f = await databaseFixture(t);
+  const initial = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal);
+  assert.equal(initial.state, 'ready', JSON.stringify(initial));
+  assert.equal((await rows(initial.url!)).length, 1);
   const stopped = await f.runtime.stop(f.spec.name);
   await writeFile(join(f.directory, 'mode'), 'wait');
   const starting = await f.runtime.rerunJob(f.spec.name, stopped.latest!.id, 'seed');
@@ -227,11 +231,11 @@ test('failed and canceled seeds retain partial writes and block implicit retries
   assert.equal(blockedRetry.state, 'failed');
   assert.match(blockedRetry.services!.seed.error!.message, /explicitly rerun/);
   await f.reconnect();
-  failed = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(failed.state, 'failed');
+  const failed = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(failed.state, 'failed');
   assert.match(failed.services!.seed.error!.message, /explicitly rerun/);
-  ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, failed.id, 'seed'), t.signal);
+  const ready = await outcome(f.runtime, await f.runtime.rerunJob(f.spec.name, failed.id, 'seed'), t.signal);
   assert.equal(ready.state, 'ready', JSON.stringify(ready));
-  assert.equal(((await (await fetch(ready.url!)).json()) as unknown[]).length, 4, 'failed and canceled writes both remain');
+  assert.equal((await rows(ready.url!)).length, 3, 'canceled writes remain alongside the original and explicitly rerun seeds');
 });
 
 test('a script reporting success cannot mask a database-querying readiness failure', database, async t => {
@@ -353,10 +357,15 @@ test('dashboard reset enforces authorization, stale and concurrent guards, and e
     return true;
   });
   try {
-    let ready = await outcome(f.runtime, await f.runtime.start(f.spec), t.signal); assert.equal(ready.state, 'ready', JSON.stringify(ready));
+    const starts = await Promise.allSettled([f.spec, { ...f.spec, name: 'other-data' }].map(async spec =>
+      outcome(f.runtime, await f.runtime.start(spec), t.signal)));
+    const [first, other] = starts.map(result => {
+      if (result.status === 'rejected') throw result.reason;
+      assert.equal(result.value.state, 'ready', JSON.stringify(result.value));
+      return result.value;
+    });
+    let ready = first;
     assert.equal((await rows(ready.url!, 'POST')).length, 2);
-    const other = await outcome(f.runtime, await f.runtime.start({ ...f.spec, name: 'other-data' }), t.signal);
-    assert.equal(other.state, 'ready', JSON.stringify(other));
     assert.equal((await rows(other.url!, 'POST')).length, 2);
     // Missing confirmation and stale attempts cannot stop the running preview.
     assert.equal((await post({ action: 'resetData', owner: id, name: f.spec.name })).error?.code, 'INVALID_INPUT');
@@ -391,7 +400,7 @@ test('dashboard reset enforces authorization, stale and concurrent guards, and e
 });
 
 
-test('dashboard reset requires explicit recovery after deletion, startup and cancellation failures', database, async t => {
+test('dashboard reset requires explicit recovery after deletion and startup failures', database, async t => {
   let lockDeletion = true; let deletionRequests = 0;
   const { f, id, post, resetRequest } = await dashboardFixture(t, async request => {
     if (request.operation === 'delete-data') {
@@ -429,20 +438,26 @@ test('dashboard reset requires explicit recovery after deletion, startup and can
     assert.equal((await rows(restarted.url!)).length, 1);
     assert.equal(deletionRequests, 2, 'startup recovery does not delete again');
     assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
-    // Canceling a partially written seed still permits an explicitly confirmed reset.
-    const canceledBase = await f.runtime.stop(f.spec.name);
-    await writeFile(join(f.directory, 'mode'), 'wait');
-    const pending = await f.runtime.rerunJob(f.spec.name, canceledBase.latest!.id, 'seed');
-    await seedWaiting(f, pending, t.signal);
-    await f.runtime.cancel(f.spec.name, pending.candidate!.id);
-    const previousDeletes = deletionRequests;
-    await writeFile(join(f.directory, 'mode'), '');
-    const reset = await post(await resetRequest());
-    assert.equal(reset.error, undefined);
-    const clean = await outcome(f.runtime, reset.result, t.signal);
-    assert.equal(clean.state, 'ready', JSON.stringify(clean));
-    assert.equal(deletionRequests, previousDeletes + 1);
-    assert.equal((await rows(clean.url!)).length, 1);
-    assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
   } finally { await f.keys.control('unlock'); }
+});
+
+test('dashboard reset clears a canceled partial seed only after explicit confirmation', database, async t => {
+  let deletionRequests = 0;
+  const { f, post, resetRequest } = await dashboardFixture(t, request => {
+    if (request.operation === 'delete-data') deletionRequests++;
+    return true;
+  });
+  await writeFile(join(f.directory, 'mode'), 'wait');
+  const pending = await f.runtime.start(f.spec);
+  await seedWaiting(f, pending, t.signal);
+  await f.runtime.cancel(f.spec.name, pending.candidate!.id);
+  assert.equal(deletionRequests, 0);
+  await writeFile(join(f.directory, 'mode'), '');
+  const reset = await post(await resetRequest());
+  assert.equal(reset.error, undefined);
+  const clean = await outcome(f.runtime, reset.result, t.signal);
+  assert.equal(clean.state, 'ready', JSON.stringify(clean));
+  assert.equal(deletionRequests, 1);
+  assert.deepEqual(await rows(clean.url!), [{ id: 1, label: 'demo' }]);
+  assert.equal(await f.keys.store.get('user', 'disposable/jobs-seed'), 'fake-job-secret-value');
 });
