@@ -228,3 +228,50 @@
   .landing-button, .landing-command, .demo-window { border-color: ButtonText; }
   .landing-tabs button[aria-selected="true"] { border-bottom-color: Highlight; }
 }
+
+.landing-workflow-detail { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--lp-line); border-radius: 8px; overflow: hidden; margin-top: 36px; }
+.landing-config-example { padding: 30px 32px; background: var(--lp-surface); }
+.landing-config-example pre { font-size: 12px; line-height: 1.9; margin: 32px 0 26px; overflow-x: auto; color: var(--lp-ink); }
+.landing-config-example > p { font-size: 13px; color: var(--lp-muted); margin-bottom: 14px; max-width: 340px; }
+.landing-config-example > a { font-size: 13px; }
+.landing-dependencies { padding: 30px 32px 24px; border-left: 1px solid var(--lp-line); }
+.landing-diagram-label { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--lp-muted); }
+.landing-dependency-grid { display: grid; position: relative; grid-template-columns: 1fr 1fr; grid-template-rows: 56px 26px 56px 26px 56px 26px 56px 26px 56px; column-gap: 48px; margin-top: 24px; }
+.dependency-node { display: flex; position: relative; z-index: 1; align-items: center; justify-content: center; gap: 12px; border: 1px solid var(--lp-line); border-radius: 5px; background: var(--lp-bg); }
+.dependency-node svg { width: 18px; height: 18px; color: var(--lp-muted); }
+.dependency-node strong { display: block; font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
+.dependency-node span { display: block; font-size: 11px; color: var(--lp-muted); line-height: 1.5; }
+.dependency-db { grid-area: 1 / 1; }
+.dependency-cache { grid-area: 1 / 2; }
+.dependency-migrate { grid-area: 3 / 1; }
+.dependency-api { grid-area: 5 / 1 / 6 / 3; width: 180px; justify-self: center; }
+.dependency-reporting { grid-area: 7 / 1 / 8 / 3; width: 180px; justify-self: center; }
+.dependency-frontend { grid-area: 9 / 1 / 10 / 3; width: 180px; justify-self: center; border-color: var(--lp-accent); }
+.dependency-frontend span { color: var(--lp-accent); }
+.dependency-down { display: flex; align-items: center; justify-content: center; color: var(--lp-muted); }
+.dependency-down svg { width: 15px; height: 24px; stroke-width: 1.3; }
+.dependency-db-arrow { grid-area: 2 / 1; }
+.dependency-api-arrow { grid-area: 6 / 1 / 7 / 3; }
+.dependency-reporting-arrow { grid-area: 8 / 1 / 9 / 3; }
+.dependency-join { grid-area: 2 / 1 / 5 / 3; position: relative; width: calc(50% + 24px); justify-self: center; margin-bottom: 12px; border-right: 1px solid var(--lp-muted); border-bottom: 1px solid var(--lp-muted); border-radius: 0 0 10px 10px; }
+.dependency-join::before { content: ""; position: absolute; bottom: 0; left: 0; height: 14px; border-left: 1px solid var(--lp-muted); }
+.dependency-join::after { content: ""; position: absolute; bottom: -12px; height: 12px; left: 50%; border-left: 1px solid var(--lp-muted); }
+@media (max-width: 1000px) {
+  .landing-config-example, .landing-dependencies { padding: 24px; }
+  .landing-dependency-grid { column-gap: 24px; }
+  .dependency-join { width: calc(50% + 12px); }
+}
+@media (max-width: 760px) {
+  .landing-workflow-detail { grid-template-columns: 1fr; }
+  .landing-dependencies { border-left: 0; border-top: 1px solid var(--lp-line); }
+  .landing-dependency-grid { max-width: 440px; margin-inline: auto; }
+}
+@media (max-width: 600px) {
+  .landing-config-example, .landing-dependencies { padding: 24px 18px; }
+  .landing-config-example pre { font-size: 10px; margin-block: 24px; }
+  .landing-config-example > p, .landing-config-example > a { font-size: 12px; }
+  .dependency-node { gap: 8px; }
+  .dependency-node svg { width: 16px; }
+  .dependency-node strong { font-size: 11px; }
+  .dependency-node span { font-size: 10px; }
+}

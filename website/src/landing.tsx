@@ -1,4 +1,4 @@
-import { ArrowRight, ArrowUpRight, Check, Copy, Menu, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUpRight, Check, Copy, Database, Layers, Menu, Terminal, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import brandSvg from "../../assets/previewhost.svg?raw";
 import { copyText } from "./clipboard";
@@ -36,15 +36,42 @@ function CopyCommand({ command, label }: { command: string; label: string }) {
   }}>{status === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}<span>{status === "copied" ? "Copied" : "Copy"}</span></button></div><span className={status === "error" ? "landing-copy-error" : "landing-sr-only"} role="status">{status === "copied" ? "Command copied." : status === "error" ? "Copy failed. Select the command and copy it manually." : ""}</span></div>;
 }
 
+function DependencyDiagram() {
+  return <div className="landing-dependencies" role="img" aria-label="Example startup dependencies: PostgreSQL before migrate; migrate and Redis before API; API before reporting; API and reporting before frontend. The frontend receives the preview URL.">
+    <span className="landing-diagram-label">Startup order</span>
+    <div className="landing-dependency-grid" aria-hidden="true">
+      <div className="dependency-node dependency-db"><Database /><div><strong>database</strong><span>PostgreSQL</span></div></div>
+      <div className="dependency-node dependency-cache"><Layers /><div><strong>cache</strong><span>Redis</span></div></div>
+      <div className="dependency-down dependency-db-arrow"><ArrowDown /></div>
+      <div className="dependency-node dependency-migrate"><Terminal /><div><strong>migrate</strong><span>Setup job</span></div></div>
+      <div className="dependency-join" />
+      <div className="dependency-node dependency-api"><Terminal /><div><strong>api</strong><span>HTTP service</span></div></div>
+      <div className="dependency-down dependency-api-arrow"><ArrowDown /></div>
+      <div className="dependency-node dependency-reporting"><Terminal /><div><strong>reporting</strong><span>HTTP service</span></div></div>
+      <div className="dependency-down dependency-reporting-arrow"><ArrowDown /></div>
+      <div className="dependency-node dependency-frontend"><Terminal /><div><strong>frontend</strong><span>Local preview URL</span></div></div>
+    </div>
+  </div>;
+}
+
 function Capabilities() {
   return <section id="how-it-works" className="landing-section landing-width" aria-labelledby="workflow-heading">
-    <div className="landing-section-intro"><p className="landing-section-label">Local development, coordinated</p><h2 id="workflow-heading">Separate stacks.<br />Connected services.</h2><p>Keep one version running while you work on another. Start each preview from existing source with its own configured services.</p></div>
-    <div className="landing-benefits">
-      <article><span>01</span><h3>Run worktrees side by side</h3><p>Each worktree gets separate ports and managed PostgreSQL and Redis data. Replacing a running preview keeps its URL.</p><TextLink href={pageHref("worktrees")}>Worktree isolation</TextLink></article>
-      <article><span>02</span><h3>Connect different repositories</h3><p>Point the frontend and APIs at their existing source directories. Service bindings supply URLs and wait for dependencies before startup.</p><TextLink href={`${github}/tree/main/examples/multi-repo`}>Multi-repository example</TextLink></article>
-      <article><span>03</span><h3>Find the service or job that failed</h3><p>Search captured process output by source and attempt. Inspect migration failures separately from the app that is still serving.</p><TextLink href={pageHref("dashboard", "read-logs")}>Service and job logs</TextLink></article>
+    <div className="landing-section-intro"><h2 id="workflow-heading">Start services in dependency order.</h2><p>One configuration connects frontends, APIs, setup jobs, and local databases—even when the source spans repositories.</p></div>
+    <div className="landing-workflow-detail">
+      <div className="landing-config-example">
+        <div className="landing-code-heading"><span>preview.yaml</span><span>API excerpt</span></div>
+        <pre tabIndex={0} aria-label="API startup configuration"><code>{'api:\n  type: command\n  cwd: ./api\n  command: [node, server.mjs]\n  readyPath: /ready\n  dependsOn: [migrate]\n  env:\n    DATABASE_URL: {service: database}\n    REDIS_URL: {service: cache}'}</code></pre>
+        <p>The API starts after its migration and databases are ready.</p>
+        <TextLink href={`${github}/tree/main/examples/multi-repo`}>See the complete configuration</TextLink>
+      </div>
+      <DependencyDiagram />
     </div>
-    <p className="landing-limit">Isolation applies to managed data and assigned ports. External databases can still share data; native commands run with your user permissions.</p>
+    <div className="landing-benefits">
+      <article><span>01</span><h3>Run worktrees side by side</h3><p>Each worktree gets separate ports and managed PostgreSQL and Redis data. Replacing a running preview keeps its URL. External databases can still share data.</p><TextLink href={pageHref("worktrees")}>Worktree isolation</TextLink></article>
+      <article><span>02</span><h3>Connect different repositories</h3><p>Point the frontend and APIs at their existing source directories. Service bindings supply URLs and wait for dependencies before startup.</p><TextLink href={`${github}/tree/main/examples/multi-repo`}>Multi-repository example</TextLink></article>
+      <article><span>03</span><h3>Find the service or job that failed</h3><p>Search frontend, API, and job output by source and attempt. Inspect a failed migration while the previous app keeps serving.</p><TextLink href={pageHref("dashboard", "read-logs")}>Service and job logs</TextLink></article>
+    </div>
+    <p className="landing-limit">Logs capture command and job output. Browser-console messages appear only when your framework forwards them to a captured process.</p>
   </section>;
 }
 
