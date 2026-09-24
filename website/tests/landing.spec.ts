@@ -1,6 +1,101 @@
 import { expect, test } from '@playwright/test';
 
-test('landing page links, dashboard tour, setup, copying and themes', async ({ page, context }) => {
+test('interactive example exposes views, filters and keyboard navigation', async ({ page }) => {
+  await page.goto('/');
+  const views = page.getByRole('tablist', { name: 'Example product views' });
+  await views.getByRole('tab', { name: 'Activity', exact: true }).press('ArrowRight');
+  await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();
+  await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toHaveCSS('outline-style', 'solid');
+  await expect(page.locator('.demo-log-line')).toHaveCount(4);
+  await page.getByLabel('Log source', { exact: true }).selectOption('api');
+  await expect(page.locator('.demo-log-line')).toHaveCount(1);
+  await expect(page.locator('.demo-log-output')).toContainText('api v1: ready for HTTP requests.');
+  await page.getByRole('searchbox', { name: 'Search example logs' }).fill('missing line');
+  await expect(page.locator('.demo-log-output')).toHaveText('No output matches these filters.');
+  await page.getByRole('searchbox', { name: 'Search example logs' }).fill('');
+  await views.getByRole('tab', { name: 'Logs', exact: true }).press('End');
+  await expect(views.getByRole('tab', { name: 'Configuration', exact: true })).toBeFocused();
+  await expect(page.getByLabel('Shared notes configuration')).toContainText('REPORTING_URL: { service: reporting }');
+  await page.locator('.demo-panel').evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await views.getByRole('tab', { name: 'Configuration', exact: true }).press('Home');
+  await expect.poll(() => page.locator('.demo-panel').evaluate(element => element.scrollTop)).toBe(0);
+  await page.getByRole('button', { name: 'View reporting logs', exact: true }).click();
+  await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();
+  await expect(page.getByLabel('Log source', { exact: true })).toHaveValue('reporting');
+  await expect(page.locator('.demo-log-output')).toContainText('reporting v1: ready for HTTP requests.');
+  await page.getByRole('button', { name: 'All previews', exact: false }).click();
+  await expect(page.locator('.demo-overview h2')).toHaveText('All previews');
+  await page.locator('.demo-overview button').click();
+  await expect(page.locator('.demo-identity h2')).toHaveText('shared-notes');
+  await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();
+});
+
+test('startup follows dependencies and a failed update preserves the serving app', async ({ page }) => {
+  const writes: string[] = [];
+  page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()); });
+  await page.goto('/');
+  const address = await page.locator('.demo-address').innerText();
+  await page.getByRole('button', { name: 'Open app', exact: true }).click();
+  const app = page.getByRole('dialog', { name: 'Shared notes', exact: true });
+  await expect(app).toContainText('No notes yet. Add the first one.');
+  await app.getByLabel('Add a note', { exact: true }).fill('A note to keep across updates');
+  await app.getByRole('button', { name: 'Save note' }).click();
+  await expect(app.getByRole('status')).toHaveText('Saved in this example.');
+  await expect(app.getByRole('region', { name: 'Shared data check' })).toContainText('A note to keep across updates');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Open app', exact: true })).toBeFocused();
+
+  await page.clock.install();
+  await page.getByRole('button', { name: 'Play startup', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Open app', exact: true })).toBeDisabled();
+  const row = (name: string) => page.locator('.demo-services tbody tr').filter({ has: page.getByRole('rowheader', { name, exact: true }) });
+  await expect(row('database')).toContainText('Starting');
+  await expect(row('api')).toContainText('Waiting');
+  await page.clock.runFor(700);
+  await expect(row('database')).toContainText('Ready');
+  await expect(page.locator('.demo-job')).toContainText('Running');
+  await page.clock.runFor(700);
+  await expect(row('api')).toContainText('Starting');
+  await expect(row('reporting')).toContainText('Waiting');
+  await page.clock.runFor(700);
+  await expect(row('api')).toContainText('Ready');
+  await expect(row('reporting')).toContainText('Starting');
+  await page.clock.runFor(700);
+  await expect(row('frontend')).toContainText('Starting');
+  await page.clock.runFor(700);
+  await expect(page.getByRole('button', { name: 'Open app', exact: true })).toBeEnabled();
+  await expect(page.locator('.demo-services [data-tone="success"]')).toHaveCount(5);
+  await expect(page.locator('.demo-job')).toContainText('Succeeded');
+
+  await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
+  await page.locator('.demo-panel').evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await page.getByRole('button', { name: 'Try a failed update', exact: true }).click();
+  await expect.poll(() => page.locator('.demo-panel').evaluate(element => element.scrollTop)).toBe(0);
+  await expect(page.locator('.demo-identity')).toContainText('Update failed');
+  await expect(page.locator('.demo-attempts')).toContainText('Latest update');
+  await expect(page.locator('.demo-attempts')).toContainText('Source edits and database writes are not rolled back.');
+  await expect(page.locator('.demo-address')).toHaveText(address);
+  await expect(page.locator('.demo-services [data-tone="success"]')).toHaveCount(5);
+  await expect(page.locator('.demo-job')).toContainText('Latest update');
+  await expect(page.locator('.demo-job')).toContainText('Failed');
+  await page.locator('.demo-attempts').getByRole('button', { name: 'View failed migration logs', exact: true }).click();
+  await expect(page.locator('.demo-log-output')).toContainText('Migration failed. Inspect the local database before retrying.');
+  await page.getByLabel('Log attempt', { exact: true }).selectOption('serving');
+  await expect(page.locator('.demo-log-output')).toContainText('Notes schema ready.');
+  await page.getByRole('tab', { name: 'Activity', exact: true }).click();
+  await page.getByRole('button', { name: 'View api logs', exact: true }).click();
+  await expect(page.getByLabel('Log attempt', { exact: true })).toHaveValue('serving');
+  await expect(page.locator('.demo-log-output')).toContainText('api v1: ready for HTTP requests.');
+  await page.getByRole('button', { name: 'Open app', exact: true }).click();
+  await expect(app.getByRole('region', { name: 'Recent notes' })).toContainText('A note to keep across updates');
+  await app.getByRole('button', { name: 'Close example app' }).click();
+  await page.getByRole('button', { name: 'Show ready state', exact: true }).click();
+  await expect(page.locator('.demo-attempts')).toHaveCount(0);
+  await expect(page.locator('.demo-identity')).toContainText('Ready');
+  expect(writes).toEqual([]);
+});
+
+test('landing page links, setup, copying and themes', async ({ page, context }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -9,20 +104,10 @@ test('landing page links, dashboard tour, setup, copying and themes', async ({ p
   await expect(page).toHaveTitle('Previewhost — Your whole app. One local preview.');
   await expect(page.locator('h1')).toHaveText('Your whole app.One local preview.');
   await expect(page.locator('vite-error-overlay')).toHaveCount(0);
-  const tour = page.getByRole('tablist', { name: 'Dashboard screenshots' });
-  await tour.getByRole('tab', { name: 'Logs', exact: true }).click();
-  await expect(page.locator('#dashboard-tour-panel img:visible')).toHaveAttribute('src', '/landing/logs-light.png');
-  await tour.getByRole('tab', { name: 'Logs', exact: true }).press('ArrowRight');
-  await expect(tour.getByRole('tab', { name: 'Configuration' })).toBeFocused();
-  await expect(page.locator('#dashboard-tour-panel')).toHaveAttribute('aria-labelledby', 'dashboard-tour-configuration');
-  await tour.getByRole('tab', { name: 'Configuration' }).press('Home');
-  await expect(tour.getByRole('tab', { name: 'Services' })).toBeFocused();
-  await expect(tour.getByRole('tab', { name: 'Services' })).toHaveCSS('outline-style', 'solid');
-
+  await expect(page.locator('.landing img')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Interactive Previewhost example' })).toBeVisible();
   await page.getByRole('button', { name: 'Toggle color theme' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-site-theme', 'dark');
-  await expect(page.locator('#dashboard-tour-panel img:visible')).toHaveAttribute('src', '/landing/activity-dark.png');
-  await expect(page.locator('.landing-tour').getByRole('link', { name: 'View full size (opens a new tab)', exact: true })).toHaveAttribute('href', '/landing/activity-dark.png');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-site-theme', 'dark');
   await page.getByRole('button', { name: 'Toggle color theme' }).click();
@@ -53,17 +138,27 @@ test('landing page links, dashboard tour, setup, copying and themes', async ({ p
   expect(errors).toEqual([]);
 });
 
-test('mobile navigation, responsive media and reduced motion', async ({ page }) => {
+test('mobile navigation, responsive demo and reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `overflow at ${width}`).toBe(true);
     await expect(page.locator('.landing-hero-copy')).toHaveCSS('animation-name', 'none');
-    const screenshot = page.locator('#dashboard-tour-panel img:visible');
-    await expect(screenshot).toBeVisible();
-    await screenshot.evaluate((image: HTMLImageElement) => image.decode());
-    expect(await screenshot.evaluate((image: HTMLImageElement) => image.currentSrc)).toContain(width <= 600 ? 'activity-mobile-light.png' : 'activity-light.png');
+    const demo = page.locator('.demo-window');
+    await expect(demo).toBeVisible();
+    const initialHeight = (await demo.boundingBox())!.height;
+    await page.getByRole('tab', { name: 'Logs', exact: true }).click();
+    await expect(page.locator('.demo-log-output')).toContainText('Notes schema ready.');
+    expect((await demo.boundingBox())!.height).toBe(initialHeight);
+    await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
+    await expect(page.getByLabel('Shared notes configuration')).toContainText('DATABASE_URL: { service: database }');
+    expect((await demo.boundingBox())!.height).toBe(initialHeight);
+    await page.getByRole('button', { name: 'Open app', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    expect(await page.getByRole('dialog').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Open app', exact: true })).toBeFocused();
   }
   await page.setViewportSize({ width: 390, height: 844 });
   const menu = page.getByRole('button', { name: 'Open menu', exact: true });
@@ -83,10 +178,7 @@ test('copy failure stays useful and page remains readable without JavaScript', a
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('Clipboard denied')) } });
   });
-  await page.route('**/landing/activity*.png', route => route.abort());
   await page.goto('/');
-  await expect(page.getByRole('status').filter({ hasText: 'Screenshot unavailable.' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Read the dashboard guide' })).toHaveAttribute('href', '/dashboard/');
   await page.getByRole('button', { name: 'Copy install command' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Copy failed.' })).toHaveText('Copy failed. Select the command and copy it manually.');
   await expect(page.locator('.landing-command code').first()).toHaveText('npm install -g previewhost');
@@ -94,6 +186,8 @@ test('copy failure stays useful and page remains readable without JavaScript', a
   const staticPage = await context.newPage();
   await staticPage.goto('http://127.0.0.1:4173/');
   await expect(staticPage.locator('h1')).toContainText('Your whole app.');
+  await expect(staticPage.locator('.demo-noscript')).toContainText('Enable JavaScript');
+  await expect(staticPage.getByRole('button', { name: 'Open app', exact: true })).toBeHidden();
   await staticPage.getByRole('link', { name: 'Get started', exact: true }).last().click();
   await expect(staticPage.locator('#start-heading')).toBeInViewport();
   await staticPage.getByRole('link', { name: 'Follow the CLI quickstart' }).click();

@@ -4,12 +4,13 @@ import brandSvg from "../../assets/previewhost.svg?raw";
 import { copyText } from "./clipboard";
 import { pageHref } from "./pages";
 import { SiteThemeToggle, useSiteTheme } from "./siteTheme";
+import { LandingTabs } from "./landing-tabs";
+import { ProductDemo } from "./product-demo";
 import "./landing.css";
 
 const github = "https://github.com/RojhatToptamus/previewhost";
 const example = `${github}/tree/main/examples/multi-repo`;
 const brandMark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
-const asset = (name: string) => `${import.meta.env.BASE_URL}landing/${name}`;
 
 function Brand() {
   return <a className="landing-brand" href={import.meta.env.BASE_URL} aria-label="Previewhost home">
@@ -20,74 +21,6 @@ function Brand() {
 
 function TextLink({ href, children, className = "" }: { href: string; children: ReactNode; className?: string }) {
   return <a className={`landing-text-link ${className}`} href={href}>{children}<ArrowRight aria-hidden="true" /></a>;
-}
-
-function Tabs<T extends string>({ id, label, items, selected, onSelect }: {
-  id: string; label: string; items: readonly { id: T; label: string }[]; selected: T; onSelect: (id: T) => void;
-}) {
-  return <div className="landing-tabs" role="tablist" aria-label={label} onKeyDown={event => {
-    const current = items.findIndex(item => item.id === selected);
-    const next = event.key === "ArrowRight" ? (current + 1) % items.length
-      : event.key === "ArrowLeft" ? (current + items.length - 1) % items.length
-        : event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : -1;
-    if (next === -1) return;
-    event.preventDefault();
-    onSelect(items[next].id);
-    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
-  }}>
-    {items.map(item => <button key={item.id} type="button" role="tab" id={`${id}-${item.id}`}
-      aria-controls={`${id}-panel`} aria-selected={selected === item.id} tabIndex={selected === item.id ? 0 : -1}
-      onClick={() => onSelect(item.id)}>{item.label}</button>)}
-  </div>;
-}
-
-function ProductImage({ view, alt, eager = false }: { view: string; alt: string; eager?: boolean }) {
-  const [failed, setFailed] = useState({ light: false, dark: false });
-  return <div className="landing-product-image">
-    {(["light", "dark"] as const).map(theme => failed[theme] ? <div className="landing-image-error" key={theme} data-product-theme={theme} role="status">
-      <p>Screenshot unavailable.</p><TextLink href={pageHref("dashboard")}>Read the dashboard guide</TextLink>
-    </div> : <picture key={theme} data-product-theme={theme}>
-      <source media="(max-width: 600px)" srcSet={asset(`${view}-mobile-${theme}.png`)} width="390" height="1120" />
-      <img src={asset(`${view === "update" ? "update-detail" : view}-${theme}.png`)} alt={alt} width={view === "update" ? "948" : "1180"} height={view === "update" ? "361" : "840"}
-        ref={image => {
-          // A prerendered image can fail before React attaches its error handler.
-          if (image?.complete && image.naturalWidth === 0) setFailed(previous => ({ ...previous, [theme]: true }));
-        }}
-        onError={() => setFailed(previous => ({ ...previous, [theme]: true }))}
-        loading={eager ? "eager" : "lazy"} decoding="async" />
-    </picture>)}
-  </div>;
-}
-
-const dashboardViews = [
-  { id: "activity", label: "Services", description: "Frontend, APIs, PostgreSQL, Redis, and a migration in one preview.", alt: "The Previewhost Activity view: frontend, API, reporting, PostgreSQL and Redis are ready; the migration succeeded." },
-  { id: "logs", label: "Logs", description: "Inspect captured output by service, job, or startup attempt.", alt: "The Previewhost Logs view with migration output, search, source and attempt controls." },
-  { id: "configuration", label: "Configuration", description: "Inspect service connections and environment bindings.", alt: "The Previewhost Configuration view showing service definitions and environment bindings." },
-] as const;
-
-function DashboardTour() {
-  const [selected, setSelected] = useState<(typeof dashboardViews)[number]["id"]>("activity");
-  const view = dashboardViews.find(view => view.id === selected)!;
-  return <figure className="landing-tour" aria-label="Previewhost dashboard screenshots">
-    <div className="landing-tour-controls">
-      <span className="landing-tour-label">Dashboard screenshots</span>
-      <Tabs id="dashboard-tour" label="Dashboard screenshots" items={dashboardViews} selected={selected} onSelect={setSelected} />
-      <span className="landing-capture-label">A real local preview</span>
-    </div>
-    <div id="dashboard-tour-panel" role="tabpanel" aria-labelledby={`dashboard-tour-${selected}`} tabIndex={0}>
-      <ProductImage key={selected} view={selected} alt={view.alt} eager />
-    </div>
-    <figcaption><span>{view.description}</span><FullSizeLink view={selected} /></figcaption>
-    <noscript><p>More dashboard captures: <a href={asset("logs-light.png")}>Logs</a> · <a href={asset("configuration-light.png")}>Configuration</a></p></noscript>
-  </figure>;
-}
-
-function FullSizeLink({ view }: { view: string }) {
-  return <span>{(["light", "dark"] as const).map(theme => <span key={theme} data-product-theme={theme}>
-    <a className="landing-image-link" href={asset(`${view}-${theme}.png`)} target="_blank" rel="noreferrer">
-      View full size<span className="landing-sr-only"> (opens a new tab)</span><ArrowUpRight aria-hidden="true" />
-    </a>
-  </span>)}</span>;
 }
 
 function DependencyDiagram() {
@@ -139,13 +72,14 @@ function Iteration() {
           <p className="landing-section-label">02 / Keep iterating</p>
           <h2 id="iteration-heading">Change the code.<br />Keep the URL.</h2>
           <p>Replace a running preview. New requests switch only when the replacement is ready.</p>
-          <div className="landing-behavior"><h3>A failed update keeps the previous preview serving.</h3><p>Source changes and database writes are not rolled back.</p></div>
           <div className="landing-behavior"><h3>Stop the preview. Keep the data.</h3><p>Managed PostgreSQL and Redis data stays for the next start.</p></div>
         </div>
-        <figure className="landing-update-image">
-          <ProductImage view="update" alt="Real failed replacement in Previewhost: the previous attempt is still serving, while the latest migration failed." />
-          <figcaption><span>A failed migration. The previous app still running.</span><FullSizeLink view="update" /></figcaption>
-        </figure>
+        <div className="landing-replacement" aria-label="Replacement outcomes">
+          <div className="landing-replacement-address"><span>LOCAL PREVIEW URL</span><code>shared-notes--frontend.localhost:49837</code></div>
+          <div className="landing-replacement-row"><span className="landing-result landing-result-ready">Ready</span><ArrowRight aria-hidden="true" /><div><h3>New requests use the replacement.</h3><p>The URL stays the same.</p></div></div>
+          <div className="landing-replacement-row"><span className="landing-result landing-result-error">Failed</span><ArrowRight aria-hidden="true" /><div><h3>The previous preview keeps serving.</h3><p>Source changes and database writes are not rolled back.</p></div></div>
+          <TextLink href="#product-demo">Try it in the interactive example</TextLink>
+        </div>
       </div>
       <div className="landing-worktrees">
         <h3>Different worktrees.<br />Separate previews.</h3>
@@ -175,12 +109,12 @@ function CopyCommand({ command, label }: { command: string; label: string }) {
 
 function GetStarted() {
   const [selected, setSelected] = useState<"terminal" | "agent">("terminal");
-  return <section id="get-started" className="landing-start" aria-labelledby="start-heading">
+  return <section id="get-started" className="landing-start site-dark-surface" aria-labelledby="start-heading">
     <div className="landing-width landing-start-grid">
       <div className="landing-start-copy"><h2 id="start-heading">Start with your<br />next change.</h2><p>From your terminal or your coding agent.</p><div className="landing-platforms">Node.js 22.23+ · macOS, Linux, Windows</div><TextLink href={pageHref("installation", "requirements")}>Installation requirements</TextLink></div>
       <div>
         <div className="landing-setup">
-          <Tabs id="setup" label="Setup method" items={[{ id: "terminal", label: "Terminal" }, { id: "agent", label: "Coding agent" }]} selected={selected} onSelect={setSelected} />
+          <LandingTabs id="setup" label="Setup method" items={[{ id: "terminal", label: "Terminal" }, { id: "agent", label: "Coding agent" }]} selected={selected} onSelect={setSelected} />
           <div id="setup-panel" role="tabpanel" aria-labelledby={`setup-${selected}`} tabIndex={0}>
             <ol className="landing-setup-steps">
               <li><span className="landing-step-number">1</span><div><h3>Install Previewhost</h3><CopyCommand label="install command" command="npm install -g previewhost" /></div></li>
@@ -222,7 +156,7 @@ export function LandingPage() {
       <section className="landing-hero" aria-labelledby="hero-heading">
         <div className="landing-width">
           <div className="landing-hero-copy"><h1 id="hero-heading">Your whole app.<br />One local preview.</h1><p>Run your frontend, APIs, and databases together.<br className="landing-desktop-break" /> Separate previews for every worktree. A stable URL as you iterate.</p><div className="landing-hero-actions"><a className="landing-button" href="#get-started">Get started<ArrowRight aria-hidden="true" /></a><TextLink href={pageHref("mcp")}>Connect your agent</TextLink></div><p className="landing-hero-note"><a href={`${github}/blob/main/LICENSE`}>Open source</a><span aria-hidden="true">·</span>Runs on your machine</p></div>
-          <DashboardTour />
+          <ProductDemo />
         </div>
       </section>
       <Workflow />

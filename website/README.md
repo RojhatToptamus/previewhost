@@ -32,11 +32,12 @@ Each page's heading supplies its title. Its first paragraph supplies its descrip
 including search and social metadata. The build also generates Markdown copies and `llms.txt`.
 
 Product screenshots are in `assets/` at the repository root.
-The homepage uses `assets/landing/`: real captures of the shared-notes example,
-including its PostgreSQL and Redis services and a deliberately failed migration.
-Desktop captures use 1180×840; mobile captures use 390×1120, in both themes.
-The failed-update detail is a crop of the real dashboard. Capture only after the
-private launch URL has cleared, and keep credentials out of images.
+The homepage demonstration is rendered in `src/product-demo.tsx` and
+`src/product-demo.css`. Its configuration comes directly from
+`examples/multi-repo/environment.yaml`. The example keeps state in the browser;
+it does not call a Previewhost runtime or start services. Keep its startup order,
+logs, labels, and replacement behavior aligned with the example and dashboard.
+
 To update the shared social image, edit [social-card.mjs](social-card.mjs) and run:
 
 ```sh
