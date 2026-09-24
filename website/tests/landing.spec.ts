@@ -5,80 +5,79 @@ async function choose(page: Page, label: string, option: string) {
   await page.getByRole('option', { name: option, exact: true }).click();
 }
 
-async function selectPreview(page: Page, id: 'notes-main' | 'notes-styleguide' | 'notes-export' | 'docs-main' | 'overview' | 'secrets') {
+async function selectPreview(page: Page, id: 'inventory-main' | 'inventory-stock' | 'booking-main' | 'overview' | 'secrets') {
   if (await page.getByRole('combobox', { name: 'Choose preview', exact: true }).isVisible()) {
-    const labels = { 'notes-main': 'shared-notes / main · shared-notes', 'notes-styleguide': 'shared-notes / main · styleguide', 'notes-export': 'shared-notes / feature/export', 'docs-main': 'docs-site / main', overview: 'Overview', secrets: 'Secret Manager' };
+    const labels = { 'inventory-main': 'inventory / main', 'inventory-stock': 'inventory / feature/stock-alerts', 'booking-main': 'booking / main', overview: 'Overview', secrets: 'Secret Manager' };
     await choose(page, 'Choose preview', labels[id]);
   } else {
-    const names = { 'notes-main': 'shared-notes main · shared-notes Ready', 'notes-styleguide': 'shared-notes main · styleguide Ready', 'notes-export': 'shared-notes feature/export Update failed', 'docs-main': 'docs-site main Ready', overview: 'Overview', secrets: 'Secret Manager' };
+    const names = { 'inventory-main': 'inventory main Ready', 'inventory-stock': 'inventory feature/stock-alerts Ready', 'booking-main': 'booking main Ready', overview: 'Overview', secrets: 'Secret Manager' };
     if (id !== 'overview' && id !== 'secrets') {
-      const group = page.locator('.demo-project-toggle').filter({ hasText: id === 'docs-main' ? 'docs-site' : 'shared-notes' });
+      const group = page.locator('.demo-project-toggle').filter({ hasText: id === 'booking-main' ? 'booking' : 'inventory' });
       if (await group.getAttribute('aria-expanded') === 'false') await group.click();
     }
     await page.getByRole('button', { name: names[id], exact: id !== 'overview' }).click();
   }
 }
 
-test('previews expose separate stacks without app launch or tutorial controls', async ({ page, context }) => {
+test('ready previews expose isolated application stacks without launching local software', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const writes: string[] = [];
   page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()); });
   await page.goto('/');
-  await expect(page.locator('.demo-services tbody tr')).toHaveCount(5);
+  await expect(page.locator('.demo-services tbody tr')).toHaveCount(4);
+  await expect(page.locator('.demo-services')).toContainText('Next.js');
+  await expect(page.locator('.demo-services')).toContainText('FastAPI');
   await expect(page.locator('.demo-job')).toContainText('Succeeded');
-  await expect(page.locator('.demo-address')).toContainText(':49837');
   await expect(page.getByRole('button', { name: /Open app|Play startup|Start demo/ })).toHaveCount(0);
   await expect(page.locator('.product-demo a, .product-demo dialog, .product-demo select:visible')).toHaveCount(0);
-  await expect(page.locator('.demo-project-toggle').filter({ hasText: 'shared-notes' })).toHaveText('shared-notes3');
   await page.getByRole('button', { name: 'Copy hostname URL', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('http://shared-notes--frontend.localhost:49837');
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('http://inventory--frontend.localhost:49837');
   await page.getByRole('button', { name: 'Copy localhost URL', exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('http://127.0.0.1:49837');
-  await selectPreview(page, 'notes-styleguide');
-  await expect(page.locator('.demo-identity')).toContainText('styleguide');
-  await expect(page.locator('.demo-project-path code')).toHaveText('~/code/shared-notes');
-  await expect(page.locator('.demo-localhost code')).toHaveText('127.0.0.1:49838');
-  await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
-  await page.getByText('YAML', { exact: true }).click();
-  await expect(page.getByLabel('styleguide configuration', { exact: true })).toContainText('directory: ./storybook-static');
-  await selectPreview(page, 'notes-export');
-  await expect(page.locator('.demo-identity')).toContainText('feature/export');
+  await selectPreview(page, 'inventory-stock');
+  await expect(page.locator('.demo-identity')).toContainText('feature/stock-alerts');
+  await expect(page.locator('.demo-project-path code')).toHaveText('~/worktrees/inventory-stock-alerts');
   await expect(page.locator('.demo-address')).toContainText(':49902');
-  await expect(page.locator('.demo-attempts')).toContainText('Previous preview still serving.');
-  await expect(page.locator('.demo-services [data-tone="success"]')).toHaveCount(5);
-  await selectPreview(page, 'docs-main');
-  await expect(page.locator('.demo-localhost code')).toHaveText('127.0.0.1:49961');
-  await expect(page.locator('.demo-services')).toHaveCount(0);
+  await expect(page.locator('.demo-services [data-tone="success"]')).toHaveCount(4);
+  await selectPreview(page, 'booking-main');
+  await expect(page.locator('.demo-address')).toContainText('booking--frontend.localhost:49961');
   await page.getByRole('tab', { name: 'Logs', exact: true }).click();
-  await expect(page.locator('.demo-log-output')).toHaveText('No process output.');
+  await expect(page.locator('.demo-log-output')).toContainText('GET /rooms/studio');
+  await expect(page.locator('.demo-log-output')).not.toContainText('SKU-1042');
   await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
   await page.getByText('YAML', { exact: true }).click();
-  await expect(page.getByLabel('docs-site configuration', { exact: true })).toContainText('type: static');
+  await expect(page.getByLabel('booking configuration', { exact: true })).toContainText('name: booking');
+  await expect(page.getByLabel('booking configuration', { exact: true })).toContainText('booking/dev/api-token');
   expect(writes).toEqual([]);
 });
 
-test('demo logs update, pause, filter and remain bounded without changing failed attempts', async ({ page }) => {
+test('log playback pauses, filters each process during updates, and preserves scroll position', async ({ page }) => {
   await page.clock.install();
   await page.goto('/');
   await page.getByRole('tab', { name: 'Logs', exact: true }).click();
   await page.locator('.demo-log-output').scrollIntoViewIfNeeded();
-  await expect(page.locator('.demo-log-line')).toHaveCount(7);
-  await page.clock.runFor(2200);
   await expect(page.locator('.demo-log-line')).toHaveCount(8);
-  await page.getByRole('button', { name: 'Pause demo log playback' }).click();
-  await page.clock.runFor(6600);
-  await expect(page.locator('.demo-log-line')).toHaveCount(8);
-  await page.getByRole('button', { name: 'Resume demo log playback' }).click();
   await page.clock.runFor(2200);
   await expect(page.locator('.demo-log-line')).toHaveCount(9);
+  await expect(page.locator('.demo-log-line').last()).toContainText('POST /stock-movements');
+  await page.getByRole('button', { name: 'Pause demo log playback' }).click();
+  await page.clock.runFor(6600);
+  await expect(page.locator('.demo-log-line')).toHaveCount(9);
+  await page.getByRole('button', { name: 'Resume demo log playback' }).click();
   await page.clock.runFor(2200);
-  await expect(page.locator('.demo-log-line').last()).toContainText('note saved; cache updated');
-  await expect(page.locator('.demo-log-line time').last()).toHaveText('09:41:20');
+  await expect(page.locator('.demo-log-line').last()).toContainText('stock cache invalidated');
+  for (const source of ['frontend', 'api', 'migrate', 'frontend']) {
+    await choose(page, 'Log source', source);
+    await expect(page.getByRole('combobox', { name: 'Log source', exact: true })).toHaveText(source);
+    await page.clock.runFor(2200 * 6);
+    const sources = await page.locator('.demo-log-line > code').allTextContents();
+    expect(sources.length).toBeGreaterThan(0);
+    expect([...new Set(sources)]).toEqual([source]);
+  }
+  await page.getByRole('searchbox', { name: 'Search example logs' }).fill('stock-movements');
+  await expect(page.locator('.demo-log-output')).toHaveText('No matching output.');
   await choose(page, 'Log source', 'api');
-  await expect(page.locator('.demo-log-output')).toContainText('POST /notes 201');
-  await expect(page.locator('.demo-log-output')).not.toContainText('frontend');
-  await page.getByRole('searchbox', { name: 'Search example logs' }).fill('POST');
-  await expect(page.locator('.demo-log-line')).toHaveCount(1);
+  await expect(page.locator('.demo-log-output')).toContainText('POST /stock-movements');
   await page.getByRole('searchbox', { name: 'Search example logs' }).fill('');
   await choose(page, 'Log source', 'All output');
   await page.clock.runFor(2200 * 65);
@@ -86,34 +85,25 @@ test('demo logs update, pause, filter and remain bounded without changing failed
   await page.locator('.demo-log-output').evaluate(element => { element.scrollTop = 0; });
   await page.clock.runFor(2200);
   expect(await page.locator('.demo-log-output').evaluate(element => element.scrollTop)).toBe(0);
-  await selectPreview(page, 'notes-export');
-  await page.getByRole('button', { name: 'Migration logs', exact: true }).click();
-  await page.clock.runFor(6600);
-  await expect(page.locator('.demo-log-line')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Pause demo log playback' })).toHaveCount(0);
 });
 
-test('logs, configuration, overview and reference search have meaningful keyboard behavior', async ({ page }) => {
+test('navigation, source filters and search have clear keyboard focus and useful results', async ({ page }) => {
   await page.goto('/');
-  const docs = page.locator('.demo-project-toggle').filter({ hasText: 'docs-site' });
-  const notes = page.locator('.demo-project-toggle').filter({ hasText: 'shared-notes' });
-  await docs.press('Enter');
-  await expect(docs).toHaveAttribute('aria-expanded', 'true');
-  await expect(notes).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByRole('button', { name: 'docs-site main Ready', exact: true })).toBeVisible();
-  await docs.press('Space');
-  await expect(docs).toHaveAttribute('aria-expanded', 'false');
-  await expect(docs).toBeFocused();
-  await notes.press('Enter');
-  await expect(notes).toHaveAttribute('aria-expanded', 'true');
+  const booking = page.locator('.demo-project-toggle').filter({ hasText: 'booking' });
+  const inventory = page.locator('.demo-project-toggle').filter({ hasText: 'inventory' });
+  await booking.press('Enter');
+  await expect(booking).toHaveAttribute('aria-expanded', 'true');
+  await expect(inventory).toHaveAttribute('aria-expanded', 'false');
+  await booking.press('Space');
+  await expect(booking).toHaveAttribute('aria-expanded', 'false');
+  await expect(booking).toBeFocused();
+  await inventory.press('Enter');
   const views = page.getByRole('tablist', { name: 'Example product views' });
   await views.getByRole('tab', { name: 'Activity', exact: true }).press('ArrowRight');
   await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();
   await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toHaveCSS('outline-style', 'solid');
   await page.getByRole('button', { name: 'Pause demo log playback' }).click();
   await choose(page, 'Log source', 'api');
-  await expect(page.locator('.demo-log-line')).toHaveCount(2);
-  await expect(page.locator('.demo-log-output')).toContainText('api v1: ready for HTTP requests.');
   const sourcePicker = page.getByRole('combobox', { name: 'Log source', exact: true });
   await sourcePicker.press('Enter');
   await expect(page.getByRole('option', { name: 'api', exact: true })).toBeFocused();
@@ -122,49 +112,41 @@ test('logs, configuration, overview and reference search have meaningful keyboar
   await page.keyboard.press('Enter');
   await expect(sourcePicker).toHaveText('migrate');
   await expect(sourcePicker).toBeFocused();
-  await expect(page.locator('.demo-log-output')).toContainText('Notes schema ready.');
-  await choose(page, 'Log source', 'api');
-  await page.getByRole('searchbox', { name: 'Search example logs' }).fill('missing line');
+  await expect(page.locator('.demo-log-output')).toContainText('create products and stock_movements');
+  await sourcePicker.press('Shift+Tab');
+  const search = page.getByRole('searchbox', { name: 'Search example logs' });
+  await expect(search).toBeFocused();
+  await expect(search).toHaveCSS('outline-style', 'none');
+  await expect(page.locator('.demo-search')).toHaveCSS('outline-style', 'solid');
+  await search.fill('missing line');
   await expect(page.locator('.demo-log-output')).toHaveText('No matching output.');
   await views.getByRole('tab', { name: 'Logs', exact: true }).press('End');
   await expect(views.getByRole('tab', { name: 'Configuration', exact: true })).toBeFocused();
-  await expect(page.locator('.demo-binding-table')).toContainText('Browser URL');
+  await expect(page.locator('.demo-binding-table')).toContainText('NEXT_PUBLIC_API_URL');
   await page.getByText('YAML', { exact: true }).click();
-  await expect(page.getByLabel('shared-notes configuration', { exact: true })).toContainText('REPORTING_URL: { service: reporting }');
+  await expect(page.getByLabel('inventory configuration', { exact: true })).toContainText('command: [python, -m, uvicorn');
   await page.locator('.demo-panel').evaluate(element => { element.scrollTop = element.scrollHeight; });
   await views.getByRole('tab', { name: 'Configuration', exact: true }).press('Home');
   await expect.poll(() => page.locator('.demo-panel').evaluate(element => element.scrollTop)).toBe(0);
-  await page.getByRole('button', { name: 'View reporting logs', exact: true }).click();
+  await page.getByRole('button', { name: 'View frontend logs', exact: true }).click();
   await expect(views.getByRole('tab', { name: 'Logs', exact: true })).toBeFocused();
-  await expect(page.getByRole('combobox', { name: 'Log source', exact: true })).toHaveText('reporting');
-  await expect(page.getByRole('searchbox', { name: 'Search example logs' })).toHaveValue('');
-
-  await selectPreview(page, 'notes-export');
-  await page.getByRole('button', { name: 'Migration logs', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Log attempt', exact: true })).toHaveText('Latest update');
-  await expect(page.locator('.demo-log-output')).toContainText('Migration failed.');
-  await choose(page, 'Log attempt', 'Serving');
-  await expect(page.locator('.demo-log-output')).toContainText('Notes schema ready.');
-  await page.getByRole('tab', { name: 'Activity', exact: true }).click();
-  await page.getByRole('button', { name: 'View api logs', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Log attempt', exact: true })).toHaveText('Serving');
-  await expect(page.locator('.demo-log-output')).toContainText('api v1: ready');
-
+  await expect(sourcePicker).toHaveText('frontend');
+  await expect(search).toHaveValue('');
+  await expect(page.locator('.demo-log-output')).toContainText('GET /inventory');
   await selectPreview(page, 'secrets');
   await expect(page.locator('.demo-reference-list li')).toHaveCount(2);
-  await page.getByRole('searchbox', { name: 'Search secret references' }).fill('export');
+  await page.getByRole('searchbox', { name: 'Search secret references' }).fill('booking');
   await expect(page.locator('.demo-reference-list li')).toHaveCount(1);
-  await expect(page.locator('.demo-reference-list')).toContainText('notes/export/api-token');
+  await expect(page.locator('.demo-reference-list')).toContainText('booking/dev/api-token');
   await page.getByRole('searchbox', { name: 'Search secret references' }).fill('missing');
   await expect(page.locator('.demo-empty')).toHaveText('No matching references.');
-  await expect(page.locator('.demo-secret-manager input:not([type="search"])')).toHaveCount(0);
   await selectPreview(page, 'overview');
-  await expect(page.locator('.demo-overview-list button')).toHaveCount(4);
+  await expect(page.locator('.demo-overview-list button')).toHaveCount(3);
   await page.locator('.demo-overview-list button').first().press('Enter');
   await expect(views.getByRole('tab', { name: 'Activity', exact: true })).toBeFocused();
 });
 
-test('demo scrollbars and open dropdowns preserve content positions', async ({ page }) => {
+test('source selection, scrollbars and open dropdowns preserve content positions', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.clock.install();
   for (const width of [1440, 390]) {
@@ -181,13 +163,18 @@ test('demo scrollbars and open dropdowns preserve content positions', async ({ p
     expect(await page.locator('.demo-panel').evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
     expect(await geometry()).toEqual(initial);
     await page.getByRole('tab', { name: 'Logs', exact: true }).click();
-    expect(await geometry()).toEqual(initial);
-    await page.getByRole('combobox', { name: 'Log source', exact: true }).click();
-    await expect(page.getByRole('listbox')).toBeVisible();
-    expect(await geometry()).toEqual(initial);
-    await page.keyboard.press('Escape');
+    const controls = await page.locator('.demo-log-controls').boundingBox();
+    const searchWidth = (await page.locator('.demo-search').boundingBox())!.width;
+    for (const source of ['frontend', 'api', 'migrate', 'All output']) {
+      await page.getByRole('combobox', { name: 'Log source', exact: true }).click();
+      expect(await geometry()).toEqual(initial);
+      await page.getByRole('option', { name: source, exact: true }).click();
+      expect(await geometry()).toEqual(initial);
+      expect(await page.locator('.demo-log-controls').boundingBox()).toEqual(controls);
+      expect((await page.locator('.demo-search').boundingBox())!.width).toBe(searchWidth);
+    }
     const search = page.getByRole('searchbox', { name: 'Search example logs' });
-    await search.fill('Notes schema ready.');
+    await search.fill('Context impl');
     const lineWidth = (await page.locator('.demo-log-line').boundingBox())!.width;
     await search.fill('');
     await page.locator('.demo-log-output').scrollIntoViewIfNeeded();
@@ -252,7 +239,7 @@ test('all demo views and setup interfaces fit desktop and mobile in both themes'
       await expect(page.locator('.product-demo')).toHaveCSS('animation-name', 'none');
       const demo = page.locator('.demo-window');
       const height = (await demo.boundingBox())!.height;
-      for (const preview of ['notes-main', 'notes-styleguide', 'notes-export', 'docs-main'] as const) {
+      for (const preview of ['inventory-main', 'inventory-stock', 'booking-main'] as const) {
         await selectPreview(page, preview);
         for (const name of ['Activity', 'Logs', 'Configuration']) {
           await page.getByRole('tab', { name, exact: true }).click();
@@ -272,7 +259,7 @@ test('all demo views and setup interfaces fit desktop and mobile in both themes'
       await selectPreview(page, 'secrets');
       await expect(page.getByRole('searchbox', { name: 'Search secret references' })).toBeVisible();
       await selectPreview(page, 'overview');
-      await expect(page.locator('.demo-overview-list button')).toHaveCount(4);
+      await expect(page.locator('.demo-overview-list button')).toHaveCount(3);
       for (const name of ['CLI', 'Codex', 'Claude Code', 'Cursor']) {
         await page.getByRole('tab', { name, exact: true }).click();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${theme} ${width} setup ${name}`).toBe(true);

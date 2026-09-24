@@ -37,19 +37,36 @@ function CopyCommand({ command, label }: { command: string; label: string }) {
 }
 
 function DependencyDiagram() {
-  return <div className="landing-dependencies" role="img" aria-label="Example startup dependencies: PostgreSQL before migrate; migrate and Redis before API; API before reporting; API and reporting before frontend. The frontend receives the preview URL.">
+  const diagram = useRef<HTMLDivElement>(null);
+  const [hasEntered, setHasEntered] = useState(false);
+  useEffect(() => {
+    if (!diagram.current || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        setHasEntered(true);
+        observer.disconnect();
+      }
+    }, { threshold: .25 });
+    observer.observe(diagram.current);
+    return () => observer.disconnect();
+  }, []);
+  const connections = [
+    { name: "database", path: "M110 56V82" },
+    { name: "cache", path: "M330 56V142Q330 152 320 152H230Q220 152 220 162V164" },
+    { name: "migration", path: "M110 138V142Q110 152 120 152H210Q220 152 220 162V164" },
+    { name: "frontend", path: "M220 220V246" },
+  ];
+  return <div ref={diagram} className="landing-dependencies" data-entered={hasEntered} role="img" aria-label="Example startup dependencies: PostgreSQL before migrate; migrate and Redis before the FastAPI API; the API before the Next.js frontend. The frontend receives the preview URL.">
     <span className="landing-diagram-label">Startup order</span>
     <div className="landing-dependency-grid" aria-hidden="true">
+      <svg className="dependency-connections" viewBox="0 0 440 302" preserveAspectRatio="none" aria-hidden="true">{connections.map(connection => <g key={connection.name} data-connection={connection.name}><path d={connection.path} className="dependency-path" /><path d={connection.path} className="dependency-signal" pathLength="1" /></g>)}</svg>
       <div className="dependency-node dependency-db"><Database /><div><strong>database</strong><span>PostgreSQL</span></div></div>
       <div className="dependency-node dependency-cache"><Layers /><div><strong>cache</strong><span>Redis</span></div></div>
       <div className="dependency-down dependency-db-arrow"><ArrowDown /></div>
       <div className="dependency-node dependency-migrate"><Terminal /><div><strong>migrate</strong><span>Setup job</span></div></div>
-      <div className="dependency-join" />
-      <div className="dependency-node dependency-api"><Terminal /><div><strong>api</strong><span>HTTP service</span></div></div>
+      <div className="dependency-node dependency-api"><Terminal /><div><strong>api</strong><span>FastAPI</span></div></div>
       <div className="dependency-down dependency-api-arrow"><ArrowDown /></div>
-      <div className="dependency-node dependency-reporting"><Terminal /><div><strong>reporting</strong><span>HTTP service</span></div></div>
-      <div className="dependency-down dependency-reporting-arrow"><ArrowDown /></div>
-      <div className="dependency-node dependency-frontend"><Terminal /><div><strong>frontend</strong><span>Local preview URL</span></div></div>
+      <div className="dependency-node dependency-frontend"><Terminal /><div><strong>frontend</strong><span>Next.js · local preview URL</span></div></div>
     </div>
   </div>;
 }
@@ -60,9 +77,9 @@ function Capabilities() {
     <div className="landing-workflow-detail">
       <div className="landing-config-example">
         <div className="landing-code-heading"><span>preview.yaml</span><span>API excerpt</span></div>
-        <pre tabIndex={0} aria-label="API startup configuration"><code>{'api:\n  type: command\n  cwd: ./api\n  command: [node, server.mjs]\n  readyPath: /ready\n  dependsOn: [migrate]\n  env:\n    DATABASE_URL: {service: database}\n    REDIS_URL: {service: cache}'}</code></pre>
+        <pre tabIndex={0} aria-label="API startup configuration"><code>{'api:\n  type: command\n  cwd: ./api\n  command: [python, -m, uvicorn, app:app,\n    --host, 127.0.0.1, --port, "{port}"]\n  readyPath: /health\n  dependsOn: [migrate]\n  env:\n    DATABASE_URL: {service: database}\n    REDIS_URL: {service: cache}'}</code></pre>
         <p>The API starts after its migration and databases are ready.</p>
-        <TextLink href={`${github}/tree/main/examples/multi-repo`}>See the complete configuration</TextLink>
+        <TextLink href={pageHref("services-and-jobs", "define-services-and-jobs")}>Services and setup jobs</TextLink>
       </div>
       <DependencyDiagram />
     </div>
@@ -79,7 +96,7 @@ function Bindings() {
   return <section className="landing-bindings" aria-labelledby="bindings-heading"><div className="landing-width">
     <div className="landing-binding-grid">
       <div className="landing-binding-copy"><p className="landing-section-label">Configuration and private setup</p><h2 id="bindings-heading">Use named connections.<br />Keep secrets out of config.</h2><p>Bind environment variables to services, selected host inputs, or stored secret references.</p><ol className="landing-secret-flow"><li><span>1</span><p>Your agent declares the secret references and services that need them.</p></li><li><span>2</span><p>You approve access and enter missing values in a private form, outside your agent chat.</p></li><li><span>3</span><p>Services receive approved values at startup. Stored-secret bindings stay as references in saved configuration.</p></li></ol><TextLink href={pageHref("secrets")}>Private setup and secret access</TextLink><p className="landing-caveat">Application code can still expose values. Log redaction is best effort.</p></div>
-      <div className="landing-binding-example"><div className="landing-code-heading"><span>preview.yaml</span><span>API service excerpt</span></div><pre tabIndex={0} aria-label="Example environment bindings"><code>{'api:\n  type: command\n  cwd: ./api\n  command: [node, server.mjs]\n  env:\n    DATABASE_URL: {service: database}\n    REDIS_URL: {service: cache}\n    API_TOKEN: {secret: "notes/dev/api-token"}\n    REGION: {fromEnv: REGION}'}</code></pre><dl><div><dt><code>service</code></dt><dd>A connection URL, plus a readiness dependency.</dd></div><div><dt><code>secret</code></dt><dd>A stored reference, shared wherever that exact name is approved.</dd></div><div><dt><code>fromEnv</code></dt><dd>A host variable selected with <code>--env</code> at startup.</dd></div></dl><p>For browser requests, <code>{'{browserUrl: api}'}</code> supplies an HTTP alias without a startup dependency.</p></div>
+      <div className="landing-binding-example"><div className="landing-code-heading"><span>preview.yaml</span><span>API service excerpt</span></div><pre tabIndex={0} aria-label="Example environment bindings"><code>{'api:\n  type: command\n  cwd: ./api\n  command: [python, -m, uvicorn, app:app,\n    --host, 127.0.0.1, --port, "{port}"]\n  env:\n    DATABASE_URL: {service: database}\n    REDIS_URL: {service: cache}\n    API_TOKEN: {secret: "inventory/dev/api-token"}\n    REGION: {fromEnv: REGION}'}</code></pre><dl><div><dt><code>service</code></dt><dd>A connection URL, plus a readiness dependency.</dd></div><div><dt><code>secret</code></dt><dd>A stored reference, shared wherever that exact name is approved.</dd></div><div><dt><code>fromEnv</code></dt><dd>A host variable selected with <code>--env</code> at startup.</dd></div></dl><p>For browser requests, <code>{'{browserUrl: api}'}</code> supplies an HTTP alias without a startup dependency.</p></div>
     </div>
     <div className="landing-config-options"><div><h3>Describe the app you have.</h3><p>Save <code>preview.yaml</code>, pass JSON to the CLI, or let your agent supply a configuration. You choose the commands and readiness checks.</p><TextLink href={pageHref("configuration")}>Configuration guide</TextLink></div><dl><div><dt>Static files</dt><dd>Prepared HTML, assets, and build output.</dd></div><div><dt>HTTP applications</dt><dd>Your installed development server or application command.</dd></div><div><dt>Existing local servers</dt><dd>Connect by HTTP URL. The existing server’s process, port, and data stay under its original owner.</dd></div><div><dt>Services and setup jobs</dt><dd>HTTP services, managed or existing local PostgreSQL and Redis, and setup jobs that run to completion.</dd></div></dl></div>
     <p className="landing-limit">Install your app’s dependencies before startup. Managed databases require <a href={pageHref("databases", "prepare-docker")}>local Docker and downloaded images</a>. Non-HTTP background workers are not supported.</p>

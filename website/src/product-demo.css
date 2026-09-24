@@ -25,7 +25,6 @@
 .landing .demo-identity h2, .landing .demo-overview h2, .landing .demo-secret-manager h2 { font-size: 22px; letter-spacing: -.6px; font-weight: 600; line-height: 1.35; }
 .demo-status { font-size: 11px; font-weight: 400; white-space: nowrap; color: var(--faint); }
 .demo-status[data-tone="success"] { color: var(--status-ok); }
-.demo-status[data-tone="error"] { color: var(--status-error); }
 .demo-branch { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted); }
 .demo-branch svg { width: 12px; height: 12px; }
 .demo-metadata { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 12px 20px; margin: 0 28px 18px; }
@@ -56,20 +55,15 @@
 .demo-services td:nth-child(2) { color: var(--muted); }
 .demo-connection code { font-size: 10px; color: var(--faint); }
 .demo-services td:last-child { text-align: right; padding-right: 0; }
-.demo-services button, .demo-job button, .demo-attempts button { color: var(--text-soft); border: 0; background: transparent; padding: 4px 6px; min-height: 28px; font-size: 11px; border-radius: 4px; }
-.demo-services button:hover, .demo-job button:hover, .demo-attempts button:hover { background: var(--field-hover); }
+.demo-services button, .demo-job button { color: var(--text-soft); border: 0; background: transparent; padding: 4px 6px; min-height: 28px; font-size: 11px; border-radius: 4px; }
+.demo-services button:hover, .demo-job button:hover { background: var(--field-hover); }
 .demo-job { display: flex; align-items: end; justify-content: space-between; border-top: 1px solid var(--hair); padding-top: 17px; margin-top: 17px; }
 .demo-job span { display: flex; align-items: center; gap: 10px; }
 .demo-job strong { font-weight: 550; }
 .demo-job svg { color: var(--faint); }
 .demo-job .demo-status { margin-left: 18px; }
-.demo-attempts { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--hair); margin-bottom: 20px; }
-.demo-attempts > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px 14px; padding-bottom: 10px; }
-.demo-attempts > div > span:first-child { font-size: 11px; color: var(--faint); }
-.demo-attempts button { display: flex; gap: 8px; align-items: center; padding-left: 0; flex-basis: 100%; }
-.demo-attempts > p { grid-column: 1 / -1; padding-bottom: 13px; color: var(--muted); font-size: 11px; }
-.demo-log-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-.demo-search { display: flex; align-items: center; flex: 1; min-width: 130px; gap: 7px; padding-left: 9px; border: 1px solid var(--edge); border-radius: 5px; color: var(--faint); }
+.demo-log-controls { display: grid; grid-template-columns: minmax(0, 1fr) 128px; gap: 8px; margin-bottom: 18px; }
+.demo-search { display: flex; align-items: center; flex: 1; min-width: 0; gap: 7px; padding-left: 9px; border: 1px solid var(--edge); border-radius: 5px; color: var(--faint); }
 .demo-search input { width: 100%; min-width: 0; height: 32px; padding: 6px 8px 6px 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; }
 .demo-log-output { overflow: auto; scrollbar-gutter: stable; flex: 1; min-height: 0; padding-block: 10px; scrollbar-width: thin; }
 .demo-log-line { display: grid; grid-template-columns: 64px 72px minmax(0, 1fr); gap: 12px; align-items: baseline; padding-block: 8px; font-family: var(--font-mono); font-size: 11px; }
@@ -89,7 +83,7 @@
 .demo-binding-table th:first-child { width: 50%; }
 .demo-binding-table thead { color: var(--faint); }
 .demo-binding-table tbody tr { border-top: 1px solid var(--hair); }
-.demo-binding-table code { font-size: 11px; overflow-wrap: normal; }
+.demo-binding-table code { font-size: 11px; overflow-wrap: anywhere; }
 .demo-yaml { margin-top: 24px; border-top: 1px solid var(--hair); padding-top: 15px; }
 .demo-yaml summary { cursor: pointer; color: var(--text-soft); font-size: 12px; }
 .demo-yaml pre { font-size: 11px; line-height: 1.85; margin: 20px 0 0; color: var(--text-soft); overflow: auto; }
@@ -103,11 +97,13 @@
 .demo-reference-list { list-style: none; padding: 0; margin: 18px 0 0; }
 .demo-reference-list li { display: flex; align-items: center; gap: 10px; padding-block: 16px; border-bottom: 1px solid var(--hair); font-size: 11px; }
 .demo-reference-list code { overflow-wrap: anywhere; }
-.demo-static { display: flex; align-items: start; gap: 15px; padding-block: 20px; }
-.demo-static .demo-status { margin-left: auto; }
 .demo-noscript { font-size: 13px; color: var(--muted); }
 .demo-mobile-select { display: none; }
-.product-demo :where(input, summary):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.landing .product-demo :where(button, summary, [tabindex]):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 5px; }
+.landing .demo-search input:focus-visible { outline: none; }
+.demo-search:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -1px; }
+.demo-search:focus-within { background: var(--ground); }
+.demo-log-controls .demo-select-trigger { width: 100%; min-width: 0; }
 @keyframes demo-view-in { from { opacity: .5; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 @media (max-width: 1100px) {
   .demo-connection { display: none; }
@@ -169,7 +165,6 @@
 .demo-log-heading button { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; min-height: 28px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; }
 .demo-log-heading button:hover { background: var(--field-hover); color: var(--text); }
 .demo-log-heading svg { width: 12px; height: 12px; }
-.demo-log-line[data-stream="stderr"] pre { color: var(--status-error); }
 
 /* The maintained dashboard Select uses Tailwind there; these site-scoped recipes
    apply the same control geometry and states without importing dashboard globals. */
@@ -185,8 +180,7 @@
 .demo-select-content svg { width: 14px; height: 14px; }
 .demo-select-content [data-slot^="select-scroll-"] { display: flex; align-items: center; justify-content: center; height: 24px; }
 @media (max-width: 600px) {
-  .demo-log-controls .demo-search { flex-basis: 100%; }
-  .demo-log-controls .demo-select-trigger { flex: 1; }
+  .demo-log-controls { grid-template-columns: minmax(0, 1fr) 112px; }
   .demo-disclosure { font-size: 10px; }
 }
 
