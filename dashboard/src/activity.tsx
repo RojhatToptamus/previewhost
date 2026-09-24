@@ -1,3 +1,5 @@
+import { ChevronRightIcon } from "lucide-react";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./components/ui/collapsible";
 import type { AttemptSummary, ServiceStatus } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import {
@@ -381,14 +383,18 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
         </Table>
       </div>
       {!!attempt?.sources?.length && (
-        <details>
-          <summary>Source folders</summary>
-          <div className="source-folders">
+        <Collapsible className="source-disclosure">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="disclosure-trigger">
+              <ChevronRightIcon data-icon="inline-start" />Source folders
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="source-folders">
             {attempt.sources.map((source) => (
               <Path key={source} value={source} />
             ))}
-          </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </Section>
   );

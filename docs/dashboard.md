@@ -22,6 +22,8 @@ It does not start owners or grant execution permissions.
 
 **Overview** groups linked Git worktrees under their repository. Branch names open preview
 details; **Open app** opens the serving application, even if a later update failed.
+Preview details show its hostname and numeric localhost URL when available, with open
+and copy actions. They are different browser origins; switching does not bypass CORS.
 Search by branch, folder, preview name, or source path. Filter for active work or failures.
 
 The sidebar keeps projects in alphabetical order. Expand a project to browse its worktrees;

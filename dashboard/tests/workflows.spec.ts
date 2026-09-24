@@ -249,7 +249,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("link", { name: "Open app", exact: true }),
     ).toHaveAttribute("href", urls[0]);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.getByRole("button", { name: "Copy URL", exact: true }).click();
+    await page.getByRole("button", { name: "Copy localhost URL", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Copied", exact: true }),
     ).toBeVisible();
@@ -258,22 +258,41 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     );
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Copy URL", exact: true }),
+      page.getByRole("button", { name: "Copy localhost URL", exact: true }),
     ).toBeVisible();
-    await expect(page.locator(".preview-address a")).toHaveAttribute(
-      "href",
-      hostnames[0],
-    );
+    await expect(page.locator(".preview-address a")).toHaveCount(2);
+    await expect(page.locator(".preview-address a").nth(0)).toHaveAttribute("href", hostnames[0]);
+    await expect(page.locator(".preview-address a").nth(1)).toHaveAttribute("href", urls[0]);
+    await page.keyboard.press("Tab");
+    await page.locator(".preview-address a").first().focus();
+    expect(await page.locator(".preview-address a").first().evaluate(element => {
+      const css = getComputedStyle(element);
+      return { outline: css.outlineWidth, border: css.borderWidth, shadow: css.boxShadow };
+    })).toEqual({ outline: "2px", border: "0px", shadow: "none" });
+    const folders = page.getByRole("button", { name: "Source folders", exact: true });
+    await folders.focus();
+    await page.keyboard.press("Enter");
+    await expect(folders).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".source-folders")).toContainText(join(directory, "first"));
+    await page.keyboard.press("Space");
+    await expect(folders).toHaveAttribute("aria-expanded", "false");
     await page.getByRole("button", { name: "Copy hostname URL" }).click();
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toBe(hostnames[0]);
-    const app = await context.newPage();
-    await app.goto(urls[0]);
-    await expect(app.locator("body")).toHaveText("first");
-    await app.goto(hostnames[0]);
+    const [app] = await Promise.all([
+      context.waitForEvent("page"),
+      page.locator(".preview-address a").nth(1).click(),
+    ]);
     await expect(app.locator("body")).toHaveText("first");
     await app.close();
+    const [hostnameApp] = await Promise.all([
+      context.waitForEvent("page"),
+      page.locator(".preview-address a").nth(0).click(),
+    ]);
+    await expect(hostnameApp.locator("body")).toHaveText("first");
+    expect(hostnameApp.url()).toBe(hostnames[0] + "/");
+    await hostnameApp.close();
     await page
       .locator(".attempt-split .attempt-failure")
       .getByRole("button", { name: "Logs", exact: true })

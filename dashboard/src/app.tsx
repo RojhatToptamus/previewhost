@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MoonIcon } from "lucide-react";
 import { toast } from "sonner";
 import { authenticated, call, errorMessage, type Mutate } from "./lib/api";
-import { entries, shortProject, type PreviewFilter, type Owner } from "./lib/model";
+import { entries, entryLabel, projectGroups, shortProject, type PreviewFilter, type Owner } from "./lib/model";
 import { Button } from "./components/ui/button";
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from "./components/ui/breadcrumb";
+import { Separator } from "./components/ui/separator";
 import { Toggle } from "./components/ui/toggle";
 import { Toaster } from "./components/ui/sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
@@ -147,6 +149,12 @@ export function App() {
     typeof selection === "object"
       ? owners.find((owner) => owner.id === selection.owner)
       : undefined;
+  const group = selected && projectGroups(owners).find(group => group.entries.some(entry => entry.owner.id === selected.id));
+  const selectedEntry = group?.entries.find(entry => entry.owner.id === selected?.id && entry.name === (typeof selection === "object" ? selection.name : undefined));
+  const label = selectedEntry && group ? entryLabel(selectedEntry, group) : undefined;
+  const location = selected
+    ? [...new Set([group?.label.name ?? shortProject(selected), group?.label.qualifier, label?.name, label?.qualifier].filter(Boolean))].join(" · ")
+    : "Preview";
   return (
     <TooltipProvider>
       <SidebarProvider className="app-shell">
@@ -164,7 +172,25 @@ export function App() {
               />
               previewhost
             </Button>
+          </div>
+          <div className="header-navigation">
             <SidebarTrigger size="icon" />
+            <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                {selection && <>
+                  <BreadcrumbItem className="breadcrumb-parent">
+                    <BreadcrumbLink asChild><button onClick={() => select(undefined)}>Previews</button></BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="breadcrumb-parent" />
+                </>}
+                <BreadcrumbItem>
+                  <BreadcrumbPage title={selected ? location : undefined}>
+                    {selection === "secrets" ? "Secret Manager" : selection ? location : "Previews"}
+                  </BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
           </div>
           <div className="header-controls">
             <Toggle

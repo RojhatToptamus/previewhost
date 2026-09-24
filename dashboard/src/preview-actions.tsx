@@ -297,7 +297,7 @@ export function PreviewMenu({
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             {reset && (
-              <DropdownMenuItem onSelect={() => setReview(reset)}>
+              <DropdownMenuItem variant="destructive" onSelect={() => setReview(reset)}>
                 Reset data…
               </DropdownMenuItem>
             )}
@@ -327,7 +327,7 @@ export function PreviewMenu({
                 Delete data…
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onSelect={() => void reviewRemoval()}>
+            <DropdownMenuItem variant="destructive" onSelect={() => void reviewRemoval()}>
               Remove entry…
             </DropdownMenuItem>
           </DropdownMenuGroup>

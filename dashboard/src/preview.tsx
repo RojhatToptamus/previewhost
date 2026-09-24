@@ -30,11 +30,13 @@ export function Preview({
     : retained[0];
   const actions = previewActions(entry);
   const canOpen = Boolean(p?.active && p.url);
-  const address = canOpen
-    ? (Object.values(p?.active?.services ?? {}).find(
-        (service) => service.url === p?.url,
-      )?.browserUrl ?? p?.url)
+  const hostnameUrl = canOpen
+    ? Object.values(p?.active?.services ?? {}).find(service => service.url === p?.url)?.browserUrl
     : undefined;
+  const addresses = canOpen ? [
+    ...(hostnameUrl && hostnameUrl !== p!.url ? [{ label: "Hostname", url: hostnameUrl }] : []),
+    { label: "Localhost", url: p!.url! },
+  ] : [];
   const primary = !canOpen
     ? actions.find((action) => !action.danger)
     : undefined;
@@ -63,28 +65,19 @@ export function Preview({
               <CopyButton value={owner.project} />
             </div>
           )}
-          {address && (
-            <div className="preview-address">
-              <AppLink url={address} variant="link">
-                {address.replace(/^http:\/\//, "")}
+          {addresses.map(({ label, url }) => (
+            <div className="preview-address" key={url}>
+              <span className="address-label">{label}</span>
+              <AppLink url={url} variant="link">
+                {url.replace(/^http:\/\//, "")}
               </AppLink>
-              <CopyButton
-                value={address}
-                label={address === p?.url ? "Copy URL" : "Copy hostname URL"}
-              />
+              <CopyButton value={url} label={`Copy ${label.toLowerCase()} URL`} />
             </div>
-          )}
+          ))}
           {context && <p className="context-note">{context}</p>}
         </div>
         <div className="header-actions">
-          {canOpen && (
-            <>
-              <AppLink url={p!.url!} variant="default" />
-              {address !== p!.url && (
-                <CopyButton value={p!.url!} label="Copy URL" />
-              )}
-            </>
-          )}
+          {canOpen && <AppLink url={p!.url!} variant="default" />}
           {actions.map((action) => (
             <Button
               key={action.label}

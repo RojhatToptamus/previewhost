@@ -74,7 +74,7 @@ Use the existing outline icon set. Icons support labels; they do not decorate he
 
 Hover, focus, selection, and loading must not change control geometry. Keep motion brief and functional. Honor reduced-motion preferences; only animate progress while work is pending.
 
-Use a single 2px keyboard focus outline. Hover uses `--hover`; the selected navigation row uses `--sel`. Color feedback lasts 120ms; sidebar movement uses a 180ms ease-out transition.
+Use a single 2px keyboard focus outline, without an additional ring or focus border. Input groups draw it around the group; menu items use their highlighted row. Destructive menu items use the shared red tint. Hover uses `--hover`; the selected navigation row uses `--sel`. Color feedback lasts 120ms; sidebar movement uses a 180ms ease-out transition.
 
 ## 4. Layout and navigation
 
@@ -82,7 +82,7 @@ Keep one application shell. The sidebar owns preview navigation and Secret Manag
 
 A preview has one persistent identity and action header, followed immediately by Activity, Logs, and Configuration tabs. Tab changes must not move the header or tabs. Content scrolls within its workspace.
 
-Keep the brand at the left of the sidebar header area and its toggle at the right edge. Keep the toggle available when the sidebar is collapsed. Use a 24px desktop content gutter and 16px narrow-screen gutter. Avoid breadcrumbs that only repeat the selected view.
+Keep the brand above the expanded sidebar. Place its toggle at the start of the content header, followed by a separator and compact navigation context. Preview breadcrumbs offer a return to Previews and identify the project and worktree, including when the sidebar is collapsed. On narrow screens, keep the current context and hide the parent breadcrumb. Use a 24px desktop content gutter and 16px narrow-screen gutter.
 
 The expanded sidebar and its brand header share a surface and right boundary. Use 12px sidebar gutters and 4px between navigation rows.
 
@@ -140,7 +140,7 @@ Tables compare values. Give each column enough room for its content; do not sque
 
 At narrow widths, stack controls in reading order and preserve the primary action. Reduce secondary detail before shrinking text. Long paths, names, and output must not widen the entire page. Horizontal scrolling is appropriate for machine output or a table that cannot retain meaning when compressed.
 
-Display the serving application's readable hostname when supplied by the runtime. Keep the existing Open app destination; different origins can affect application cookies and CORS. Never construct an alias from a preview name or show a candidate's address as serving.
+Display the serving application's runtime-provided hostname and numeric localhost URL on separate labeled rows, each with an open link and copy action. Omit unsupported aliases. Keep the existing Open app destination; these origins can have different cookies and CORS behavior. Never construct an alias from a preview name or show a candidate's address as serving.
 
 Log source means the process or job that emitted the output. Frameworks can forward browser messages into that same output. Do not silently hide lines or classify their origin from text prefixes. Source selection and search provide reliable ways to narrow output.
 
@@ -167,6 +167,7 @@ Compose the maintained components in `dashboard/src/components/ui/`. Reuse view-
 | Destructive confirmation | `ConfirmAction` / `AlertDialog` |
 | Loading / empty / failure | `Loading`, `EmptyState`, `Notice` |
 | Theme choice | Existing `Toggle` |
+| Source folders | `Collapsible` with a ghost button and aligned chevron |
 | Secondary diagnostic disclosure | Native `details` and `summary` |
 
 Do not add a component merely to replace working native behavior. Shared CSS owns consistent sizing; page components own content and placement.
