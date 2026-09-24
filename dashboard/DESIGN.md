@@ -92,23 +92,32 @@ clones and non-Git folders remain separate, even when names match. Missing Git m
 back to folder identity; never infer repository membership from names or remote URLs.
 
 Show branch names beneath the repository heading. Add source subfolders and preview names
-when needed to distinguish environments; detached worktrees use folder labels. Keep exact
-paths and configured names in details and accessible control context. Branch labels describe
-current source, not a historical build. A multi-repository application belongs under its owner's
+when needed to distinguish environments; use a middle dot before a configured preview name
+to distinguish it from a source subfolder. When branch metadata is absent, mark the folder label
+with `(folder)`. Keep exact paths and configured names in details and accessible control context.
+Branch labels describe current source, not a historical build. A multi-repository application belongs under its owner's
 project; its other sources remain visible in configuration and searchable from Overview.
 
-Keep five previews visible per sidebar group, plus a selected or focused row so actions never
-make their own target disappear. Show all expands the group; collapsing it is a presentation
-choice only. Overview owns the full searchable comparison table and status filter. Group
-headings replace repeated repository names and paths in both views. Overview filters leave
-sidebar navigation available. Active work comes first, then entries needing attention, with
-newer startup attempts first within each category. No separate recent-history list is stored.
+Start sidebar project groups collapsed and expand one project at a time. Opening a preview
+reveals its group and scrolls the selected row into view. Sort projects and worktrees
+alphabetically so status changes do not move navigation targets. Keep the open project while
+the dashboard is open, including across mobile drawer dismissal. Use one sidebar scroll area;
+keep the expanded project's heading sticky so its collapse control remains reachable. Every
+row stays mounted while open, so refresh cannot evict a focused action or confirmation.
+
+Overview owns search, status filtering, and comparison in one table with repository divider
+rows. Its global count links clear search and apply the corresponding status filter. Within
+groups, active work comes first, then entries needing attention, with newer startup attempts
+first within each category. Calculate distinguishing labels from the complete group before
+filtering. No separate recent-history list or project lifecycle is stored.
 
 Use the shortest distinguishing parent suffix for groups with matching names. Long labels
 may wrap in Overview; sidebar labels truncate and retain their full accessible context.
 
 Each row has a separate action menu; using it must not navigate. Keep sidebar action triggers
-inside their rows, aligned with the name. Reuse the same actions in overview and details.
+inside their rows, aligned with the name and visible for mouse, keyboard, and touch. Include
+project/worktree identity in accessible action names and status in navigation names. The mobile
+Sheet has a visible close control. Reuse the same actions in overview and details.
 Every entry offers Recheck status and Remove entry. Removal explains blockers in its review;
 an unreachable owner never counts as stopped. The server rechecks cleanup evidence and rejects
 changed records before removal.

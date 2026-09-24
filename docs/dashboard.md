@@ -24,8 +24,12 @@ It does not start owners or grant execution permissions.
 details; **Open app** opens the serving application, even if a later update failed.
 Search by branch, folder, preview name, or source path. Filter for active work or failures.
 
-The sidebar uses the same groups, with five previews and **Show all** for longer lists.
-Each preview has its own actions. Overview filters do not hide sidebar navigation.
+The sidebar keeps projects in alphabetical order. Expand a project to browse its worktrees;
+one project opens at a time. Its heading stays visible as you scroll. Opening a preview reveals
+its selected row. Each preview has its own actions, and status changes do not reorder navigation.
+
+Use the counts above Overview to show active previews or those needing attention. These
+shortcuts clear search; the status dropdown keeps it. Overview filters do not hide the sidebar.
 Separate clones and non-Git folders stay separate. Matching names show a distinguishing path.
 When Git metadata is unavailable, folder labels remain usable. Branch labels reflect current
 source; a preview spanning repositories stays under its owner's project.

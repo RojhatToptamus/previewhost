@@ -77,9 +77,8 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
       await page.getByRole("button", { name: "Overview", exact: true }).click();
     }
     const nav = page.locator('[data-slot="sidebar-content"]');
-    await expect(nav.getByRole("button", { name: /^Actions for/ })).toHaveCount(
-      2,
-    );
+    await nav.getByRole("button", { name: "storefront-checkout", exact: true }).click();
+    await expect(nav.getByRole("button", { name: /^Actions for/ })).toHaveCount(1);
     const stale = nav.getByRole("button", {
       name: "Actions for storefront-checkout",
       exact: true,
@@ -100,6 +99,7 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(stale).toBeFocused();
     expect(await readProjectRecord(rows[0].path)).toEqual(rows[0].record);
+    await nav.getByRole("button", { name: "storefront-payments", exact: true }).click();
     await nav
       .getByRole("button", { name: "Actions for storefront-payments" })
       .click();
@@ -125,7 +125,8 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     const sheet = page.getByRole("dialog");
     await expect(
       sheet.getByRole("button", { name: /^Actions for/ }),
-    ).toHaveCount(2);
+    ).toHaveCount(1);
+    await sheet.getByRole("button", { name: "storefront-checkout", exact: true }).click();
     await sheet
       .getByRole("button", { name: "Actions for storefront-checkout" })
       .click();
@@ -183,12 +184,13 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
       ...rows[1].record,
       endpoint: recovered.endpoint,
     });
+    await sheet.getByRole("button", { name: "storefront-payments", exact: true }).click();
     await sheet
       .getByRole("button", { name: "Actions for storefront-payments" })
       .click();
     await page.getByRole("menuitem", { name: "Recheck status" }).click();
     await expect(sheet.locator(".preview-nav")).toHaveCount(1);
-    await sheet.getByRole("button", { name: "Actions for payments", exact: true }).click();
+    await sheet.getByRole("button", { name: "Actions for storefront-payments · payments", exact: true }).click();
     await page.getByRole("menuitem", { name: "Remove entry…" }).click();
     await expect(dialog.getByRole("button", { name: "Remove entry", exact: true })).toBeDisabled();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -207,7 +209,7 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();
     await expect(sheet.locator(".preview-nav")).toContainText("Ready");
     await expect(
-      sheet.getByRole("button", { name: "Actions for payments" }),
+      sheet.getByRole("button", { name: "Actions for storefront-payments · payments" }),
     ).toBeVisible();
     expect(
       await (await fetch((await runtime.get("payments")).url!)).text(),

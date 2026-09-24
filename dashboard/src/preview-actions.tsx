@@ -151,11 +151,13 @@ export function PreviewMenu({
   mutate,
   acting,
   managementOnly = false,
+  label,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
   managementOnly?: boolean;
+  label?: string;
 }) {
   const [review, setReview] = useState<Confirmation>();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -253,7 +255,8 @@ export function PreviewMenu({
             variant="ghost"
             size="icon-sm"
             disabled={acting || checking}
-            aria-label={`Actions for ${name ?? shortProject(owner)}`}
+            aria-label={`Actions for ${label ?? name ?? shortProject(owner)}`}
+            title="Preview actions"
           >
             <MoreHorizontalIcon />
           </Button>

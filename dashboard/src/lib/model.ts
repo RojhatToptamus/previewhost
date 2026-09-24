@@ -137,7 +137,7 @@ export function projectLabels(owners: Owner[]): Map<string, ProjectLabel> {
 export type ProjectGroup = { id: string; label: ProjectLabel; directory?: string; entries: Entry[] };
 
 /** Git common directories group linked worktrees; names and remotes never merge projects. */
-export function projectGroups(owners: Owner[], list: Entry[]): ProjectGroup[] {
+export function projectGroups(owners: Owner[], list: Entry[] = owners.flatMap(entries)): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>();
   for (const owner of owners) {
     const id = owner.git?.commonDirectory ?? owner.id;
@@ -175,15 +175,16 @@ export function entryLabel(entry: Entry, group: ProjectGroup): ProjectLabel {
   const subdirectory = sourceSubdirectory(owner);
   const duplicate = branch && group.entries.some(other => other.owner.id !== owner.id &&
     other.owner.git?.branch === branch && sourceSubdirectory(other.owner) === subdirectory);
+  const worktree = [branch, subdirectory].filter(Boolean).join(" / ");
   if (branch && !duplicate) {
-    return { name: [branch, subdirectory, multiple ? name : undefined].filter(Boolean).join(" / "), qualifier: "" };
+    return { name: [worktree, multiple ? name : undefined].filter(Boolean).join(" · "), qualifier: "" };
   }
   const owners = [...new Map(group.entries.map(item => [item.owner.id, item.owner])).values()];
   const folder = projectLabels(owners).get(owner.id)!;
   const path = [folder.qualifier, folder.name].filter(Boolean).join("/");
   return {
-    name: branch ? [branch, subdirectory, multiple ? name : undefined].filter(Boolean).join(" / ")
-      : owner.git ? [path, multiple ? name : undefined].filter(Boolean).join(" / ") : name ?? folder.name,
+    name: branch ? [worktree, multiple ? name : undefined].filter(Boolean).join(" · ")
+      : owner.git ? [`${path} (folder)`, multiple ? name : undefined].filter(Boolean).join(" · ") : name ?? folder.name,
     qualifier: duplicate ? path : "",
   };
 }

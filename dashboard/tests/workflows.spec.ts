@@ -60,13 +60,25 @@ test("repository groups keep clone identity, subprojects and multiple previews d
   const group = groups.find(group => group.id === main.git!.commonDirectory)!;
   expect(group.entries).toHaveLength(5);
   const label = (id: string, name: string) => entryLabel(group.entries.find(entry => entry.owner.id === id && entry.name === name)!, group);
-  expect(label("tree", "review")).toEqual({ name: "checkout / review", qualifier: "" });
-  expect(label("tree", "compare")).toEqual({ name: "checkout / compare", qualifier: "" });
+  expect(label("tree", "review")).toEqual({ name: "checkout · review", qualifier: "" });
+  expect(label("tree", "compare")).toEqual({ name: "checkout · compare", qualifier: "" });
   expect(label("nested", "app")).toEqual({ name: "main / apps/api", qualifier: "" });
   expect(label("main", "app").qualifier).toBe("work/shop");
   expect(label("duplicate", "app").qualifier).toBe("forced/shop");
   expect(groups.map(group => group.label.qualifier).sort()).toEqual(["client", "work"]);
   expect(visibleEntries(owners, "checkout", "all").map(entry => entry.name).sort()).toEqual(["compare", "review"]);
+  const root: Owner = { ...main, previews: [{ name: "api", busy: false }, { name: "web", busy: false }] };
+  const subproject: Owner = { ...main, id: "subproject", project: "/work/shop/web" };
+  const monorepo = projectGroups([root, subproject])[0];
+  const names = monorepo.entries.map(entry => entryLabel(entry, monorepo).name);
+  expect(new Set(names).size).toBe(3);
+  expect(names).toContain("main · web");
+  expect(names).toContain("main / web");
+  const detached: Owner = { ...main, id: "detached", project: "/trees/main", git: { ...main.git!, root: "/trees/main", branch: undefined } };
+  const sameName = projectGroups([main, detached])[0];
+  expect(sameName.entries.map(entry => entryLabel(entry, sameName))).toEqual([
+    { name: "main", qualifier: "" }, { name: "main (folder)", qualifier: "" },
+  ]);
 });
 
 test("React dashboard preserves attempt isolation, logs, configuration and safe controls", async ({
@@ -489,6 +501,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.screenshot({ path: "/tmp/previewhost-clear-logs-narrow.png" });
     await page.setViewportSize({ width: 1360, height: 900 });
     // Compare another worktree, then restore this diagnostic view through Back and reload.
+    await page.getByRole("navigation", { name: "Projects", exact: true }).getByRole("button", { name: "first", exact: true }).click();
     await page.locator('.preview-nav[title$="/first · app"]').click();
     await page.goBack();
     await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");

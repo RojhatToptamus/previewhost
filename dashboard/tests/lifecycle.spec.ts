@@ -17,7 +17,7 @@ const { createDataOwner } = (await import(
   new URL("../../dist/data.js", import.meta.url).href
 )) as typeof import("../../src/data");
 
-test("linked worktrees stay grouped, discoverable and independently controllable", async ({ page }) => {
+test("linked worktrees stay grouped, discoverable and independently controllable", async ({ page, browser }) => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "previewhost-navigation-")));
   const evidence = "/private/tmp/previewhost-navigation-review";
   await mkdir(evidence, { recursive: true });
@@ -75,6 +75,7 @@ test("linked worktrees stay grouped, discoverable and independently controllable
       }
       await mkdir(project, { recursive: true });
       if (i === 4) git(project, "checkout", "--detach");
+      if (i === 10 || i === 14) git(project, "checkout", "--ignore-other-worktrees", "main");
       if (i === 8) git(project, "branch", "-m", "feature/editor-toolbar-with-keyboard-navigation-and-long-labels");
       await writeFile(join(project, "index.html"), `<h1>${name} ${i}</h1>`);
       const runtime = await createPreviewRuntime({ allowedRoots: [directory] });
@@ -136,7 +137,7 @@ test("linked worktrees stay grouped, discoverable and independently controllable
         await route.fulfill({ json: { error: { code: "TIMEOUT", message: "Fixture owner did not respond." } } });
       } else await route.continue();
     });
-    const tableRows = page.locator(".overview-table tbody tr");
+    const tableRows = page.locator(".overview-table tbody tr:not(.project-section-heading)");
     const nav = page.locator('[data-slot="sidebar-content"]');
     const rowFor = (scope: Locator, index: number) => scope.filter({ has: page.locator(
       `[title=${JSON.stringify(fixtures[index].project)}], [title^=${JSON.stringify(fixtures[index].project + " · ")}]`,
@@ -153,8 +154,8 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     async function filterBy(name: string) {
       await filter.click(); await page.getByRole("option", { name, exact: true }).click();
     }
-    async function action(row: Locator, index: number, name: string) {
-      await row.getByRole("button", { name: `Actions for ${fixtures[index].name}` }).click();
+    async function action(row: Locator, name: string) {
+      await row.getByRole("button", { name: /^Actions for/ }).click();
       await page.getByRole("menuitem", { name, exact: true }).click();
     }
     async function capture(count: number) {
@@ -176,9 +177,14 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     visible = 10;
     await refresh();
     await expect(tableRows).toHaveCount(10);
+    await expect(nav.locator(".preview-nav")).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Dashboard", exact: true }).getByRole("button", { name: "Overview", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(rowFor(tableRows, 1)).toContainText("checkout-layout");
     await expect(rowFor(tableRows, 2)).toContainText("feature-pricing");
-    await filterBy("Needs attention");
+    await search.fill("receipt-checker");
+    await page.getByRole("button", { name: "2 need attention", exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(filter).toHaveText("Needs attention");
     await expect(tableRows).toHaveCount(2);
     await filterBy("Stopped / offline");
     await expect(tableRows).toHaveCount(7);
@@ -203,6 +209,12 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     holdPages = false;
     await expect(nav.getByRole("searchbox")).toHaveCount(0);
     await expect(nav.getByRole("combobox")).toHaveCount(0);
+    const qualifier = await rowFor(tableRows, 10).locator(".project-qualifier").textContent();
+    expect(qualifier).toBeTruthy();
+    await search.fill("invoice-list-10");
+    await expect(tableRows).toHaveCount(1);
+    await expect(rowFor(tableRows, 10).locator(".project-qualifier")).toHaveText(qualifier!);
+    await search.fill("");
     // Keyboard selection opens the exact worktree without changing project identity.
     await rowFor(tableRows, 0).locator(".preview-name").focus();
     await page.keyboard.press("Enter");
@@ -213,17 +225,20 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await search.fill("checkout-layout");
     await rowFor(tableRows, 1).locator(".preview-name").click();
     await expect(details).toContainText("checkout-layout");
+    const atlas = nav.locator(".project-navigation").filter({ has: page.getByRole("button", { name: "atlas", exact: true }) });
     await expect(navigationRow(0)).toBeVisible();
     await expect(navigationRow(1)).toBeVisible();
+    const orderBeforeStop = await atlas.locator(".nav-name").allTextContents();
     listGate = new Promise<void>(resolve => { releaseLists = resolve; });
     // Sidebar actions operate on their row without leaving the selected environment.
     const stoppedRow = await fixtures[0].runtime.stop(fixtures[0].name);
-    await action(navigationRow(0), 0, "Recheck status");
+    await action(navigationRow(0), "Recheck status");
     await expect(navigationRow(0)).toContainText("Stopped");
+    expect(await atlas.locator(".nav-name").allTextContents()).toEqual(orderBeforeStop);
     await expect(details).toContainText("checkout-layout");
     const resumedRow = await fixtures[0].runtime.startAgain(fixtures[0].name, stoppedRow.latest!.id);
     await fixtures[0].runtime.wait(fixtures[0].name, resumedRow.candidate!.id);
-    await action(navigationRow(0), 0, "Recheck status");
+    await action(navigationRow(0), "Recheck status");
     await expect(navigationRow(0)).toContainText("Ready");
     rejectRecheck = true;
     await refresh();
@@ -243,57 +258,113 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await overview();
     await expect(search).toHaveValue("checkout-layout");
     await search.fill("");
-    // Long repository groups are bounded; selecting a hidden row reveals it.
-    const atlas = nav.locator(".project-navigation").filter({ has: page.getByRole("button", { name: "atlas", exact: true }) });
-    await expect(atlas.locator(".preview-nav")).toHaveCount(5);
+    // Expanded projects keep rows mounted; selection reveals them in the sidebar.
+    expect(await atlas.locator(".preview-nav").count()).toBeGreaterThan(20);
     const toggle = atlas.getByRole("button", { name: "atlas", exact: true });
     await toggle.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await expect(toggle).toBeFocused();
     expect(await toggle.evaluate(element => getComputedStyle(element).outlineStyle)).not.toBe("none");
     await page.keyboard.press("Space");
     await expect(atlas.locator(".preview-nav")).toHaveCount(0);
-    await rowFor(tableRows, 12).locator(".preview-name").click();
-    await expect(navigationRow(12)).toBeVisible();
-    await expect(atlas.locator(".preview-nav")).toHaveCount(6);
+    await rowFor(tableRows, 0).locator(".preview-name").click();
+    await expect(navigationRow(0)).toBeVisible();
+    await expect(navigationRow(0)).toBeInViewport();
+    const groupScroll = nav;
+    await expect(toggle).toBeInViewport();
+    expect(await groupScroll.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
     await overview();
-    await atlas.getByRole("button", { name: /^Show all/ }).click();
     expect(await atlas.locator(".preview-nav").count()).toBeGreaterThan(20);
-    await atlas.getByRole("button", { name: "Show less" }).click();
-    await expect(atlas.locator(".preview-nav")).toHaveCount(5);
+    const beforeRefresh = await groupScroll.evaluate(element => element.scrollTop);
+    await refresh();
+    await expect.poll(() => groupScroll.evaluate(element => element.scrollTop)).toBe(beforeRefresh);
     await expect(tableRows).toHaveCount(100);
+    // Renaming a source during an open menu reorders rows without discarding the interaction.
+    await navigationRow(0).getByRole("button", { name: /^Actions for/ }).click();
+    git(join(directory, repositories[0]), "branch", "-m", "main", "aaa-current-work");
+    await expect(navigationRow(0)).toContainText("aaa-current-work");
+    await expect(page.getByRole("menuitem", { name: "Stop", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(navigationRow(0).getByRole("button", { name: /^Actions for/ })).toBeFocused();
+    git(join(directory, repositories[0]), "branch", "-m", "aaa-current-work", "main");
+    await expect(navigationRow(0)).toContainText("main / web");
     await capture(100);
+    const touchContext = await browser.newContext({ viewport: { width: 390, height: 560 }, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
+    try {
+      const touch = await touchContext.newPage();
+      await touch.goto(launch);
+      await expect(touch.locator(".overview-table .preview-name")).toHaveCount(100);
+      await touch.locator(".overview-table .preview-name").filter({ hasText: "checkout-layout" }).tap();
+      await touch.getByRole("button", { name: "Toggle Sidebar" }).tap();
+      const drawer = touch.getByRole("dialog");
+      const target = drawer.locator(".preview-nav-row").filter({ hasText: "checkout-layout" });
+      await expect(target).toBeInViewport();
+      await target.getByRole("button", { name: /^Actions for/ }).tap();
+      await touch.getByRole("menuitem", { name: "Recheck status", exact: true }).tap();
+      await expect(drawer).toBeVisible();
+      await target.locator(".preview-nav").tap();
+      await expect(drawer).toBeHidden();
+      await expect(touch.getByRole("article", { name: "Preview details" })).toContainText("checkout-layout");
+    } finally { await touchContext.close(); }
     const otherTab = await page.context().newPage();
     try {
       await otherTab.goto(launch);
-      await expect(otherTab.locator(".overview-table tbody tr")).toHaveCount(100);
+      await expect(otherTab.locator(".overview-table tbody tr:not(.project-section-heading)")).toHaveCount(100);
       await expect(otherTab.locator(".project-navigation")).toHaveCount(6);
     } finally { await otherTab.close(); }
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const actionCell = (await tableRows.first().locator("td").last().boundingBox())!;
+    const tableBounds = (await page.locator(".overview-table").boundingBox())!;
+    expect(Math.abs(actionCell.x + actionCell.width - tableBounds.x - tableBounds.width)).toBeLessThan(3);
     await page.setViewportSize({ width: 390, height: 844 });
     for (const theme of ["light", "dark"]) {
       if (theme === "dark") await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+      const groupHeader = page.locator(".project-section-heading").first();
+      const headerCell = groupHeader.locator("th");
+      expect(Math.abs((await headerCell.boundingBox())!.width - (await groupHeader.boundingBox())!.width)).toBeLessThan(2);
       await page.screenshot({ path: join(evidence, `after-100-narrow-${theme}.png`), animations: "disabled" });
       await page.getByRole("button", { name: "Toggle Sidebar" }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
       await page.screenshot({ path: join(evidence, `after-100-drawer-${theme}.png`), animations: "disabled" });
-      await page.keyboard.press("Escape");
+      if (theme === "light") {
+        await page.setViewportSize({ width: 390, height: 560 });
+        const projectNav = page.getByRole("navigation", { name: "Projects", exact: true });
+        expect(await projectNav.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+        await projectNav.evaluate(element => { element.scrollTop = 0; });
+        const box = (await projectNav.boundingBox())!;
+        await page.mouse.move(box.x + 20, box.y + 80);
+        await page.mouse.wheel(0, 500);
+        await expect.poll(() => projectNav.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        const projectToggle = projectNav.getByRole("button", { name: "atlas", exact: true });
+        await expect(projectToggle).toBeInViewport();
+        await projectToggle.click();
+        await expect(projectNav.locator(".preview-nav")).toHaveCount(0);
+        await expect(projectNav.getByRole("button", { name: "studio", exact: true })).toBeInViewport();
+        await projectToggle.click();
+        await page.setViewportSize({ width: 390, height: 844 });
+      }
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(page.getByRole("dialog")).toBeHidden();
     }
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await page.setViewportSize({ width: 1360, height: 900 });
     await filterBy("Active");
     await expect(tableRows).toHaveCount(2);
-    await action(rowFor(tableRows, 0), 0, "Stop");
+    await action(rowFor(tableRows, 0), "Stop");
     await expect(tableRows).toHaveCount(1);
     expect(await (await fetch(neighborUrl)).text()).toBe("<h1>review 1</h1>");
-    await action(navigationRow(0), 0, "Start preview");
+    await action(navigationRow(0), "Start preview");
     await expect(tableRows).toHaveCount(2);
-    await action(navigationRow(0), 0, "Stop");
+    await action(navigationRow(0), "Stop");
     await expect(tableRows).toHaveCount(1);
-    await action(navigationRow(0), 0, "Remove entry…");
+    await action(navigationRow(0), "Remove entry…");
     await expect(page.getByRole("alertdialog")).toContainText("projects/atlas/web");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(navigationRow(0).getByRole("button", { name: "Actions for web" })).toBeFocused();
+    await expect(navigationRow(0).getByRole("button", { name: /^Actions for/ })).toBeFocused();
     await navigationRow(0).locator(".preview-nav").click();
     listGate = new Promise<void>(resolve => { releaseLists = resolve; });
-    await action(navigationRow(0), 0, "Remove entry…");
+    await action(navigationRow(0), "Remove entry…");
     await page.getByRole("button", { name: "Remove entry", exact: true }).click();
     await fixtures[0].daemon.closed;
     await refresh();
@@ -323,10 +394,12 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     const drawer = page.getByRole("dialog");
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole("searchbox")).toHaveCount(0);
+    const mobileAtlas = drawer.getByRole("button", { name: "atlas", exact: true });
+    if (await mobileAtlas.getAttribute("aria-expanded") !== "true") await mobileAtlas.click();
     const mobileRow = rowFor(drawer.locator(".preview-nav-row"), 1);
-    await action(mobileRow, 1, "Recheck status");
+    await action(mobileRow, "Recheck status");
     await expect(drawer).toBeVisible();
-    await mobileRow.getByRole("button", { name: "Actions for review" }).click();
+    await mobileRow.getByRole("button", { name: /^Actions for/ }).click();
     await expect(page.getByRole("menuitem", { name: "Stop", exact: true })).toBeVisible();
     await page.screenshot({ path: join(evidence, "after-100-narrow.png") });
     await page.keyboard.press("Escape");

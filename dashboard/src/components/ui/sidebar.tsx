@@ -178,7 +178,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground"
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
@@ -186,11 +186,11 @@ function Sidebar({
           }
           side={side}
         >
-          <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+          <SheetHeader className="border-b pr-12">
+            <SheetTitle>Navigation</SheetTitle>
+            <SheetDescription className="sr-only">Projects and previews</SheetDescription>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col">{children}</div>
+          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         </SheetContent>
       </Sheet>
     );
@@ -285,7 +285,7 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
-        "no-scrollbar flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        "flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
         className,
       )}
       {...props}
