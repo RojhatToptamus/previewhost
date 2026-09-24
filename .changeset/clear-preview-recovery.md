@@ -9,3 +9,5 @@ Preserve dashboard navigation and log filters, add surrounding search context, a
 Group linked worktrees by repository, with branch labels and compact expandable sidebar lists. Keep the full overview searchable and preserve independent preview actions.
 
 Refine dashboard controls and contrast, show both application URLs, and fix favicons and browser page titles.
+
+Prevent completed setup jobs from reporting a startup failure when their final result arrives after the supervisor exits.
