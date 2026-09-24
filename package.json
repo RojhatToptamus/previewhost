@@ -1,6 +1,6 @@
 {
   "name": "previewhost",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Run apps and services in local preview environments with stable URLs.",
   "keywords": [
     "local-preview",
