@@ -17,7 +17,7 @@ try {
     p { margin: 0; color: #52525b; font-size: 26px; }
     footer { margin-top: 42px; padding-top: 24px; border-top: 1px solid #d4d4d8; font-size: 22px; color: #52525b; }
   </style><body><header><img src="data:image/svg+xml;base64,${logo.toString('base64')}" alt="">Previewhost</header>
-    <h1>Local app stacks.<br>Separate worktrees.</h1><p>Run services together. Keep ports and managed data separate.</p>
+    <h1>Local previews<br>for full-stack apps.</h1><p>Start your frontend, API, and databases on your machine.</p>
     <footer>previewhost.app</footer></body></html>`);
   await page.evaluate(() => document.fonts.ready);
   await page.locator('img').evaluate(image => image.decode());

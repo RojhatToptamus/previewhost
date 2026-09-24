@@ -135,7 +135,7 @@ function PreviewDetail({ preview }: { preview: Preview }) {
           {preview.static ? <div className="demo-static"><FileCode2 aria-hidden="true" /><strong>./site</strong><Status value="Ready" /></div> : <>
             <table className="demo-services"><thead><tr><th>Service</th><th>Type</th><th>Status</th><th className="demo-connection">Connection</th><th><span className="landing-sr-only">Actions</span></th></tr></thead><tbody>{services.map(service => <tr key={service.name}>
               <th scope="row"><service.icon aria-hidden="true" /><span>{service.name}</span></th><td>{service.type}</td><td><Status value="Ready" /></td>
-              <td className="demo-connection"><code>{service.type === "HTTP" ? `shared-notes--${service.name}.localhost:${preview.port}` : "Managed · this worktree"}</code></td>
+              <td className="demo-connection"><code>{service.type === "HTTP" ? `shared-notes--${service.name}.localhost:${preview.port}` : "Managed · this environment"}</code></td>
               <td>{service.type === "HTTP" && <button type="button" onClick={() => showLogs(service.name)} aria-label={`View ${service.name} logs`}>Logs</button>}</td>
             </tr>)}</tbody></table>
             <div className="demo-job"><div><p className="demo-section-label">Setup jobs{preview.failed ? " · Latest update" : ""}</p><span><Terminal aria-hidden="true" /><strong>migrate</strong><Status value={preview.failed ? "Failed" : "Succeeded"} /></span></div><button type="button" onClick={() => showLogs("migrate", preview.failed ? "latest" : "serving")} aria-label="View migration logs">Logs</button></div>
@@ -171,7 +171,7 @@ export function ProductDemo() {
   return <section id="product-demo" className="product-demo" aria-label="Interactive Previewhost example" aria-describedby="demo-disclosure">
     <div className="demo-window">
       <aside className="demo-sidebar" aria-label="Example preview navigation">
-        <div className="demo-brand"><span aria-hidden="true" dangerouslySetInnerHTML={{ __html: mark }} /><strong>previewhost</strong></div>
+        <div className="demo-brand"><span aria-hidden="true" dangerouslySetInnerHTML={{ __html: mark }} /><strong>Previewhost</strong></div>
         <button className="demo-overview-button" type="button" aria-pressed={selection === "overview"} onClick={() => selectPreview("overview")}><Grid2X2 aria-hidden="true" />Overview<span>3</span></button>
         <button className="demo-overview-button" type="button" aria-pressed={selection === "secrets"} onClick={() => selectPreview("secrets")}><KeyRound aria-hidden="true" />Secret Manager</button>
         {["shared-notes", "docs-site"].map(project => <div className="demo-project-group" key={project}><p className="demo-sidebar-label">{project}</p>{previews.filter(preview => preview.project === project).map(preview => <button key={preview.id} type="button" className="demo-preview-button" aria-label={`${preview.project} ${preview.branch} ${previewStatus(preview)}`} aria-pressed={selection === preview.id} onClick={() => selectPreview(preview.id)}><span><GitBranch aria-hidden="true" />{preview.branch}</span><Status value={previewStatus(preview)} /></button>)}</div>)}

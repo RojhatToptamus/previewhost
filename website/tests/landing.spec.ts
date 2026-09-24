@@ -139,8 +139,8 @@ test('all four setup interfaces have correct copyable instructions and links', a
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
-  await expect(page).toHaveTitle('Previewhost — Local app stacks for Git worktrees');
-  await expect(page.locator('h1')).toHaveText('Run local app stacksfrom your Git worktrees.');
+  await expect(page).toHaveTitle('Previewhost | Local previews for full-stack apps');
+  await expect(page.locator('h1')).toHaveText('Local previews for full-stack apps.');
   await expect(page.locator('vite-error-overlay')).toHaveCount(0);
   await expect(page.locator('.landing img')).toHaveCount(0);
   await page.getByRole('button', { name: 'Copy quick install command', exact: true }).click();
@@ -162,6 +162,8 @@ test('all four setup interfaces have correct copyable instructions and links', a
   await expect(page.getByRole('tab', { name: 'Cursor', exact: true })).toBeFocused();
   await page.getByRole('button', { name: 'Copy Cursor configuration' }).click();
   expect(JSON.parse(await page.evaluate(() => navigator.clipboard.readText()))).toEqual({ mcpServers: { previewhost: { type: 'stdio', command: 'previewhost', args: ['mcp', '--allow-exec'] } } });
+  await page.getByRole('button', { name: 'Copy agent prompt', exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Preview this application with Previewhost. Read its instructions and start commands,\nreuse the project configuration if present, and verify the returned URL in a browser.');
   await page.getByRole('tab', { name: 'Cursor', exact: true }).press('Home');
   await expect(page.getByRole('tab', { name: 'CLI', exact: true })).toBeFocused();
   const localLinks = await page.locator('.landing a[href^="/"]').evaluateAll(elements => [...new Set(elements.map(el => (el as HTMLAnchorElement).pathname))]);
@@ -229,11 +231,11 @@ test('copy failure and JavaScript-free reading remain useful', async ({ page, br
   await page.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('Clipboard denied')) } }); });
   await page.goto('/');
   await page.getByRole('button', { name: 'Copy quick install command' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Copy failed.' })).toHaveText('Copy failed. Select the command and copy it manually.');
+  await expect(page.getByRole('status').filter({ hasText: 'Copy failed.' })).toHaveText('Copy failed. Select the text and copy it manually.');
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
   const staticPage = await context.newPage();
   await staticPage.goto('http://127.0.0.1:4173/');
-  await expect(staticPage.locator('h1')).toContainText('Run local app stacks');
+  await expect(staticPage.locator('h1')).toContainText('Local previews');
   await expect(staticPage.locator('.demo-noscript')).toContainText('Enable JavaScript');
   await expect(staticPage.locator('.product-demo button:visible')).toHaveCount(0);
   await staticPage.getByRole('link', { name: 'Choose your interface', exact: true }).click();

@@ -23,7 +23,7 @@ export function pagePath(id, base = '/') {
 
 export const homePage = {
   id: 'home',
-  title: 'Local app stacks for Git worktrees',
-  documentTitle: 'Previewhost — Local app stacks for Git worktrees',
-  description: 'Run frontends, APIs, PostgreSQL, and Redis together. Separate ports and managed data for each worktree, with service bindings, captured logs, and CLI or MCP control.',
+  title: 'Local previews for full-stack apps',
+  documentTitle: 'Previewhost | Local previews for full-stack apps',
+  description: 'Start your frontend, API, and databases on your machine. Separate ports and managed data for each environment. Use the CLI or connect your coding agent over MCP.',
 };

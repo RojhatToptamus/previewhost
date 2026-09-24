@@ -126,6 +126,7 @@
 .landing-setup-content > div > .landing-command-wrap + .landing-text-link { margin-top: 20px; }
 .landing-agent-setup { gap: 18px 70px; align-content: start; padding-bottom: 32px; }
 .landing-setup-next { grid-column: 2; }
+.landing-setup-next > .landing-command-wrap { margin-bottom: 16px; }
 .landing-setup-content .landing-agent-capabilities { grid-column: 1; grid-row: 2; font-size: 12px; padding-top: 4px; max-width: 350px; }
 .landing-setup-commands > p { font-size: 12px; }
 .landing-setup-commands > .landing-command-wrap { margin-bottom: 18px; }
