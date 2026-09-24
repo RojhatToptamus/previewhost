@@ -11,6 +11,7 @@ export default defineConfig(({ isPreview }) => ({
   root: resolve(repository, 'website'),
   publicDir: resolve(repository, 'assets'),
   base,
+  resolve: { alias: { '@': resolve(repository, 'dashboard/src') } },
   plugins: [react(), {
     name: 'documentation-content',
     resolveId(id) { if (id === 'virtual:docs') return '\0virtual:docs'; },

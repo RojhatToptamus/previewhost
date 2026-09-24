@@ -1,0 +1,34 @@
+name: inventory
+type: environment
+primary: frontend
+timeoutMs: 120000
+services:
+  database:
+    type: postgres
+  cache:
+    type: redis
+  migrate:
+    type: job
+    cwd: ./api
+    command: [python, -m, alembic, upgrade, head]
+    env:
+      DATABASE_URL: {service: database}
+  api:
+    type: command
+    cwd: ./api
+    command: [python, -m, uvicorn, app:app, --host, 127.0.0.1, --port, "{port}"]
+    readyPath: /health
+    dependsOn: [migrate]
+    env:
+      DATABASE_URL: {service: database}
+      REDIS_URL: {service: cache}
+      ALLOWED_ORIGIN: {browserUrl: frontend}
+      ALLOWED_NUMERIC_ORIGIN: {publicUrl: frontend}
+      API_TOKEN: {secret: "inventory/dev/api-token"}
+  frontend:
+    type: command
+    cwd: ./frontend
+    command: [npm, run, dev, --, --hostname, 127.0.0.1, --port, "{port}"]
+    env:
+      API_URL: {service: api}
+      NEXT_PUBLIC_API_URL: {browserUrl: api}

@@ -5,27 +5,10 @@ import { pages, notFoundPage, type DocPage, type DocPageId, pageHref } from "./p
 import "./styles.css";
 import "./previewhost.css";
 import brandSvg from "../../assets/previewhost.svg?raw";
+import { copyText } from "./clipboard";
 
 const GITHUB_URL = "https://github.com/RojhatToptamus/previewhost";
 const brandMark = brandSvg.replace(/<style>[\s\S]*?<\/style>/, "");
-
-async function copyText(text: string) {
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.setAttribute("readonly", "");
-  textArea.style.position = "fixed";
-  textArea.style.opacity = "0";
-  document.body.append(textArea);
-  textArea.select();
-  const copied = document.execCommand("copy");
-  textArea.remove();
-  if (!copied) throw new Error("Copy failed. Select the text and copy it manually.");
-}
 
 function MarkdownBody({ html }: { html: string }) {
   const [copyError, setCopyError] = useState("");
@@ -131,7 +114,7 @@ function DocsHeader({
         >
           {menuOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
         </button>
-        <a className="docs-brand" href={pageHref("welcome")} aria-label="Previewhost documentation">
+        <a className="docs-brand" href={import.meta.env.BASE_URL} aria-label="Previewhost home">
           <span className="docs-brand-mark" aria-hidden="true" dangerouslySetInnerHTML={{ __html: brandMark }} />
           <span className="docs-brand-name">Previewhost</span>
           <span className="docs-brand-divider" aria-hidden="true" />

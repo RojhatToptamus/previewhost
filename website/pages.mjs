@@ -18,5 +18,12 @@ export const pageSources = [
 ].map(([id, label, group, source]) => ({ id, label, group, source }));
 
 export function pagePath(id, base = '/') {
-  return `${base}${id === 'welcome' ? '' : `${id}/`}`;
+  return `${base}${id === 'home' ? '' : id === 'welcome' ? 'introduction/' : `${id}/`}`;
 }
+
+export const homePage = {
+  id: 'home',
+  title: 'Local previews for full-stack apps',
+  documentTitle: 'Previewhost | Local previews for full-stack apps',
+  description: 'Start your frontend, API, and databases on your machine. Separate ports and managed data for each environment. Use the CLI or connect your coding agent over MCP.',
+};

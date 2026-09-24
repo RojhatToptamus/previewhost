@@ -22,8 +22,11 @@
   --accent-soft: #f0f0f0;
   --focus-ring: #666666;
   --browser-theme-color: #ffffff;
+  --status-ok: #0f7b55;
+  --status-error: #c5372c;
+  --presentation-shadow: 0 16px 48px #00000008, 0 2px 6px #00000005;
 }
-:root[data-site-theme="dark"] {
+:root[data-site-theme="dark"], .site-dark-surface {
   --ground: #000000;
   --panel: #0a0a0a;
   --surface: #0a0a0a;
@@ -46,6 +49,9 @@
   --accent-soft: #1f1f1f;
   --focus-ring: #a1a1a1;
   --browser-theme-color: #000000;
+  --status-ok: #4cc38a;
+  --status-error: #f97066;
+  --presentation-shadow: none;
 }
 
 /* Markdown elements use the template's article styles. */
