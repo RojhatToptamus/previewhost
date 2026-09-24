@@ -7,7 +7,7 @@ import http from 'node:http';
 import childProcess, { spawn, fork, type ChildProcess } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { startNative, type NativeResource, type NativeCommandSpec as CommandSpec } from './native.js';
+import { runNativeJob, startNative, type NativeResource, type NativeCommandSpec as CommandSpec } from './native.js';
 
 const posix = { skip: process.platform === 'win32' && 'Requires POSIX signals, process groups, and ps inspection' };
 const server = `
@@ -116,6 +116,48 @@ test('missing executable fails and joins supervisor cleanup', async () => {
     await resource.stop();
     await assert.rejects(access(path.join(root, 'identity.json')), { code: 'ENOENT' });
   } finally { await resource?.stop(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('finite jobs drain their result after supervisor exit and fail when no result arrives', async () => {
+  const root = await fixture('process.stdout.write("final output"); process.exitCode = Number(process.argv[2]);');
+  const originalFork = childProcess.fork;
+  let omitResult = false;
+  const replacement = test.mock.method(childProcess, 'fork', (...args: unknown[]) => {
+    const child = Reflect.apply(originalFork, childProcess, args) as ChildProcess;
+    const emit = child.emit;
+    const buffered: unknown[][] = [];
+    // Windows can report exit before reading the supervisor's final IPC messages.
+    child.emit = ((event: string | symbol, ...values: unknown[]) => {
+      const message = values[0] as { type?: string } | undefined;
+      if (event === 'message' && ['started', 'log', 'target-exit'].includes(message?.type ?? '')) {
+        if (!omitResult || message?.type !== 'target-exit') buffered.push(values);
+        return true;
+      }
+      const handled = Reflect.apply(emit, child, [event, ...values]);
+      if (event === 'exit') for (const message of buffered) Reflect.apply(emit, child, ['message', ...message]);
+      return handled;
+    }) as typeof child.emit;
+    return child;
+  });
+  syncBuiltinESMExports();
+  try {
+    for (const code of [0, 7, undefined]) {
+      omitResult = code === undefined;
+      let logs = '';
+      const work = runNativeJob({
+        spec: spec(root, { command: [process.execPath, 'server.mjs', String(code ?? 0)] }),
+        signal: new AbortController().signal, url: '', timeoutMs: 5_000,
+        appendLog(text) { logs += text; }, onResource() {},
+      });
+      if (code === 0) await work;
+      else await assert.rejects(work, { code: 'START_FAILED', message: code === 7
+        ? /Job exited \(7\)/ : /Native supervisor exited/ });
+      assert.equal(logs, 'final output');
+    }
+  } finally {
+    replacement.mock.restore(); syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('logs redact split and URL-encoded secrets and preserve split UTF-8', async () => {

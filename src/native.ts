@@ -219,7 +219,8 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     supervisor.once('error', (error) => {
       recordUnexpected(new PreviewError('START_FAILED', `Native supervisor failed: ${error.message}`));
     });
-    supervisor.once('exit', (code, signal) => {
+    // A finite job's result can still be buffered in IPC when its supervisor exits.
+    supervisor.once(job ? 'close' : 'exit', (code, signal) => {
       if (!finished) recordUnexpected(new PreviewError('START_FAILED', `Native supervisor exited (${code ?? signal ?? 'unknown'}).`));
     });
     const online = await waitMessage(supervisor, 'online', input.signal);
@@ -307,18 +308,17 @@ function waitMessage(child: ChildProcess, type: string, signal: AbortSignal): Pr
       if (value?.type === type) finish(undefined, value);
       if (value?.type === 'failure') finish(new PreviewError('START_FAILED', String(value.message ?? 'Native launch failed.')));
     };
-    const exit = () => finish(new PreviewError('START_FAILED', `Native supervisor exited before ${type}.`));
+    const close = () => finish(new PreviewError('START_FAILED', `Native supervisor exited before ${type}.`));
     const abort = () => finish(new PreviewError('CLOSED', 'Native startup was canceled.'));
     function finish(error?: Error, value?: Record<string, unknown>) {
       clearTimeout(timer);
-      child.off('message', message); child.off('exit', exit); child.off('error', finish);
+      child.off('message', message); child.off('close', close); child.off('error', finish);
       signal.removeEventListener('abort', abort);
       if (error) reject(error); else resolve(value!);
     }
-    child.on('message', message); child.once('exit', exit); child.once('error', finish);
+    child.on('message', message); child.once('close', close); child.once('error', finish);
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
-    else if (child.exitCode !== null || child.signalCode !== null) exit();
   });
 }
 
