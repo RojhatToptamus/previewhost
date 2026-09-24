@@ -71,7 +71,7 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await page.clock.install();
     await page.goto(launch);
     await expect(page).toHaveTitle("Previews · Previewhost");
-    // Open each entry once; recent navigation resolves actions from current owner data.
+    // Open each entry once; navigation resolves actions from current owner data.
     for (const name of ["storefront-checkout", "storefront-payments"]) {
       await page.locator(".overview-table .preview-name").filter({ hasText: name }).click();
       await page.getByRole("button", { name: "Overview", exact: true }).click();
@@ -188,13 +188,11 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
       .click();
     await page.getByRole("menuitem", { name: "Recheck status" }).click();
     await expect(sheet.locator(".preview-nav")).toHaveCount(1);
-    await sheet.getByRole("button", { name: "Actions for storefront-payments" }).click();
+    await sheet.getByRole("button", { name: "Actions for payments", exact: true }).click();
     await page.getByRole("menuitem", { name: "Remove entry…" }).click();
     await expect(dialog.getByRole("button", { name: "Remove entry", exact: true })).toBeDisabled();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await sheet.locator(".preview-nav").click();
-    await expect(page.getByRole("button", { name: "payments", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "payments", exact: true }).click();
     await expect(page.getByRole("article", { name: "Preview details" })).toContainText("Ready");
     await page.clock.resume();
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();

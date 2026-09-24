@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
+import { readProjectGit } from './dashboard-identity.js';
 import { loadPreviewSpec, resolvePreviewFile } from './config.js';
 import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
@@ -83,7 +84,8 @@ export async function startDashboard(options: {
   }
 
   async function readOwner(owner: Awaited<ReturnType<typeof discover>>[number]) {
-    const identity = { id: owner.id, project: (owner.connection ?? owner.retained)?.projectDirectory };
+    const project = (owner.connection ?? owner.retained)?.projectDirectory;
+    const identity = { id: owner.id, project, git: project ? await readProjectGit(project, controller.signal) : undefined };
     if (owner.retained) {
       try { return { ...identity, offline: true, previews: await offlinePreviews(owner.retained), requests: [] }; }
       catch (error) { return { ...identity, offline: true, error: failure(error) }; }
@@ -145,7 +147,7 @@ export async function startDashboard(options: {
       for (const result of results) {
         let item = result;
         if (Buffer.byteLength(JSON.stringify(item)) > limits.controlBytes - 128) {
-          item = { id: item.id, project: item.project, error: { code: 'BUSY', message: 'This project has too much detail to display. Inspect it through the CLI.' } };
+          item = { id: item.id, project: item.project, git: item.git, error: { code: 'BUSY', message: 'This project has too much detail to display. Inspect it through the CLI.' } };
         }
         const size = Buffer.byteLength(JSON.stringify(item)) + 1;
         if (bytes + size > limits.controlBytes) break;

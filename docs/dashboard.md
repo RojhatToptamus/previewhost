@@ -20,13 +20,16 @@ It does not start owners or grant execution permissions.
 
 ![Preview overview with separate Storefront worktrees](../assets/dashboard-worktrees.png)
 
-**Overview** lists project folders and their previews. Search by folder, preview name, or a source path;
-use the status filter to find active work or failures. Active previews appear first, with newer attempts first.
-Matching folder names show a distinguishing parent path. Names never merge unrelated projects.
-Click a folder name to open that row's preview. **Open app** opens the serving attempt, even if a later update failed.
+**Overview** groups linked Git worktrees under their repository. Branch names open preview
+details; **Open app** opens the serving application, even if a later update failed.
+Search by branch, folder, preview name, or source path. Filter for active work or failures.
 
-The sidebar keeps your eight most recently opened previews in this browser tab. Overview filters
-leave these shortcuts visible. Both lists have the same environment actions.
+The sidebar uses the same groups, with five previews and **Show all** for longer lists.
+Each preview has its own actions. Overview filters do not hide sidebar navigation.
+Separate clones and non-Git folders stay separate. Matching names show a distinguishing path.
+When Git metadata is unavailable, folder labels remain usable. Branch labels reflect current
+source; a preview spanning repositories stays under its owner's project.
+
 The list fills as project checks finish. Refresh checks the selected project before the rest.
 Browser Back returns to the previous view. Each preview keeps its diagnostic selections
 for this browser session, including after reload. Runtime information is fetched again.

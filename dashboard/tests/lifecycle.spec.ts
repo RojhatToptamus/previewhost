@@ -1,7 +1,8 @@
 import { test, expect, type Locator } from "@playwright/test";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 const { createPreviewRuntime } = (await import(
   new URL("../../dist/runtime.js", import.meta.url).href
@@ -16,8 +17,8 @@ const { createDataOwner } = (await import(
   new URL("../../dist/data.js", import.meta.url).href
 )) as typeof import("../../src/data");
 
-test("mixed projects remain discoverable while recent navigation and actions stay isolated", async ({ page }) => {
-  const directory = await mkdtemp(join(tmpdir(), "previewhost-navigation-"));
+test("linked worktrees stay grouped, discoverable and independently controllable", async ({ page }) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "previewhost-navigation-")));
   const evidence = "/private/tmp/previewhost-navigation-review";
   await mkdir(evidence, { recursive: true });
   const fixtures: Array<{
@@ -40,6 +41,15 @@ test("mixed projects remain discoverable while recent navigation and actions sta
   page.on("pageerror", error => errors.push(error.message));
   await page.emulateMedia({ reducedMotion: "reduce" });
   try {
+    const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=Test",
+      "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd, stdio: "pipe" });
+    const repositories = ["projects/atlas", "projects/internal/ledger-api", "repositories/customer-portal", "projects/design/studio"];
+    for (const repository of repositories) {
+      const root = join(directory, repository);
+      await mkdir(root, { recursive: true });
+      git(root, "init", "-b", "main");
+      git(root, "commit", "--allow-empty", "-m", "Disposable fixture");
+    }
     const named = [
       ["projects/atlas/web", "web"],
       ["worktrees/checkout-layout/atlas-web", "review"],
@@ -58,7 +68,14 @@ test("mixed projects remain discoverable while recent navigation and actions sta
         ["web", "api", "portal", "editor"][i % 4],
       ];
       const project = join(directory, relative);
+      if (i !== 0 && i !== 3 && i !== 5 && i !== 9) {
+        const repository = i === 1 || i === 2 ? 0 : i === 4 ? 1 : i === 6 || i === 7 ? 2 : i === 8 ? 3 : i % 4;
+        const branch = relative.split("/")[1];
+        git(join(directory, repositories[repository]), "worktree", "add", "-b", branch, project);
+      }
       await mkdir(project, { recursive: true });
+      if (i === 4) git(project, "checkout", "--detach");
+      if (i === 8) git(project, "branch", "-m", "feature/editor-toolbar-with-keyboard-navigation-and-long-labels");
       await writeFile(join(project, "index.html"), `<h1>${name} ${i}</h1>`);
       const runtime = await createPreviewRuntime({ allowedRoots: [directory] });
       if (i === 0) {
@@ -124,7 +141,7 @@ test("mixed projects remain discoverable while recent navigation and actions sta
     const rowFor = (scope: Locator, index: number) => scope.filter({ has: page.locator(
       `[title=${JSON.stringify(fixtures[index].project)}], [title^=${JSON.stringify(fixtures[index].project + " · ")}]`,
     ) });
-    const recent = (index: number) => rowFor(nav.locator(".preview-nav-row"), index);
+    const navigationRow = (index: number) => rowFor(nav.locator(".preview-nav-row"), index);
     const overview = async () => {
       const button = page.getByRole("button", { name: "Overview", exact: true });
       if (!await button.isVisible()) await page.getByRole("button", { name: "Toggle Sidebar" }).click();
@@ -168,7 +185,7 @@ test("mixed projects remain discoverable while recent navigation and actions sta
     await filterBy("All statuses");
     await search.fill("scratch");
     await expect(tableRows).toHaveCount(1);
-    await expect(tableRows).toContainText("receipt-checker");
+    await expect(page.getByRole("heading", { name: "receipt-checker" })).toBeVisible();
     await search.fill("projects/atlas/api");
     await expect(tableRows).toHaveCount(1);
     await expect(rowFor(tableRows, 0)).toBeVisible();
@@ -186,27 +203,28 @@ test("mixed projects remain discoverable while recent navigation and actions sta
     holdPages = false;
     await expect(nav.getByRole("searchbox")).toHaveCount(0);
     await expect(nav.getByRole("combobox")).toHaveCount(0);
-    // Keyboard selection adds a recent reference without changing project identity.
+    // Keyboard selection opens the exact worktree without changing project identity.
     await rowFor(tableRows, 0).locator(".preview-name").focus();
     await page.keyboard.press("Enter");
     const details = page.getByRole("article", { name: "Preview details" });
     await expect(details).toContainText("projects/atlas/web");
-    await expect(recent(0)).toBeVisible();
+    await expect(navigationRow(0)).toBeVisible();
     await overview();
     await search.fill("checkout-layout");
     await rowFor(tableRows, 1).locator(".preview-name").click();
     await expect(details).toContainText("checkout-layout");
-    await expect(nav.locator(".preview-nav")).toHaveCount(2);
+    await expect(navigationRow(0)).toBeVisible();
+    await expect(navigationRow(1)).toBeVisible();
     listGate = new Promise<void>(resolve => { releaseLists = resolve; });
-    // Recent actions operate on their row without leaving the selected environment.
+    // Sidebar actions operate on their row without leaving the selected environment.
     const stoppedRow = await fixtures[0].runtime.stop(fixtures[0].name);
-    await action(recent(0), 0, "Recheck status");
-    await expect(recent(0)).toContainText("Stopped");
+    await action(navigationRow(0), 0, "Recheck status");
+    await expect(navigationRow(0)).toContainText("Stopped");
     await expect(details).toContainText("checkout-layout");
     const resumedRow = await fixtures[0].runtime.startAgain(fixtures[0].name, stoppedRow.latest!.id);
     await fixtures[0].runtime.wait(fixtures[0].name, resumedRow.candidate!.id);
-    await action(recent(0), 0, "Recheck status");
-    await expect(recent(0)).toContainText("Ready");
+    await action(navigationRow(0), 0, "Recheck status");
+    await expect(navigationRow(0)).toContainText("Ready");
     rejectRecheck = true;
     await refresh();
     await expect(details.locator(".preview-title")).toContainText("Unavailable");
@@ -225,22 +243,29 @@ test("mixed projects remain discoverable while recent navigation and actions sta
     await overview();
     await expect(search).toHaveValue("checkout-layout");
     await search.fill("");
-    // Visiting owners bounds only recent navigation; every environment remains discoverable.
-    for (const i of [10, 11, 12, 13, 14, 15, 16, 17, 1, 0]) {
-      await rowFor(tableRows, i).locator(".preview-name").click();
-      await expect(recent(i)).toBeVisible();
-      expect(await nav.locator(".preview-nav").count()).toBeLessThanOrEqual(8);
-      await overview();
-    }
-    await expect(nav.locator(".preview-nav")).toHaveCount(8);
+    // Long repository groups are bounded; selecting a hidden row reveals it.
+    const atlas = nav.locator(".project-navigation").filter({ has: page.getByRole("button", { name: "atlas", exact: true }) });
+    await expect(atlas.locator(".preview-nav")).toHaveCount(5);
+    const toggle = atlas.getByRole("button", { name: "atlas", exact: true });
+    await toggle.focus();
+    expect(await toggle.evaluate(element => getComputedStyle(element).outlineStyle)).not.toBe("none");
+    await page.keyboard.press("Space");
+    await expect(atlas.locator(".preview-nav")).toHaveCount(0);
+    await rowFor(tableRows, 12).locator(".preview-name").click();
+    await expect(navigationRow(12)).toBeVisible();
+    await expect(atlas.locator(".preview-nav")).toHaveCount(6);
+    await overview();
+    await atlas.getByRole("button", { name: /^Show all/ }).click();
+    expect(await atlas.locator(".preview-nav").count()).toBeGreaterThan(20);
+    await atlas.getByRole("button", { name: "Show less" }).click();
+    await expect(atlas.locator(".preview-nav")).toHaveCount(5);
     await expect(tableRows).toHaveCount(100);
     await capture(100);
     const otherTab = await page.context().newPage();
     try {
       await otherTab.goto(launch);
       await expect(otherTab.locator(".overview-table tbody tr")).toHaveCount(100);
-      await expect(otherTab.locator(".preview-nav")).toHaveCount(0);
-      await expect(nav.locator(".preview-nav")).toHaveCount(8);
+      await expect(otherTab.locator(".project-navigation")).toHaveCount(6);
     } finally { await otherTab.close(); }
     await page.setViewportSize({ width: 390, height: 844 });
     for (const theme of ["light", "dark"]) {
@@ -258,21 +283,21 @@ test("mixed projects remain discoverable while recent navigation and actions sta
     await action(rowFor(tableRows, 0), 0, "Stop");
     await expect(tableRows).toHaveCount(1);
     expect(await (await fetch(neighborUrl)).text()).toBe("<h1>review 1</h1>");
-    await action(recent(0), 0, "Start preview");
+    await action(navigationRow(0), 0, "Start preview");
     await expect(tableRows).toHaveCount(2);
-    await action(recent(0), 0, "Stop");
+    await action(navigationRow(0), 0, "Stop");
     await expect(tableRows).toHaveCount(1);
-    await action(recent(0), 0, "Remove entry…");
+    await action(navigationRow(0), 0, "Remove entry…");
     await expect(page.getByRole("alertdialog")).toContainText("projects/atlas/web");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(recent(0).getByRole("button", { name: "Actions for web" })).toBeFocused();
-    await recent(0).locator(".preview-nav").click();
+    await expect(navigationRow(0).getByRole("button", { name: "Actions for web" })).toBeFocused();
+    await navigationRow(0).locator(".preview-nav").click();
     listGate = new Promise<void>(resolve => { releaseLists = resolve; });
-    await action(recent(0), 0, "Remove entry…");
+    await action(navigationRow(0), 0, "Remove entry…");
     await page.getByRole("button", { name: "Remove entry", exact: true }).click();
     await fixtures[0].daemon.closed;
     await refresh();
-    await expect(recent(0)).toHaveCount(0);
+    await expect(navigationRow(0)).toHaveCount(0);
     await expect(page.getByText("Preview no longer listed", { exact: true })).toHaveCount(0);
     listGate = undefined; releaseLists();
     await expect(page.getByText("Preview no longer listed", { exact: true })).toBeVisible();
@@ -289,7 +314,7 @@ test("mixed projects remain discoverable while recent navigation and actions sta
     await expect(details).toContainText("chart-legend");
     await page.reload();
     await expect(details).toContainText("chart-legend");
-    await expect(nav.locator(".preview-nav")).toHaveCount(7);
+    await expect(navigationRow(4)).toBeVisible();
     await overview();
     await expect(tableRows).toHaveCount(99);
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
@@ -298,14 +323,14 @@ test("mixed projects remain discoverable while recent navigation and actions sta
     const drawer = page.getByRole("dialog");
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole("searchbox")).toHaveCount(0);
-    const mobileRecent = rowFor(drawer.locator(".preview-nav-row"), 1);
-    await action(mobileRecent, 1, "Recheck status");
+    const mobileRow = rowFor(drawer.locator(".preview-nav-row"), 1);
+    await action(mobileRow, 1, "Recheck status");
     await expect(drawer).toBeVisible();
-    await mobileRecent.getByRole("button", { name: "Actions for review" }).click();
+    await mobileRow.getByRole("button", { name: "Actions for review" }).click();
     await expect(page.getByRole("menuitem", { name: "Stop", exact: true })).toBeVisible();
     await page.screenshot({ path: join(evidence, "after-100-narrow.png") });
     await page.keyboard.press("Escape");
-    await mobileRecent.locator(".preview-nav").click();
+    await mobileRow.locator(".preview-nav").click();
     await expect(drawer).toBeHidden();
     await page.setViewportSize({ width: 320, height: 740 });
     await overview();

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MoonIcon } from "lucide-react";
 import { toast } from "sonner";
 import { authenticated, call, errorMessage, type Mutate } from "./lib/api";
-import { entries, projectLabels, shortProject, type PreviewFilter, type Owner } from "./lib/model";
+import { entries, shortProject, type PreviewFilter, type Owner } from "./lib/model";
 import { Button } from "./components/ui/button";
 import { Toggle } from "./components/ui/toggle";
 import { Toaster } from "./components/ui/sonner";
@@ -29,7 +29,7 @@ export function App() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
-  const [selection, select, recent] = useSelection();
+  const [selection, select] = useSelection();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
@@ -143,13 +143,6 @@ export function App() {
     },
     [],
   );
-  const labels = projectLabels(owners);
-  const recentEntries = recent.flatMap(item => {
-    const owner = owners.find(owner => owner.id === item.owner);
-    if (!owner) return [];
-    const entry = entries(owner).find(entry => entry.name === item.name);
-    return entry ? [entry] : owner.error || item.name === undefined ? [{ owner, name: item.name }] : [];
-  });
   const selected =
     typeof selection === "object"
       ? owners.find((owner) => owner.id === selection.owner)
@@ -192,8 +185,7 @@ export function App() {
           </div>
         </header>
         <Navigation
-          recent={recentEntries}
-          labels={labels}
+          owners={owners}
           selection={selection}
           select={select}
           mutate={mutate}
@@ -247,7 +239,7 @@ export function App() {
               </div>
             )
           ) : (
-            <Overview owners={owners} labels={labels} loading={!loaded}
+            <Overview owners={owners} loading={!loaded}
               query={query} setQuery={setQuery} filter={filter} setFilter={setFilter}
               mutate={mutate} acting={acting}
               select={entry => select({ owner: entry.owner.id, name: entry.name })} />
@@ -278,6 +270,7 @@ function ownerReadFailed(current: Owner[], id: string, error: unknown) {
   return mergeOwners(current, [{
     id,
     project: current.find(owner => owner.id === id)?.project,
+    git: current.find(owner => owner.id === id)?.git,
     error: { message: errorMessage(error) },
   }]);
 }

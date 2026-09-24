@@ -86,19 +86,26 @@ Keep the brand at the left of the sidebar header area and its toggle at the righ
 
 The expanded sidebar and its brand header share a surface and right boundary. Use 12px sidebar gutters and 4px between navigation rows.
 
-The sidebar provides Overview, Secret Manager, and up to eight recently opened previews.
-Recent means visited in this browser tab, not recently modified source. Store only owner/name
-references; resolve status and actions from current API data. Overview filters never hide recent navigation.
+The sidebar provides Overview, Secret Manager, and collapsible project groups. Linked Git
+worktrees share a heading only when their canonical Git common directory matches. Independent
+clones and non-Git folders remain separate, even when names match. Missing Git metadata falls
+back to folder identity; never infer repository membership from names or remote URLs.
 
-Overview owns the complete inventory, search, and status filter. Compare project folders,
-preview names, status, and the last startup attempt. Keep different preview names below
-the folder identity; omit a repeated name unless the folder has multiple previews. Put active work first,
-then entries needing attention; sort recent attempts first within each group. A project folder
-is not necessarily a repository, and one preview may use several source repositories.
-Never group owners by matching display names.
+Show branch names beneath the repository heading. Add source subfolders and preview names
+when needed to distinguish environments; detached worktrees use folder labels. Keep exact
+paths and configured names in details and accessible control context. Branch labels describe
+current source, not a historical build. A multi-repository application belongs under its owner's
+project; its other sources remain visible in configuration and searchable from Overview.
 
-Use a folder basename with the shortest distinguishing parent suffix. Keep the complete path in details and accessible control context. Long distinguishing suffixes
-may wrap in the overview; recent rows truncate them. A folder name opens that row's preview details.
+Keep five previews visible per sidebar group, plus a selected or focused row so actions never
+make their own target disappear. Show all expands the group; collapsing it is a presentation
+choice only. Overview owns the full searchable comparison table and status filter. Group
+headings replace repeated repository names and paths in both views. Overview filters leave
+sidebar navigation available. Active work comes first, then entries needing attention, with
+newer startup attempts first within each category. No separate recent-history list is stored.
+
+Use the shortest distinguishing parent suffix for groups with matching names. Long labels
+may wrap in Overview; sidebar labels truncate and retain their full accessible context.
 
 Each row has a separate action menu; using it must not navigate. Keep sidebar action triggers
 inside their rows, aligned with the name. Reuse the same actions in overview and details.

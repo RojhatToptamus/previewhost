@@ -13,7 +13,7 @@ const { startDashboard } = (await import(
   new URL("../../dist/dashboard.js", import.meta.url).href
 )) as typeof import("../../src/dashboard");
 import type { PreviewSpec } from "../../src/contracts";
-import { projectLabels, previewDetail, visibleEntries, type Owner } from "../src/lib/model";
+import { projectLabels, entryLabel, projectGroups, visibleEntries, type Owner } from "../src/lib/model";
 import { searchLogs } from "../src/lib/log-search";
 
 test("log search retains ordered, nonduplicated context around case-insensitive matches", () => {
@@ -44,8 +44,29 @@ test("navigation labels distinguish folders without merging owners and keep clea
     { name: "app", busy: false, cleanup: [{ attemptId: "old", error: { code: "CLEANUP_INCOMPLETE", message: "Process still exists" }, sources: ["/old/backend"] }] },
     { name: "comparison", busy: false },
   ] };
-  expect(previewDetail({ owner, name: "app" }, { name: "app", qualifier: "" })).toBe("app");
+  expect(entryLabel({ owner, name: "app" }, projectGroups([owner], visibleEntries([owner], "", "all"))[0]).name).toBe("app");
   expect(visibleEntries([owner], "OLD/BACKEND", "attention").map(entry => entry.name)).toEqual(["app"]);
+});
+
+test("repository groups keep clone identity, subprojects and multiple previews distinct", () => {
+  const main: Owner = { id: "main", project: "/work/shop", git: { root: "/work/shop", commonDirectory: "/work/shop/.git", branch: "main" }, previews: [{ name: "app", busy: false }] };
+  const tree: Owner = { id: "tree", project: "/trees/shop", git: { ...main.git!, root: "/trees/shop", branch: "checkout" }, previews: [{ name: "review", busy: false }, { name: "compare", busy: false }] };
+  const clone: Owner = { ...main, id: "clone", project: "/client/shop", git: { ...main.git!, root: "/client/shop", commonDirectory: "/client/shop/.git" } };
+  const nested: Owner = { ...main, id: "nested", project: "/work/shop/apps/api" };
+  const duplicate: Owner = { ...main, id: "duplicate", project: "/forced/shop", git: { ...main.git!, root: "/forced/shop" } };
+  const owners = [main, tree, clone, nested, duplicate];
+  const groups = projectGroups(owners, visibleEntries(owners, "", "all"));
+  expect(groups).toHaveLength(2);
+  const group = groups.find(group => group.id === main.git!.commonDirectory)!;
+  expect(group.entries).toHaveLength(5);
+  const label = (id: string, name: string) => entryLabel(group.entries.find(entry => entry.owner.id === id && entry.name === name)!, group);
+  expect(label("tree", "review")).toEqual({ name: "checkout / review", qualifier: "" });
+  expect(label("tree", "compare")).toEqual({ name: "checkout / compare", qualifier: "" });
+  expect(label("nested", "app")).toEqual({ name: "main / apps/api", qualifier: "" });
+  expect(label("main", "app").qualifier).toBe("work/shop");
+  expect(label("duplicate", "app").qualifier).toBe("forced/shop");
+  expect(groups.map(group => group.label.qualifier).sort()).toEqual(["client", "work"]);
+  expect(visibleEntries(owners, "checkout", "all").map(entry => entry.name).sort()).toEqual(["compare", "review"]);
 });
 
 test("React dashboard preserves attempt isolation, logs, configuration and safe controls", async ({
@@ -202,7 +223,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       throw new Error("The authenticated dashboard could not open.");
     });
     await expect(page.locator(".overview-table .preview-name")).toHaveCount(2);
-    await page.locator(".overview-table .preview-name").filter({ hasText: "first" }).click();
+    await page.locator('.overview-table .preview-name[title$="/first"]').click();
     await expect(page.locator(".preview-title")).toContainText("Update failed");
     await expect(page.locator(".attempt-split")).toContainText("Serving");
     await expect(page.getByRole("heading", { name: "Services · serving", exact: true })).toBeVisible();
@@ -385,7 +406,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page
       .getByRole("button", { name: "Overview", exact: true })
       .click();
-    await page.locator(".overview-table .preview-name").filter({ hasText: "second-worktree" }).click();
+    await page.locator(".overview-table .preview-name").filter({ hasText: "checkout-feature-with-long-address-layout-review" }).click();
     for (const width of [820, 320, 1360]) {
       await page.setViewportSize({ width, height: 900 });
       for (const selector of [".preview-address", ".service-address"]) {
@@ -468,7 +489,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.screenshot({ path: "/tmp/previewhost-clear-logs-narrow.png" });
     await page.setViewportSize({ width: 1360, height: 900 });
     // Compare another worktree, then restore this diagnostic view through Back and reload.
-    await page.locator(".preview-nav").filter({ hasText: "first" }).click();
+    await page.locator('.preview-nav[title$="/first · app"]').click();
     await page.goBack();
     await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");
     await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText("web");
@@ -488,7 +509,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     expect((await runtimes[1].logs(current.name, currentId)).text).toContain("refresh marker");
     const independent = await context.newPage();
     await independent.goto(launch);
-    await independent.locator(".overview-table .preview-name").filter({ hasText: "second-worktree" }).click();
+    await independent.locator(".overview-table .preview-name").filter({ hasText: "checkout-feature-with-long-address-layout-review" }).click();
     await independent.getByRole("tab", { name: "Logs", exact: true }).click();
     await expect(independent.locator(".logs")).toContainText("refresh marker");
     await independent.close();

@@ -4,7 +4,10 @@ import type {
   SecretSetupSummary,
 } from "../../../src/contracts";
 
+import type { ProjectGit } from "../../../src/dashboard-identity";
+
 export type Owner = {
+  git?: ProjectGit;
   id: string;
   project?: string;
   previews?: PreviewStatus[];
@@ -131,9 +134,58 @@ export function projectLabels(owners: Owner[]): Map<string, ProjectLabel> {
   }));
 }
 
-export function previewDetail(entry: Entry, label: ProjectLabel) {
-  const name = entry.name !== label.name || entries(entry.owner).length > 1 ? entry.name : undefined;
-  return [label.qualifier, name].filter(Boolean).join(" · ");
+export type ProjectGroup = { id: string; label: ProjectLabel; directory?: string; entries: Entry[] };
+
+/** Git common directories group linked worktrees; names and remotes never merge projects. */
+export function projectGroups(owners: Owner[], list: Entry[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  for (const owner of owners) {
+    const id = owner.git?.commonDirectory ?? owner.id;
+    if (groups.has(id)) continue;
+    const common = pathSegments(owner.git?.commonDirectory);
+    const directory = owner.git
+      ? (common.at(-1) === ".git" ? owner.git.commonDirectory.slice(0, -5) : owner.git.commonDirectory)
+      : owner.project;
+    groups.set(id, { id, directory, label: { name: "", qualifier: "" }, entries: [] });
+  }
+  const labels = projectLabels([...groups.values()].map(group => ({ id: group.id, project: group.directory })));
+  for (const group of groups.values()) group.label = labels.get(group.id)!;
+  // Preserve active / attention / recent ordering, including the order of the groups.
+  const ordered = new Map<string, ProjectGroup>();
+  for (const entry of list) {
+    const id = entry.owner.git?.commonDirectory ?? entry.owner.id;
+    const group = groups.get(id)!;
+    group.entries.push(entry);
+    ordered.set(id, group);
+  }
+  return [...ordered.values()];
+}
+
+function sourceSubdirectory(owner: Owner) {
+  if (!owner.git || !owner.project) return;
+  const separator = owner.git.root.startsWith("/") ? "/" : "\\";
+  return owner.project.startsWith(owner.git.root + separator)
+    ? owner.project.slice(owner.git.root.length + 1) : undefined;
+}
+
+export function entryLabel(entry: Entry, group: ProjectGroup): ProjectLabel {
+  const { owner, name } = entry;
+  const multiple = entries(owner).length > 1;
+  const branch = owner.git?.branch;
+  const subdirectory = sourceSubdirectory(owner);
+  const duplicate = branch && group.entries.some(other => other.owner.id !== owner.id &&
+    other.owner.git?.branch === branch && sourceSubdirectory(other.owner) === subdirectory);
+  if (branch && !duplicate) {
+    return { name: [branch, subdirectory, multiple ? name : undefined].filter(Boolean).join(" / "), qualifier: "" };
+  }
+  const owners = [...new Map(group.entries.map(item => [item.owner.id, item.owner])).values()];
+  const folder = projectLabels(owners).get(owner.id)!;
+  const path = [folder.qualifier, folder.name].filter(Boolean).join("/");
+  return {
+    name: branch ? [branch, subdirectory, multiple ? name : undefined].filter(Boolean).join(" / ")
+      : owner.git ? [path, multiple ? name : undefined].filter(Boolean).join(" / ") : name ?? folder.name,
+    qualifier: duplicate ? path : "",
+  };
 }
 
 export function lastAttempt(entry: Entry) {
@@ -222,7 +274,7 @@ export function visibleEntries(
         ...attempts(entry.preview).flatMap(attempt => attempt.sources),
         ...(entry.preview?.cleanup?.flatMap(item => item.sources) ?? []),
       ];
-      const searchable = [entry.owner.project ?? entry.owner.id, entry.name, ...sources].join(" ");
+      const searchable = [entry.owner.project ?? entry.owner.id, entry.owner.git?.branch, entry.owner.git?.commonDirectory, entry.name, ...sources].join(" ");
       return searchable.toLowerCase().includes(search) &&
         (filter === "all" ||
           (filter === "active" && isActive(entry)) ||

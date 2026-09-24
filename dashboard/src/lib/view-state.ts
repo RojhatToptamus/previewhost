@@ -28,23 +28,6 @@ function selectionFromHistory(): Selection {
 
 export function useSelection() {
   const [selection, setSelection] = useState(selectionFromHistory);
-  const [recent, setRecent] = useState<PreviewSelection[]>(() => {
-    try {
-      const saved: unknown = JSON.parse(sessionStorage.getItem("previewhost.recent") ?? "[]");
-      return Array.isArray(saved) ? saved.filter(isPreviewSelection).slice(0, 8)
-        .map(({ owner, name }) => ({ owner, name })) : [];
-    } catch { return []; }
-  });
-  useEffect(() => {
-    if (!isPreviewSelection(selection)) return;
-    setRecent(current => [selection, ...current.filter(item =>
-      item.owner !== selection.owner || (item.name !== selection.name && item.name !== undefined),
-    )].slice(0, 8));
-  }, [selection]);
-  useEffect(() => {
-    try { sessionStorage.setItem("previewhost.recent", JSON.stringify(recent)); }
-    catch { /* Quick navigation still works without storage. */ }
-  }, [recent]);
   useEffect(() => {
     const restore = () => setSelection(selectionFromHistory());
     window.addEventListener("popstate", restore);
@@ -55,7 +38,7 @@ export function useSelection() {
     history.pushState({ previewhost: value }, "", "/");
     setSelection(value);
   }
-  return [selection, select, recent] as const;
+  return [selection, select] as const;
 }
 
 // Only presentation choices belong here. Runtime data and authorization stay in the API.
