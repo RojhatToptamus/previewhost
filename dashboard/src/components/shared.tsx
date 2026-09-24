@@ -66,7 +66,7 @@ export function CopyButton({
         );
       }}
     >
-      {copied ? <CheckIcon className="text-muted-foreground" /> : <CopyIcon />}
+      {copied ? <CheckIcon /> : <CopyIcon />}
       <span className="sr-only" role="status">
         {copied ? "Copied" : ""}
       </span>

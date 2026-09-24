@@ -37,16 +37,16 @@ h1 { margin:0 0 7px; font-size:30px; line-height:1.1; font-weight:600; letter-sp
 h2 { margin:0 0 6px; font-size:15px; font-weight:600; letter-spacing:-.2px; }
 p { margin:0 0 10px; }
 strong { font-weight:500; }
-.muted { color:var(--t5); }
+.muted { color:var(--t4); }
 .machine,code,pre,time { font-family:'Geist Mono',monospace; font-size:12.5px; font-weight:400; }
 .status { font-size:13px; font-weight:500; white-space:nowrap; }
 .ready { color:var(--ok); }
 .error { color:var(--err); }
 .warning { color:var(--warn); }
 .neutral { color:var(--t2); }
-.section-label { font-size:11px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--t5); }
+.section-label { font-size:11px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--t4); }
 .path { display:flex; min-width:0; font-family:'Geist Mono',monospace; font-size:12.5px; white-space:nowrap; }
-.path-parent { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--t5); }
+.path-parent { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--t4); }
 .path-tail { flex:none; color:var(--t2); }
 .notice { padding:18px 20px; border:1px solid var(--border); border-radius:var(--panel-radius); margin-bottom:24px; background:var(--subtle); color:var(--t1); }
 .notice.error { border-color:var(--err-border); }

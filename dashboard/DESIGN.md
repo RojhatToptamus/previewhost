@@ -44,6 +44,11 @@ Use semantic utilities or existing variables. Do not add color literals to compo
 | Low-priority visual detail | `--t5`, `--t6`, `--t7` |
 | Primary action | `--inv-bg`, `--inv-fg` |
 | Success, error, warning | `--ok`, `--err`, `--warn` |
+| Destructive control / hover fill | `--err-bg`, `--err-hover` |
+
+Utility controls, including copy, use muted text with a transparent background. Hover and keyboard focus use the shared hover fill and supporting text color. A copied checkmark keeps the same color as the copy icon; success does not need a bright fill or toast. Reserve strong contrast for primary actions, headings, and selected content.
+
+Inputs, selects, and outline buttons share transparent surfaces in both themes. Use the shared destructive fills rather than per-component red opacity values. Small controls such as checkboxes need a visible boundary even when unchecked.
 
 Do not use faint text for instructions, errors, or required decisions. Check text contrast against its actual background in both themes: 4.5:1 for normal text. Focus indicators and meaningful control boundaries need 3:1 contrast. These are review targets, not a claim that every existing token combination passes.
 
