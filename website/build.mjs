@@ -16,7 +16,7 @@ function pageHead(page) {
   const meta = (name, value, attribute = 'name') => `<meta ${attribute}="${name}" content="${escapeHtml(value)}" />`;
   const tags = [
     meta('robots', url ? 'index, follow, max-image-preview:large' : 'noindex, nofollow'),
-    `<link rel="alternate" type="text/markdown" href="${escapeHtml(page.id === 'home' ? absolute(pagePath('welcome', base)) : canonical)}index.md" />`,
+    ...(page.id === 'home' ? [] : [`<link rel="alternate" type="text/markdown" href="${escapeHtml(canonical)}index.md" />`]),
     `<link rel="describedby" href="${escapeHtml(absolute(`${base}llms.txt`))}" />`,
     meta('og:type', 'website', 'property'),
     meta('og:site_name', 'Previewhost', 'property'),

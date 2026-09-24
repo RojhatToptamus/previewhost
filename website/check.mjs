@@ -9,6 +9,7 @@ import { siteSettings } from './site.mjs';
 import { Marked } from 'marked';
 
 const { base, url: publicUrl } = siteSettings();
+const origin = publicUrl?.origin ?? 'http://docs.test';
 assert.equal(siteSettings({ DOCS_URL: 'https://docs.example.test/guide' }).base, '/guide/');
 for (const DOCS_URL of ['http://docs.example.test/', 'https://user:password@docs.example.test/', 'https://docs.example.test/?preview=1', 'https://docs.example.test/#guide']) {
   assert.throws(() => siteSettings({ DOCS_URL }));
@@ -46,6 +47,10 @@ for (const page of [homePage, ...pages]) {
   assert.equal(meta('og:image:height'), '630');
   assert(meta('og:image:alt')); assert(meta('twitter:image:alt'));
   const canonical = [...html.matchAll(/<link rel="canonical" href="([^"]+)"/g)];
+  const alternate = [...html.matchAll(/<link rel="alternate" type="text\/markdown" href="([^"]+)"/g)];
+  assert.deepEqual(alternate.map(match => match[1]), page.id === 'home' ? [] : [
+    `${publicUrl ? new URL(pathname, publicUrl).href : pathname}index.md`,
+  ], `${page.id}: Markdown alternate represents this page`);
   if (publicUrl) {
     const expected = new URL(pathname, publicUrl).href;
     assert.deepEqual(canonical.map(match => match[1]), [expected]);
@@ -71,8 +76,9 @@ for (const page of [homePage, ...pages]) {
     assert.deepEqual(code(markdown), code(page.markdown), `${page.id}: Markdown preserves code examples`);
     parser.walkTokens(parser.lexer(markdown), token => {
       if (token.type !== 'link' && token.type !== 'image') return;
-      if (/^(https?:|mailto:)/.test(token.href)) return;
-      const target = new URL(token.href, `http://docs.test${pathname}index.md`);
+      if (/^(mailto:|data:)/.test(token.href)) return;
+      const target = new URL(token.href, `${origin}${pathname}index.md`);
+      if (target.origin !== origin) return;
       assert(target.pathname.startsWith(base), `${page.id}: Markdown link escapes deployment prefix`);
       assert(existsSync(resolve(output, target.pathname.slice(base.length))), `${page.id}: missing Markdown target ${token.href}`);
     });
@@ -81,8 +87,9 @@ for (const page of [homePage, ...pages]) {
   assert.equal(new Set(ids).size, ids.length, `${page.id}: duplicate anchors`);
   for (const match of html.matchAll(/\b(?:href|src)="([^"]+)"/g)) {
     const href = match[1].replaceAll('&amp;', '&');
-    if (/^(https?:|mailto:|data:)/.test(href)) continue;
-    const url = new URL(href, `http://docs.test${pathname}`);
+    if (/^(mailto:|data:)/.test(href)) continue;
+    const url = new URL(href, `${origin}${pathname}`);
+    if (url.origin !== origin) continue;
     assert(url.pathname.startsWith(base), `${page.id}: link escapes deployment prefix: ${href}`);
     let target = resolve(output, url.pathname.slice(base.length));
     if (url.pathname.endsWith('/')) target = join(target, 'index.html');
@@ -104,6 +111,9 @@ const card = readFileSync(resolve(output, 'social-card.png'));
 assert.equal(card.readUInt32BE(16), 1200);
 assert.equal(card.readUInt32BE(20), 630);
 const llms = readFileSync(resolve(output, 'llms.txt'), 'utf8');
+assert.equal(readFileSync(resolve(output, 'index.md'), 'utf8'),
+  readFileSync(resolve(output, pagePath('welcome').slice(1), 'index.md'), 'utf8'),
+  'The legacy Markdown address still serves the introduction.');
 assert(llms.startsWith('# Previewhost\n\n> '));
 assert.equal((llms.match(/^- \[/gm) ?? []).length, pages.length);
 for (const page of pages) {

@@ -1,6 +1,6 @@
 # Dashboard
 
-Check running previews, read service logs, and stop or update an app from the browser.
+Check running previews, read service and setup-job logs, and stop previews from the browser.
 
 ## Open the dashboard
 

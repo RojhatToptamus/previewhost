@@ -35,6 +35,8 @@ PNG favicon with `node scripts/generate-favicon.mjs` (requires Playwright Chromi
 The product homepage is in `src/landing.tsx` and `src/landing.css`. The introduction
 is served at `/introduction/`; the other documentation routes are unchanged.
 The existing `/index.md` address still serves the introduction for Markdown readers.
+Each documentation page declares its own Markdown copy as an alternate format.
+The homepage points readers to `llms.txt` for documentation discovery.
 
 Edit the Markdown files listed in [pages.mjs](pages.mjs).
 Each page's heading supplies its title. Its first paragraph supplies its description,
