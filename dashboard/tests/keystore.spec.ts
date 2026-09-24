@@ -53,6 +53,7 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     await dashboard.open();
     await page.goto(dashboardUrl);
     await page.getByRole("button", { name: "Secret Manager", exact: true }).click();
+    await expect(page).toHaveTitle("Secret Manager · Previewhost");
     await expect(page.getByRole("heading", { name: "Create your keystore" })).toBeVisible();
     await page.getByLabel("Keystore password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill("FAKE_mismatch");
@@ -74,6 +75,7 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     try { expect((await client.secretsStatus(expired.id)).state).toBe("expired"); }
     finally { clock.mock.restore(); }
     await setup.goto(expiredUrl);
+    await expect(setup).toHaveTitle("Private setup · Previewhost");
     await expect(setup.getByRole("heading", { name: "Private setup unavailable" })).toBeVisible();
     expect((await runtime.inspect(spec)).secrets![0].selected).toBe(false);
     // Browser launches have a one-second rate limit, independent of expiry.
@@ -105,6 +107,7 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     expect(await runtime.list()).toEqual([]);
     expect((await client.secretsStatus(expired.id)).state).toBe("expired");
     await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await expect(page).toHaveTitle("Previews · Previewhost");
     await page.locator('.overview-table .preview-name[aria-label$=" · sample"]').click();
     const privateSetup = page.locator("section").filter({ has: page.getByRole("heading", { name: "Private setup", exact: true }) });
     await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toBeVisible();

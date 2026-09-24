@@ -62,6 +62,18 @@ test('MCP missing → private save → status → ordinary retry keeps values an
     assert.equal(shell.status, 200);
     assert.match(shell.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
     assert.equal(shell.headers.get('cache-control'), 'no-store');
+    const html = await shell.text();
+    assert.match(html, /<meta name="robots" content="noindex, nofollow"/);
+    assert.match(shell.headers.get('content-security-policy')!, /img-src 'self';/);
+    for (const [file, type] of [['previewhost.svg', 'image/svg+xml'], ['favicon.png', 'image/png']]) {
+      assert.ok(html.includes('/' + file));
+      const icon = await fetch(`${daemon.endpoint}/${file}`);
+      assert.equal(icon.status, 200);
+      assert.equal(icon.headers.get('content-type'), type);
+      assert.equal(icon.headers.get('cross-origin-resource-policy'), 'same-origin');
+      assert.deepEqual(Buffer.from(await icon.arrayBuffer()), await readFile(new URL('./' + file, import.meta.url)));
+      assert.equal((await fetch(`${daemon.endpoint}/${file}`, { headers: { origin: 'http://evil.example' } })).status, 401);
+    }
     assert.match(shell.headers.get('content-security-policy')!, /font-src 'self';/);
     for (const file of ['geist.woff2', 'geist-mono.woff2']) {
       const font = await fetch(`${daemon.endpoint}/fonts/${file}`);
@@ -72,7 +84,7 @@ test('MCP missing → private save → status → ordinary retry keeps values an
       assert.equal((await fetch(`${daemon.endpoint}/fonts/${file}`, { headers: { Origin: 'http://evil.example' } })).status, 401);
     }
     assert.equal((await fetch(`${daemon.endpoint}/fonts/unknown.woff2`)).status, 401);
-    assert.ok(!(await shell.text()).includes(capability));
+    assert.ok(!html.includes(capability));
     assert.equal((await browserCall(daemon.endpoint, setup.result.id, 'form')).status, 401);
     const form = await browserCall(daemon.endpoint, capability, 'form');
     assert.equal(form.data.result?.name, spec.name);

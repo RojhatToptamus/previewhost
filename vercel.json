@@ -1,0 +1,4 @@
+{
+  "buildCommand": "DOCS_URL=https://www.previewhost.app/ npm run build:docs",
+  "outputDirectory": ".local/docs-site"
+}

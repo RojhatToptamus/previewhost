@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 
 const uiTokens = readFileSync(new URL('./ui-tokens.css', import.meta.url), 'utf8');
 // Embedded marks inherit the page theme; standalone SVGs follow the browser theme.
-export const brandMark = readFileSync(new URL('./previewhost.svg', import.meta.url), 'utf8').replace(/<style>[\s\S]*?<\/style>/, '');
+export const brandIcon = readFileSync(new URL('./previewhost.svg', import.meta.url), 'utf8');
+export const favicon = readFileSync(new URL('./favicon.png', import.meta.url));
+export const brandMark = brandIcon.replace(/<style>[\s\S]*?<\/style>/, '');
 
 /** Shared presentation only. Each page retains its own authorization and state. */
 export const uiStyle = `

@@ -155,6 +155,8 @@ export function App() {
   const location = selected
     ? [...new Set([group?.label.name ?? shortProject(selected), group?.label.qualifier, label?.name, label?.qualifier].filter(Boolean))].join(" · ")
     : "Preview";
+  const pageTitle = selection === "secrets" ? "Secret Manager" : typeof selection === "object" ? location : "Previews";
+  useEffect(() => { document.title = `${pageTitle} · Previewhost`; }, [pageTitle]);
   return (
     <TooltipProvider>
       <SidebarProvider className="app-shell">

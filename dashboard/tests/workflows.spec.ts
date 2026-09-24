@@ -235,7 +235,9 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       throw new Error("The authenticated dashboard could not open.");
     });
     await expect(page.locator(".overview-table .preview-name")).toHaveCount(2);
+    await expect(page).toHaveTitle("Previews · Previewhost");
     await page.locator('.overview-table .preview-name[title$="/first"]').click();
+    await expect(page).toHaveTitle(/first.* · Previewhost$/);
     await expect(page.locator(".preview-title")).toContainText("Update failed");
     await expect(page.locator(".attempt-split")).toContainText("Serving");
     await expect(page.getByRole("heading", { name: "Services · serving", exact: true })).toBeVisible();
