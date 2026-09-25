@@ -248,7 +248,7 @@ export function hint(entry: Entry) {
     : "Start again uses the same configuration and current source without reloading YAML; the URL may change.";
 }
 
-export type PreviewFilter = "all" | "active" | "attention" | "stopped";
+export type PreviewFilter = "all" | "active" | "attention" | "inactive";
 export function needsAttention(entry: Entry) {
   return !!(
     entry.owner.error ||
@@ -283,11 +283,14 @@ export function visibleEntries(
         (filter === "all" ||
           (filter === "active" && isActive(entry)) ||
           (filter === "attention" && needsAttention(entry)) ||
-          (filter === "stopped" &&
+          (filter === "inactive" &&
             !entry.owner.error &&
+            (!entry.owner.offline || !!entry.preview) &&
             !isActive(entry) &&
             !pending(entry).length &&
-            !needsCleanup(entry.preview)));
+            !needsCleanup(entry.preview) &&
+            !entry.preview?.url &&
+            !entry.preview?.data?.running));
     })
     .sort(
       (a, b) =>

@@ -1,3 +1,4 @@
+import { DatabaseIcon, FileCode2Icon, LayersIcon, LinkIcon, TerminalIcon } from "lucide-react";
 import type { AttemptSummary, ServiceStatus } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import {
@@ -43,6 +44,17 @@ const types: Record<string, string> = {
   "external-postgres": "PostgreSQL",
   "external-redis": "Redis",
 };
+const serviceIcons = {
+  command: TerminalIcon, static: FileCode2Icon, attach: LinkIcon,
+  postgres: DatabaseIcon, "external-postgres": DatabaseIcon,
+  redis: LayersIcon, "external-redis": LayersIcon, job: TerminalIcon,
+};
+
+function ResourceName({ name, type }: { name: string; type: string }) {
+  const Icon = serviceIcons[type as keyof typeof serviceIcons];
+  return <span className="resource-name">{Icon && <Icon aria-hidden="true" />}<strong>{name}</strong></span>;
+}
+
 const tone = (value: string) =>
   value === "failed"
     ? "error"
@@ -61,20 +73,20 @@ export function Activity(props: Props) {
     : setupRequests.slice(-1);
   return (
     <>
-      {deletionNeedsRetry(p) ? (
-        <Notice title="Data deletion incomplete" error>
-          Managed data was deleted, but its database credential could not be
-          removed. Resolve the keystore error, then review data deletion again.
-        </Notice>
-      ) : needsCleanup(p) ? (
-        <Notice title="Cleanup needs attention" error>
-          Some owned resources could not be confirmed stopped. Inspect the
-          details before retrying cleanup.
+      {needsCleanup(p) ? (
+        <Notice title={deletionNeedsRetry(p) ? "Data deletion incomplete" : "Cleanup needs attention"} error>
+          <p>{deletionNeedsRetry(p)
+            ? "Managed data was deleted, but its database credential could not be removed. Resolve the keystore error, then review data deletion again."
+            : "Some owned resources could not be confirmed stopped. Keep these source directories until cleanup succeeds."}</p>
+          {p?.cleanup?.map(item => <div key={item.attemptId}>
+            <p>{item.error.message}</p>
+            {item.sources.map(source => <Path key={source} value={source} />)}
+          </div>)}
+          {p?.data?.cleanup && <p>{p.data.cleanup.message}</p>}
         </Notice>
       ) : openRequests.length ? (
         <Notice title="Private setup requested">
-          Approve access or enter missing values in the private form. Cancel
-          there.
+          Approve access or enter missing values in the private form. Cancel there.
         </Notice>
       ) : null}
       {p && (
@@ -122,24 +134,6 @@ export function Activity(props: Props) {
         <Notice title="Configuration needs attention" error>
           {owner.configuration.error.message}
           {p?.active ? " The running app is unchanged." : ""}
-        </Notice>
-      )}
-      {(p?.cleanup?.length || p?.data?.cleanup) && (
-        <Notice title="Cleanup needs attention" error>
-          <p>
-            {deletionNeedsRetry(p)
-              ? "Database credential removal is incomplete."
-              : "Keep these source directories until cleanup succeeds."}
-          </p>
-          {p.cleanup?.map((item) => (
-            <div key={item.attemptId}>
-              <p>{item.error.message}</p>
-              {item.sources.map((source) => (
-                <Path key={source} value={source} />
-              ))}
-            </div>
-          ))}
-          {p.data?.cleanup && <p>{p.data.cleanup.message}</p>}
         </Notice>
       )}
       {!!setupRequests.length && (
@@ -300,7 +294,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
     <Section
       title={"Services" + (attempt ? " · " + attemptScope(p, attempt) : "")}
     >
-      <div className="data-table service-table">
+      <div className="data-table resource-table service-table">
         <Table>
           <TableHeader>
             <TableRow>
@@ -308,7 +302,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Address / data</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="text-right"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -318,7 +312,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
               return (
                 <TableRow key={name}>
                   <TableCell>
-                    <strong>{name}</strong>
+                    <ResourceName name={name} type={service.type} />
                     {service.error && (
                       <p className="error">{service.error.message}</p>
                     )}
@@ -368,7 +362,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
               )
               .map((resource) => (
                 <TableRow key={resource.name}>
-                  <TableCell>{resource.name}</TableCell>
+                  <TableCell><ResourceName name={resource.name} type={resource.type} /></TableCell>
                   <TableCell>{types[resource.type]}</TableCell>
                   <TableCell>
                     {p.data?.cleanup ? "Needs cleanup" : "Retained"}
@@ -405,20 +399,20 @@ function Jobs({ entry, mutate, acting, openLogs }: Props) {
   if (!jobs.length || !attempt) return null;
   return (
     <Section title={"Setup jobs · " + attemptScope(p, attempt)}>
-      <div className="data-table jobs-table">
+      <div className="data-table resource-table jobs-table">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Job</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="text-right"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {jobs.map(([name, job]) => (
               <TableRow key={name}>
                 <TableCell>
-                  <strong>{name}</strong>
+                  <ResourceName name={name} type="job" />
                   {!!job.waitingFor?.length && (
                     <p className="text-muted-foreground">
                       Waiting for <code>{job.waitingFor.join(", ")}</code>

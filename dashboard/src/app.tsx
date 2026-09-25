@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MoonIcon } from "lucide-react";
 import { toast } from "sonner";
 import { authenticated, call, errorMessage, type Mutate } from "./lib/api";
@@ -34,6 +34,8 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [selection, select] = useSelection();
+  const workspace = useRef<HTMLElement>(null);
+  useLayoutEffect(() => { workspace.current?.scrollTo(0, 0); }, [selection]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
@@ -227,7 +229,7 @@ export function App() {
           mutate={mutate}
           acting={acting}
         />
-        <main className="main-workspace">
+        <main className="main-workspace" ref={workspace}>
           {!authenticated ? (
             <div className="page">
               <EmptyState title="Open from your terminal">

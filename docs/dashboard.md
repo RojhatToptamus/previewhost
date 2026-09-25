@@ -47,18 +47,21 @@ and relaunch with `--allow-exec`. This stops that owner's previews; managed data
 
 ![Preview overview with separate Storefront worktrees](../assets/dashboard-worktrees.png)
 
-**Overview** groups linked Git worktrees under their repository. Branch names open preview
-details; **Open app** opens the serving application, even if a later update failed.
+**Overview** compares previews across projects. Each row identifies the project and worktree.
+Names open details; **Open app** opens the serving application, even if a later update failed.
 Preview details show its hostname and numeric localhost URL when available, with open
 and copy actions. They are different browser origins; switching does not bypass CORS.
-Search by branch, folder, preview name, or source path. Filter for active work or failures.
+Search by branch, folder, preview name, or source path. **All**, **Active**, **Needs attention**,
+and **Inactive** keep your search. An active application with a failed update appears in both
+Active and Needs attention. An unavailable owner is not assumed inactive.
 
-The sidebar keeps projects in alphabetical order. Expand a project to browse its worktrees;
-one project opens at a time. Its heading stays visible as you scroll. Opening a preview reveals
-its selected row. Each preview has its own actions, and status changes do not reorder navigation.
+The sidebar groups linked Git worktrees by repository. Expand several projects to compare worktrees.
+Project menus offer **Pin project**, **Unpin project**, and **Move up/down** among pins.
+Pins appear first; **More projects** reveals the remaining projects alphabetically.
+These preferences survive dashboard restarts and do not change running previews, data, or secrets.
+Without pins, all projects remain visible. Preview menus appear on hover or keyboard focus,
+and stay visible for the selected preview and on touch screens.
 
-Use the counts above Overview to show active previews or those needing attention. These
-shortcuts clear search; the status dropdown keeps it. Overview filters do not hide the sidebar.
 Separate clones and non-Git folders stay separate. Matching names show a distinguishing path.
 When Git metadata is unavailable, folder labels remain usable. Branch labels reflect current
 source; a preview spanning repositories stays under its owner's project.
@@ -70,6 +73,7 @@ for this browser session, including after reload. Runtime information is fetched
 ## Inspect services and updates
 
 Open a preview's **Activity** tab to see services, setup jobs, and available recovery actions.
+Resource icons identify the declared service type. The title and addresses scroll away while diagnostic tabs remain reachable.
 **Serving** identifies the active application. **Latest update** identifies the replacement attempt.
 Services and setup jobs identify the attempt they belong to. A failed resource's **Logs** action
 selects that exact attempt and source. Failed updates do not roll back source edits or database writes.

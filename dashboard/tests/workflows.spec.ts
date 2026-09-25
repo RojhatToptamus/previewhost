@@ -418,8 +418,8 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.locator(".preview-address a").first().focus();
     expect(await page.locator(".preview-address a").first().evaluate(element => {
       const css = getComputedStyle(element);
-      return { outline: css.outlineWidth, border: css.borderWidth, shadow: css.boxShadow };
-    })).toEqual({ outline: "2px", border: "0px", shadow: "none" });
+      return { outline: css.outlineStyle, border: css.borderWidth, shadow: css.boxShadow };
+    })).toEqual({ outline: "none", border: "0px", shadow: "none" });
     const folders = page.getByRole("button", { name: "Source folders", exact: true });
     await folders.focus();
     await page.keyboard.press("Enter");
@@ -695,7 +695,8 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.screenshot({ path: "/tmp/previewhost-clear-logs-narrow.png" });
     await page.setViewportSize({ width: 1360, height: 900 });
     // Compare another worktree, then restore this diagnostic view through Back and reload.
-    await page.getByRole("navigation", { name: "Projects", exact: true }).getByRole("button", { name: "first", exact: true }).click();
+    const firstProject = page.getByRole("navigation", { name: "Projects", exact: true }).getByRole("button", { name: "first", exact: true });
+    if (await firstProject.getAttribute("aria-expanded") !== "true") await firstProject.click();
     await page.locator('.preview-nav[title$="/first · app"]').click();
     await page.goBack();
     await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");

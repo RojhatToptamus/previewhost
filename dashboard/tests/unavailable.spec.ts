@@ -77,8 +77,7 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
       await page.getByRole("button", { name: "Overview", exact: true }).click();
     }
     const nav = page.locator('[data-slot="sidebar-content"]');
-    await nav.getByRole("button", { name: "storefront-checkout", exact: true }).click();
-    await expect(nav.getByRole("button", { name: /^Actions for/ })).toHaveCount(1);
+    await expect(nav.getByRole("button", { name: /^Actions for/ })).toHaveCount(2);
     const stale = nav.getByRole("button", {
       name: "Actions for storefront-checkout",
       exact: true,
@@ -99,7 +98,6 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(stale).toBeFocused();
     expect(await readProjectRecord(rows[0].path)).toEqual(rows[0].record);
-    await nav.getByRole("button", { name: "storefront-payments", exact: true }).click();
     await nav
       .getByRole("button", { name: "Actions for storefront-payments" })
       .click();
@@ -117,16 +115,12 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("combobox", { name: "Filter previews" }).click();
-    await page
-      .getByRole("option", { name: "Needs attention", exact: true })
-      .click();
+    await page.getByRole("tab", { name: "Needs attention", exact: true }).click();
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();
     const sheet = page.getByRole("dialog");
     await expect(
       sheet.getByRole("button", { name: /^Actions for/ }),
-    ).toHaveCount(1);
-    await sheet.getByRole("button", { name: "storefront-checkout", exact: true }).click();
+    ).toHaveCount(2);
     await sheet
       .getByRole("button", { name: "Actions for storefront-checkout" })
       .click();
@@ -184,7 +178,6 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
       ...rows[1].record,
       endpoint: recovered.endpoint,
     });
-    await sheet.getByRole("button", { name: "storefront-payments", exact: true }).click();
     await sheet
       .getByRole("button", { name: "Actions for storefront-payments" })
       .click();
@@ -199,15 +192,12 @@ test("unavailable entries can be rechecked and removed only after explicit, guar
     await page.clock.resume();
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();
     await sheet.getByRole("button", { name: "Overview", exact: true }).click();
-    await page.getByRole("combobox", { name: "Filter previews" }).focus();
-    await page.keyboard.press("Enter");
-    await expect(page.getByRole("option", { name: "Needs attention", exact: true })).toBeFocused();
+    await page.getByRole("tab", { name: "Needs attention", exact: true }).focus();
     await page.keyboard.press("Home");
-    await expect(page.getByRole("option", { name: "All statuses", exact: true })).toBeFocused();
-    await page.keyboard.press("Enter");
+    await expect(page.getByRole("tab", { name: "All", exact: true })).toBeFocused();
     await page.locator(".overview-table .preview-name").click();
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();
-    await expect(sheet.locator(".preview-nav")).toContainText("Ready");
+    await expect(sheet.locator(".preview-nav")).toHaveAttribute("aria-label", /Ready/);
     await expect(
       sheet.getByRole("button", { name: "Actions for storefront-payments · payments" }),
     ).toBeVisible();

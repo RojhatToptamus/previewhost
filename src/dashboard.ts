@@ -3,6 +3,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { readProjectGit } from './dashboard-identity.js';
+import { navigationPreferences, navigationPreferencesSchema } from './dashboard-preferences.js';
 import { loadPreviewSpec, resolvePreviewFile } from './config.js';
 import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
@@ -17,6 +18,8 @@ import { Keystore, secretListSchema, unlockSchema } from './keystore.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('navigationPreferences') }),
+  navigationPreferencesSchema.extend({ action: z.literal('saveNavigationPreferences') }),
   z.strictObject({ action: z.literal('list'), after: ownerId.optional() }),
   z.strictObject({ action: z.literal('recheck'), owner: ownerId }),
   z.strictObject({ action: z.literal('reviewRemoval'), owner: ownerId }),
@@ -125,6 +128,11 @@ export async function startDashboard(options: {
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
     const p = parsed.data;
+    if (p.action === 'navigationPreferences' || p.action === 'saveNavigationPreferences') {
+      const update = navigationPreferences(p.action === 'saveNavigationPreferences' ? { pinnedProjects: p.pinnedProjects } : undefined, signal);
+      updates.add(update);
+      try { return await update; } finally { updates.delete(update); }
+    }
     if (p.action === 'listSecrets' || p.action === 'unlockKeystore' || p.action === 'rememberKeystore' || p.action === 'forgetKeystore') {
       const work = (async () => {
         if (p.action === 'unlockKeystore') { const { action: _, ...input } = p; return store.unlock(input, { signal }); }

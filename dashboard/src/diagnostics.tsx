@@ -222,7 +222,7 @@ export function Diagnostics({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" aria-label="Log options">
-                <MoreHorizontalIcon />
+                {loading ? <Spinner aria-label="Refreshing output" /> : <MoreHorizontalIcon />}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -254,19 +254,18 @@ export function Diagnostics({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {tab === "logs" && (
+        {tab === "logs" && (query || clearAfter !== undefined || logs?.truncated) && (
           <div className="log-options">
             <p role="status" className="log-note">
-              {loading && <Spinner aria-label="Refreshing output" />}
               {logs
                 ? query
                   ? `${matches!.count} matching ${matches!.count === 1 ? "line" : "lines"}${showContext ? " · With context" : ""}`
-                  : "Captured output"
+                  : ""
                 : loading
                   ? "Loading output…"
                   : "Output unavailable"}
-              {logs && clearAfter !== undefined ? " · Earlier output hidden" : ""}
-              {logs?.truncated ? " · Earlier output omitted" : ""}
+              {logs && clearAfter !== undefined ? `${query ? " · " : ""}Earlier output hidden` : ""}
+              {logs?.truncated ? `${query || clearAfter !== undefined ? " · " : ""}Earlier output omitted` : ""}
             </p>
           </div>
         )}

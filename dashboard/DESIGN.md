@@ -75,7 +75,7 @@ Use Geist for interface text and Geist Mono for machine values. Mono belongs on 
 
 Treat these as shared recipes, not reasons to scatter literal values across components. Keep control heights aligned within a row. Use `gap` for relationships within a group. Prefer existing spacing steps: 4, 8, 12, 16, 20, 24, and 32px.
 
-Use the existing outline icon set. Icons support labels; they do not decorate headings. Every icon-only control needs an accessible name. Do not use emoji as interface icons.
+Use the existing outline icon set. Icons support recognition, not decoration. Activity uses neutral 16px icons beside resource names: terminal for commands/jobs, file-code for static content, link for attached services, database for PostgreSQL, and layers for Redis. Map verified service types only; do not infer frameworks from names or commands. Keep type text and hide supplementary icons from assistive technology. Every icon-only control needs an accessible name. Do not use emoji as interface icons.
 
 Hover, focus, selection, and loading must not change control geometry. Keep motion brief and functional. Honor reduced-motion preferences; only animate progress while work is pending.
 
@@ -85,7 +85,7 @@ For bordered controls, keyboard focus changes the existing border color; do not 
 
 Keep one application shell. The sidebar owns preview navigation and Secret Manager. On narrow screens, use the existing Sheet; do not build a second navigation model.
 
-A preview has one persistent identity and action header, followed immediately by Activity, Logs, and Configuration tabs. Tab changes must not move the header or tabs. Content scrolls within its workspace.
+Keep only essential navigation fixed: the app header and the preview diagnostic tabs. The preview title, actions, folder, and addresses scroll with the page. Activity uses the main workspace scroll. Logs and Configuration have a viewport-sized work area with their own output/editor scroll; include their toolbar and action footer within that height. Opening either diagnostic view aligns its tabs below the app header. Refresh never changes the user’s scroll position. Selecting another preview starts at its header, or restores its chosen diagnostic view.
 
 Keep the brand above the expanded sidebar. Place its toggle at the start of the content header, followed by a separator and compact navigation context. Preview breadcrumbs offer a return to Previews and identify the project and worktree, including when the sidebar is collapsed. On narrow screens, keep the current context and hide the parent breadcrumb. Use a 24px desktop content gutter and 16px narrow-screen gutter.
 
@@ -103,24 +103,19 @@ with `(folder)`. Keep exact paths and configured names in details and accessible
 Branch labels describe current source, not a historical build. A multi-repository application belongs under its owner's
 project; its other sources remain visible in configuration and searchable from Overview.
 
-Start sidebar project groups collapsed and expand one project at a time. Opening a preview
-reveals its group and scrolls the selected row into view. Sort projects and worktrees
-alphabetically so status changes do not move navigation targets. Keep the open project while
-the dashboard is open, including across mobile drawer dismissal. Use one sidebar scroll area;
-keep the expanded project's heading sticky so its collapse control remains reachable. Every
-row stays mounted while open, so refresh cannot evict a focused action or confirmation.
+The sidebar is a stable project/worktree navigator. Keep one chevron per project; do not add a folder icon beside it. Expansion changes the chevron, not the background; reserve the selection fill for the current preview. Start groups collapsed and let users keep several expanded. Opening a preview reveals its group without closing another. Worktree labels stay alphabetic so status changes do not move navigation targets. Keep disclosure choices when dismissing the narrow-screen drawer.
 
-Overview owns search, status filtering, and comparison in one table with repository divider
-rows. Its global count links clear search and apply the corresponding status filter. Within
-groups, active work comes first, then entries needing attention, with newer startup attempts
-first within each category. Calculate distinguishing labels from the complete group before
-filtering. No separate recent-history list or project lifecycle is stored.
+Project menus offer Pin project, Unpin project, and Move up/down among pins. Pinned projects appear first in the chosen order; More projects reveals the remaining alphabetic list. With no pins, show the full project list. Pins are local navigation preferences, stored separately from project configuration. They do not start, stop, authorize, or remove anything. Preserve undiscovered pins without inventing project rows. Reordering and partial discovery must not unmount focused menus or confirmations.
+
+Overview is a cross-project comparison list, not another project tree. Use one row per preview, with project identity first and the distinguishing worktree/preview beneath. Put All, Active, Needs attention, and Inactive beside search; changing a filter preserves the query. Active and Needs attention may overlap when an update fails while an earlier app serves. Unknown owners are not Inactive. Keep active work first, then attention, then other entries, with newer startup attempts first within each category. Derive distinguishing labels from the complete group before filtering. Keep timestamps in details; do not claim startup order is recent usage.
+
+Use row separators without an outer card or shaded project divider rows. Align status and actions in compact columns; identity uses the remaining width. Keep Open app visible when available. Avoid summary metrics and duplicate filter controls.
 
 Use the shortest distinguishing parent suffix for groups with matching names. Long labels
 may wrap in Overview; sidebar labels truncate and retain their full accessible context.
 
 Each row has a separate action menu; using it must not navigate. Keep sidebar action triggers
-inside their rows, aligned with the name and visible for mouse, keyboard, and touch. Include
+inside their rows, aligned with the name. Secondary menu triggers may appear on hover, keyboard focus, selection, or while open; keep their space reserved and their keyboard target mounted. Show them continuously on touch devices. Pin/unpin and reorder return focus to the project menu. Healthy Ready and Stopped words may be omitted from sidebar rows, but remain in their accessible names and in Overview/details. Always show startup, failure, and unavailable states. Include
 project/worktree identity in accessible action names and status in navigation names. The mobile
 Sheet has a visible close control. Reuse the same actions in overview and details.
 Every entry offers Recheck status and Remove entry. Removal explains blockers in its review;
@@ -140,6 +135,8 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 | Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
 
 Long lists need bounded scrolling without burying actions. Environment tables stop growing at 320px or 45% of viewport height, with an internal scrollbar and sticky header. Secret lists use the existing bounded scroll area. An empty environment list uses a short message without a scroll box. Short lists should not gain artificial filler rows.
+
+Activity service and job tables use row separators and a quiet header without an enclosing card. Logs use one subtle output surface in both themes, with no nested boxes or extra outline. Show a log status line only for search results, hidden output, or truncation; loading belongs in an existing control without changing toolbar height.
 
 Tables compare values. Give each column enough room for its content; do not squeeze references into an action-width column. Reserve compact right columns for actions. Use row separators without extra lines above the first row or below the last.
 
