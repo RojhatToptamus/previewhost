@@ -388,9 +388,8 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.locator('.overview-table .preview-name[title$="/first"]').click();
     await expect(page).toHaveTitle(/first.* · Previewhost$/);
     await expect(page.locator(".preview-title")).toContainText("Update failed");
-    await expect(page.locator(".attempt-split")).toContainText("Serving");
     await expect(page.getByRole("heading", { name: "Services · serving", exact: true })).toBeVisible();
-    await expect(page.locator(".attempt-split .attempt-failure")).toContainText("migrate");
+    await expect(page.locator(".jobs-table tr").filter({ hasText: "migrate" })).toContainText("Failed");
     await page.screenshot({ path: "/tmp/previewhost-attempts-light.png", animations: "disabled" });
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await expect(page.locator("body")).toHaveClass(/ph-dark/);
@@ -449,7 +448,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     expect(hostnameApp.url()).toBe(hostnames[0] + "/");
     await hostnameApp.close();
     await page
-      .locator(".attempt-split .attempt-failure")
+      .locator(".jobs-table tr").filter({ hasText: "migrate" })
       .getByRole("button", { name: "Logs", exact: true })
       .click();
     await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText(

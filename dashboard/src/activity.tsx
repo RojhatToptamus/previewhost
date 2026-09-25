@@ -91,41 +91,7 @@ export function Activity(props: Props) {
       ) : null}
       {p && (
         <>
-          {p.active && latest && p.active.id !== latest.id ? (
-            <div className="attempt-split">
-              {(
-                [
-                  ["Serving", p.active],
-                  ["Latest update", latest],
-                ] as const
-              ).map(([label, attempt]) => (
-                <div key={label}>
-                  <p className="text-muted-foreground">{label}</p>
-                  <code title={attempt.id}>{attempt.id.slice(0, 8)}</code>
-                  <Status tone={tone(attempt.state)}>
-                    {capitalize(attempt.state)}
-                  </Status>
-                  <AttemptTime attempt={attempt} />
-                  <AttemptFailure attempt={attempt} openLogs={openLogs} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            (p.active ?? latest) && (
-              <div className="attempt-line">
-                <span className="section-label">
-                  {p.active ? "Serving" : "Latest attempt"}
-                </span>
-                <code title={(p.active ?? latest)!.id}>
-                  {(p.active ?? latest)!.id.slice(0, 8)}
-                </code>
-                <AttemptTime attempt={(p.active ?? latest)!} />
-              </div>
-            )
-          )}
-          {!(p.active && latest && p.active.id !== latest.id) && latest && (
-            <AttemptFailure attempt={latest} openLogs={openLogs} />
-          )}
+          {latest && <AttemptFailure attempt={latest} servingId={p.active?.id} openLogs={openLogs} />}
           <Services {...props} />
           <Jobs {...props} />
         </>
@@ -204,33 +170,30 @@ function attemptScope(
   return preview.active ? "latest update" : "latest attempt";
 }
 
-function AttemptTime({ attempt }: { attempt: AttemptSummary }) {
-  const started = new Date(attempt.startedAt);
-  return (
-    <time className="attempt-time" dateTime={attempt.startedAt} title={started.toLocaleString()}>
-      {started.toLocaleTimeString()}
-    </time>
-  );
-}
-
 function AttemptFailure({
   attempt,
+  servingId,
   openLogs,
 }: {
   attempt: AttemptSummary;
+  servingId?: string;
   openLogs: Props["openLogs"];
 }) {
   if (attempt.state !== "failed") return null;
   const failed = Object.entries(attempt.services ?? {}).filter(
     ([, service]) => service.state === "failed",
   );
+  // Jobs own their errors. Services describes the serving attempt, so only
+  // failed replacement services need a separate diagnostic here.
+  const updates = failed.filter(([, service]) => service.type !== "job");
+  if (failed.length && (!servingId || servingId === attempt.id || !updates.length)) return null;
   return (
     <div className="attempt-failure">
       {failed.length ? (
-        failed.map(([name, service]) => (
+        updates.map(([name, service]) => (
           <div key={name}>
             <div className="flex items-center justify-between gap-3">
-              <strong>{name}</strong>
+              <strong>{name} <span className="error">· Update failed</span></strong>
               <Button
                 variant="ghost"
                 size="sm"
@@ -239,7 +202,7 @@ function AttemptFailure({
                 Logs
               </Button>
             </div>
-            {service.type !== "job" && service.error && (
+            {service.error && (
               <p className="text-muted-foreground">{service.error.message}</p>
             )}
           </div>
@@ -294,7 +257,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
     <Section
       title={"Services" + (attempt ? " · " + attemptScope(p, attempt) : "")}
     >
-      <div className="data-table resource-table service-table">
+      <div className="data-table service-table">
         <Table>
           <TableHeader>
             <TableRow>
@@ -341,7 +304,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
                   </TableCell>
                   <TableCell>
                     <div className="row-actions">
-                      {service.type === "command" && (
+                      {(service.type === "command" || service.state === "failed") && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -399,7 +362,7 @@ function Jobs({ entry, mutate, acting, openLogs }: Props) {
   if (!jobs.length || !attempt) return null;
   return (
     <Section title={"Setup jobs · " + attemptScope(p, attempt)}>
-      <div className="data-table resource-table jobs-table">
+      <div className="data-table jobs-table">
         <Table>
           <TableHeader>
             <TableRow>

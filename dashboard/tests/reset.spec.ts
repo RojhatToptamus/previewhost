@@ -226,7 +226,7 @@ test("reset keeps deletion and startup outcomes in context with real PostgreSQL"
     expect(deletionCount).toBe(2);
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await page
-      .locator(".attempt-failure")
+      .locator(".jobs-table tr").filter({ hasText: "migrate" })
       .getByRole("button", { name: "Logs", exact: true })
       .click();
     await expect(page.locator(".logs")).toContainText(

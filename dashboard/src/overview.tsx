@@ -43,7 +43,7 @@ export function Overview({ owners, loading, query, setQuery, filter, setFilter, 
           ) : (
             <EmptyState title="No matching previews">Try another folder, preview name, or status.</EmptyState>
           ) : (
-            <div className="overview-table">
+            <div className="data-table overview-table">
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>Project / worktree</TableHead>
@@ -58,9 +58,9 @@ export function Overview({ owners, loading, query, setQuery, filter, setFilter, 
                     const worktree = [...new Set([entry.owner.git || label.name !== group.label.name ? label.name : "", label.qualifier].filter(Boolean))].join(" · ");
                     const status = state(entry);
                     return (
-                      <TableRow key={entry.owner.id + "/" + (entry.name ?? "")}>
+                      <TableRow key={entry.owner.id + "/" + (entry.name ?? "")} onClick={() => select(entry)}>
                         <TableCell>
-                          <Button variant="link" className="preview-name overview-identity" onClick={() => select(entry)}
+                          <Button variant="link" className="preview-name overview-identity"
                             title={entry.owner.project ?? entry.owner.id} aria-label={context}>
                             <span className="overview-project">{group.label.name}{group.label.qualifier && <code>{group.label.qualifier}</code>}</span>
                             {worktree && <span className="overview-worktree">{worktree}</span>}
@@ -72,7 +72,7 @@ export function Overview({ owners, loading, query, setQuery, filter, setFilter, 
                           </Status>
                           {status.note && !entry.owner.error && <p className="text-muted-foreground">{status.note}</p>}
                         </TableCell>
-                        <TableCell><div className="row-actions">
+                        <TableCell><div className="row-actions" onClick={event => event.stopPropagation()}>
                           {entry.preview?.active && entry.preview.url && <AppLink url={entry.preview.url} />}
                           <PreviewMenu entry={entry} label={context} mutate={mutate} acting={acting} />
                         </div></TableCell>

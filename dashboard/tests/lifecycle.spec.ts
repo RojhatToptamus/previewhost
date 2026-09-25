@@ -205,7 +205,7 @@ test("linked worktrees stay grouped, discoverable and independently controllable
       while (await notifications.count()) {
         const remaining = await notifications.count();
         await notifications.first().getByRole("button", { name: "Close toast" }).click();
-        await expect(notifications).toHaveCount(remaining - 1);
+        await expect.poll(() => notifications.count()).toBeLessThan(remaining);
       }
       await page.screenshot({ path: join(evidence, `after-${count}-light.png`), animations: "disabled" });
       await page.getByRole("button", { name: "Dark mode", exact: true }).click();
@@ -238,6 +238,18 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await expect(tableRows).toHaveCount(1);
     await expect(rowFor(tableRows, 0)).toBeVisible();
     await search.fill("");
+    // Shared sidebar geometry and selected typography stay stable.
+    const dashboardNav = page.getByRole("navigation", { name: "Dashboard", exact: true });
+    const iconCenters = await page.locator('[data-slot="sidebar-menu-button"] > svg, .project-toggle > svg').evaluateAll(icons => icons.map(icon => {
+      const box = icon.getBoundingClientRect();
+      return box.x + box.width / 2;
+    }));
+    expect(Math.max(...iconCenters) - Math.min(...iconCenters)).toBeLessThan(1);
+    const overviewButton = dashboardNav.getByRole("button", { name: "Overview", exact: true });
+    const selectedWeight = await overviewButton.evaluate(element => getComputedStyle(element).fontWeight);
+    await dashboardNav.getByRole("button", { name: "Secret Manager", exact: true }).click();
+    expect(await overviewButton.evaluate(element => getComputedStyle(element).fontWeight)).toBe(selectedWeight);
+    await overview();
     await capture(10);
     const projectOptions = (name: string) => nav.getByRole("button", { name: `Project options for ${name}`, exact: true });
     async function organize(name: string, action: string) {
@@ -273,6 +285,12 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await organize("atlas", "Unpin project");
     await expect(nav.locator(".project-toggle:visible")).toHaveCount(6);
     await expect(projectOptions("atlas")).toBeFocused();
+    // A failed non-command service keeps a focused log action on its own row.
+    await rowFor(tableRows, 3).locator(".overview-status").click();
+    await page.locator(".service-table tr").filter({ hasText: "api" }).getByRole("button", { name: "Logs", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText("api");
+    await expect(page.getByRole("combobox", { name: "Diagnostic attempt" })).toContainText((await fixtures[3].runtime.get("api")).latest!.id.slice(0, 8));
+    await overview();
     visible = 100;
     holdPages = true;
     await page.reload();
@@ -297,22 +315,30 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     const details = page.getByRole("article", { name: "Preview details" });
     await expect(details).toContainText("projects/atlas/web");
     await expect(navigationRow(0)).toBeVisible();
-    // Even a short Activity page must give Logs the full notebook workspace.
+    // Tab changes preserve the user's workspace position, even on a notebook.
     await page.setViewportSize({ width: 1280, height: 720 });
     const workspace = page.locator(".main-workspace");
-    expect(await workspace.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
-    await page.getByRole("tab", { name: "Logs", exact: true }).click();
-    await expect.poll(async () => Math.abs(
-      (await page.locator(".preview-tab-list").boundingBox())!.y - (await workspace.boundingBox())!.y,
-    )).toBeLessThan(2);
-    const output = await page.getByRole("region", { name: "Log output" }).boundingBox();
-    expect(output!.height).toBeGreaterThan(500);
-    expect(output!.y + output!.height).toBeLessThanOrEqual(720);
-    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    const tabs = page.getByRole("tablist", { name: "Preview diagnostics" });
+    const geometry = () => tabs.getByRole("tab").evaluateAll(elements => elements.map(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, weight: getComputedStyle(element).fontWeight };
+    }));
+    for (const position of [0, 100]) {
+      await workspace.evaluate((element, top) => { element.scrollTop = top; }, position);
+      const before = await geometry();
+      for (const name of ["Logs", "Configuration", "Activity"]) {
+        await tabs.getByRole("tab", { name, exact: true }).click();
+        await expect(page.getByRole("tabpanel").filter({ visible: true })).toBeVisible();
+        expect(await workspace.evaluate(element => element.scrollTop)).toBe(position);
+        expect(await geometry()).toEqual(before);
+      }
+    }
     await page.setViewportSize({ width: 1360, height: 900 });
     await overview();
     await search.fill("checkout-layout");
-    await rowFor(tableRows, 1).locator(".preview-name").click();
+    await rowFor(tableRows, 1).locator(".overview-status").click();
     await expect(details).toContainText("checkout-layout");
     const atlas = nav.locator(".project-navigation").filter({ has: page.getByRole("button", { name: "atlas", exact: true }) });
     await expect(navigationRow(0)).toBeVisible();

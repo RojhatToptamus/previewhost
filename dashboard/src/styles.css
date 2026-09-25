@@ -82,7 +82,7 @@
 }
 
 /* Shared component recipes keep sizing and states consistent across every view. */
-[data-slot="button"],
+.group\/button,
 [data-slot="sidebar-trigger"],
 [data-slot="collapsible-trigger"],
 [data-slot="sidebar-menu-button"],
@@ -95,7 +95,7 @@
   border-radius: var(--control-radius);
   box-shadow: none;
 }
-[data-slot="button"],
+.group\/button,
 [data-slot="sidebar-trigger"],
 [data-slot="collapsible-trigger"],
 [data-slot="sidebar-menu-button"],
@@ -107,11 +107,6 @@
     background-color 120ms,
     border-color 120ms,
     color 120ms;
-}
-[data-slot="button"],
-[data-slot="sidebar-trigger"],
-[data-slot="collapsible-trigger"] {
-  translate: none;
 }
 /* Borderless controls keep a keyboard cue. Bordered controls highlight their
    existing edge; input groups own the edge around their borderless input. */
@@ -335,7 +330,7 @@
   position: relative;
   border-radius: 6px;
 }
-.preview-nav-row:hover {
+:is(.preview-nav-row:not([data-active="true"]), .project-nav-row):is(:hover, :focus-within, :has(> [data-slot="dropdown-menu-trigger"][data-state="open"])) {
   background: var(--hover);
 }
 .preview-nav-row[data-active="true"] {
@@ -381,21 +376,28 @@
   width: 100%;
   height: auto;
   min-height: 32px;
-  padding: 6px 8px;
-  gap: 6px;
+  padding: 5px 7px;
+  gap: 8px;
   justify-content: flex-start;
   text-align: left;
   background: transparent;
 }
-.project-toggle:is(:hover, :focus-visible),
+.project-toggle:is(:hover, :focus-visible, [aria-expanded="true"]) { background: transparent; }
 .more-projects-toggle:is(:hover, :focus-visible) { background: var(--hover); }
+:is(.preview-nav-row, .project-nav-row) > [data-slot="dropdown-menu-trigger"]:is(:hover, :focus-visible, [data-state="open"]) {
+  background: var(--sel);
+  color: var(--t1);
+}
+.preview-nav-row[data-active="true"] > [data-slot="dropdown-menu-trigger"]:is(:hover, :focus-visible, [data-state="open"]) {
+  background: var(--border-2);
+}
 .project-heading { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .project-heading > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-heading code { font-size: 11px; font-weight: 400; color: var(--t4); }
 .project-count { color: var(--t4); font-size: 11px; font-weight: 400; width: 24px; text-align: center; }
 .navigation-label { padding: 12px 20px 4px; color: var(--t4); font-size: 11px; }
 .navigation-error { padding: 8px 20px; color: var(--err); font-size: 12px; }
-.more-projects-toggle { justify-content: flex-start; flex-shrink: 0; margin: 8px 12px; padding: 0 8px; gap: 6px; color: var(--t4); background: transparent; }
+.more-projects-toggle { justify-content: flex-start; flex-shrink: 0; margin: 8px 12px; padding: 0 7px; gap: 8px; color: var(--t4); background: transparent; }
 .project-nav-row .project-count { visibility: hidden; }
 @media (hover: hover) and (pointer: fine) {
   :is(.preview-nav-row, .project-nav-row, .overview-table tr) [data-slot="dropdown-menu-trigger"] { opacity: 0; }
@@ -511,6 +513,9 @@
   flex: none;
 }
 .preview-tabs {
+  --preview-panel-height: max(360px, calc(100dvh - 96px));
+  /* Keep the workspace stable while Radix exchanges tab panels. */
+  min-height: calc(var(--preview-panel-height) + 44px);
   flex-direction: column;
   flex: 1;
   gap: 0;
@@ -533,6 +538,7 @@
   padding: 0;
   height: 100%;
   border: 0;
+  border-bottom: 2px solid transparent;
   border-radius: 0;
   color: var(--t4);
   box-shadow: none;
@@ -540,7 +546,7 @@
 .preview-tab-list [data-slot="tabs-trigger"][data-state="active"] {
   color: var(--t1);
   background: none;
-  border-bottom: 2px solid var(--t1);
+  border-bottom-color: var(--t1);
 }
 .preview-tab-list [data-slot="tabs-trigger"]::after {
   display: none;
@@ -552,15 +558,17 @@
   scrollbar-width: thin;
 }
 .activity-panel {
+  overscroll-behavior-y: auto;
+  padding: 0 24px 20px;
+}
+.preview-panel {
+  flex: none;
+  height: var(--preview-panel-height);
   min-height: 0;
-  padding: 20px 24px;
 }
 .diagnostics-panel {
   display: flex;
   flex-direction: column;
-  flex: none;
-  height: calc(100dvh - 96px);
-  min-height: 360px;
 }
 .diagnostics-panel[data-state="inactive"] {
   display: none;
@@ -607,6 +615,9 @@
   color: var(--t4);
 }
 .log-panel {
+  margin: 16px 24px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--panel-radius);
   background: var(--subtle);
 }
 .scroll-panel:focus-visible {
@@ -679,13 +690,8 @@
   color: var(--t2);
 }
 .section {
-  padding: 20px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 20px 0 0;
 }
-.section:last-child {
-  border-bottom: 0;
-}
-.data-table.resource-table { border: 0; border-radius: 0; }
 .resource-name { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .resource-name svg { width: 16px; height: 16px; flex: none; color: var(--t4); }
 .section-label {
@@ -696,48 +702,12 @@
   color: var(--t4);
   margin-bottom: 12px;
 }
-.attempt-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 12px;
-  padding: 10px 0 16px;
-  border-bottom: 1px solid var(--border);
-}
-.attempt-line .section-label {
-  margin: 0;
-}
-.attempt-split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.attempt-split > div {
-  min-width: 0;
-  padding: 14px 16px;
-}
-.attempt-split > div + div {
-  border-left: 1px solid var(--border);
-}
-.attempt-split code {
-  display: inline-block;
-  margin: 6px 12px 0 0;
-}
 .attempt-failure {
   display: grid;
-  gap: 8px;
-  margin-top: 12px;
-  font-size: 12px;
+  gap: 12px;
+  padding-top: 20px;
+  font-size: 13px;
   overflow-wrap: anywhere;
-}
-.attempt-time {
-  color: var(--t4);
-  font-size: 11px;
-}
-.attempt-split .attempt-time {
-  display: block;
-  margin-top: 4px;
 }
 .data-table,
 .definitions {
@@ -757,22 +727,21 @@
 .overview-toolbar { display: flex; align-items: center; gap: 24px; border-bottom: 1px solid var(--border); }
 .overview-toolbar > [data-slot="input-group"] { width: 320px; margin-left: auto; margin-bottom: 8px; }
 .overview-filters[data-slot="tabs-list"] { height: 44px; padding: 0; gap: 24px; }
-.overview-filters [data-slot="tabs-trigger"] { height: 44px; padding: 0; border: 0; border-radius: 0; font-size: 13px; color: var(--t4); }
-.overview-filters [data-slot="tabs-trigger"][data-state="active"] { color: var(--t1); border-bottom: 2px solid var(--t1); }
+.overview-filters [data-slot="tabs-trigger"] { height: 44px; padding: 0; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font-size: 13px; color: var(--t4); }
+.overview-filters [data-slot="tabs-trigger"][data-state="active"] { color: var(--t1); border-bottom-color: var(--t1); }
 .overview-filters [data-slot="tabs-trigger"]::after { display: none; }
 .overview-table table { table-layout: fixed; }
-.overview-table [data-slot="table-head"] { background: transparent; }
+.overview-table tbody tr { cursor: pointer; }
 .overview-table [data-slot="table-cell"], .overview-table [data-slot="table-head"] { padding-left: 12px; padding-right: 12px; }
 .overview-table [data-slot="table-cell"] { height: 64px; }
 .overview-table .status-column { width: 190px; }
 .overview-table [data-slot="table-cell"]:last-child,
 .overview-table [data-slot="table-head"]:last-child { width: 140px; }
 .overview-identity[data-slot="button"] { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-decoration: none; }
-.overview-identity:hover .overview-project { text-decoration: underline; text-underline-offset: 3px; }
 .overview-project { color: var(--t1); }
 .overview-project code { font-size: 11px; font-weight: 400; color: var(--t4); margin-left: 8px; }
 .overview-worktree { font-family: var(--font-mono); color: var(--t4); font-size: 12px; font-weight: 400; }
-.overview-table .row-actions { gap: 4px; }
+.overview-table .row-actions { width: fit-content; margin-left: auto; gap: 4px; }
 @media (max-width: 1100px) {
   .overview-toolbar { flex-wrap: wrap; gap: 12px; }
   .overview-toolbar > [data-slot="input-group"] { width: 240px; }
@@ -1029,6 +998,7 @@
   .logs-toolbar > [data-slot="select-trigger"] {
     width: 100%;
   }
+  .log-panel { margin: 12px 16px 16px; }
   .logs-toolbar > .attempt-select {
     grid-column: 1 / 3;
     max-width: none;

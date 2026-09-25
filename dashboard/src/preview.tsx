@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { AttemptSummary } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import { attempts, hint, shortProject, state, type Entry } from "./lib/model";
@@ -34,13 +34,6 @@ export function Preview({
   const retained = attempts(p);
   const reviews = owner.reviews?.filter(review => review.name === entry.name) ?? [];
   const tab = !retained.length && view.tab === "logs" ? "activity" : view.tab;
-  const tabList = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (tab === "activity") return;
-    // Radix mounts the selected panel after the tab changes; wait for its scroll range.
-    const frame = requestAnimationFrame(() => tabList.current?.scrollIntoView({ block: "start" }));
-    return () => cancelAnimationFrame(frame);
-  }, [tab]);
   const selected = attemptId
     ? retained.find((attempt) => attempt.id === attemptId)
     : retained[0];
@@ -152,7 +145,6 @@ export function Preview({
           }}
         >
           <TabsList
-            ref={tabList}
             variant="line"
             className="preview-tab-list"
             aria-label="Preview diagnostics"
@@ -169,7 +161,7 @@ export function Preview({
               Configuration
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="activity" className="activity-panel">
+          <TabsContent value="activity" className="preview-panel activity-panel scroll-panel">
             <Activity
               entry={entry}
               mutate={mutate}
@@ -178,7 +170,7 @@ export function Preview({
             />
           </TabsContent>
           {(["logs", "configuration"] as const).map((view) => (
-            <TabsContent key={view} value={view} className="diagnostics-panel" forceMount={view === "configuration" && configurationVisited ? true : undefined}>
+            <TabsContent key={view} value={view} className="preview-panel diagnostics-panel" forceMount={view === "configuration" && configurationVisited ? true : undefined}>
               {view === "configuration" && configurationVisited && !retained.length ? (
                 <div className="diagnostic-body">
                   <Notice title={reviews.length ? "Configuration awaits review" : "No startup configuration retained"}>
