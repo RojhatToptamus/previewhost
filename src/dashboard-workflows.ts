@@ -5,7 +5,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { requestSchemas, limits, type ConfigurationBindingChange, type ConfigurationBindingRow, type PreviewDescription, type PreviewStatus, type EffectiveSpec, type StopOptions } from './contracts.js';
+import { requestSchemas, limits, type ConfigurationBindingChange, type ConfigurationBindingRow, type PreviewDescription, type PreviewStatus, type EffectiveSpec, type StopOptions, type SecretSetupStatus } from './contracts.js';
 import { configurationBindings, changeConfigurationBindings, loadPreviewSpec, readPreviewSpec, resolvePreviewFile, readConfigurationDocument, updateConfigurationDocument, type ConfigurationDocument } from './config.js';
 import { connectProject, discoverProjectOwners, projectOwnerDirectory, type ProjectOwnerInfo } from './project.js';
 import { connectPreviewDaemon } from './client.js';
@@ -17,7 +17,9 @@ export interface ConfigurationView {
   id: string; project: string; file?: string; description: PreviewDescription;
   bindings: ConfigurationBindingRow[]; existing?: PreviewStatus;
 }
+export interface PreviewReviewSummary { id: string; project: string; name: string; file?: string; expiresAt: string }
 export interface PreviewReview extends ConfigurationView {
+  setup?: SecretSetupStatus;
   inspection: PreviewDescription; inspectionError?: string; executionBlocked?: string;
   sources: string[]; commands: string[]; managedData: string[]; secretIds: string[];
 }
@@ -25,12 +27,13 @@ const path = z.string().min(1).max(4096);
 const changes = requestSchemas.configureBindings.shape.changes;
 const workflowSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('previewProjects') }),
+  z.strictObject({ action: z.literal('previewResume'), id: z.uuid() }),
   z.strictObject({ action: z.literal('configurationOpen'), owner: z.string(), name: z.string().optional(), attemptId: z.string().optional(), file: path.optional() }),
   z.strictObject({ action: z.enum(['configurationSave', 'configurationReview']), id: z.uuid(), changes }),
   z.strictObject({ action: z.literal('previewPrepare'), project: path, file: path.optional(), text: z.string().max(limits.controlBytes).optional(), format: z.enum(['yaml', 'json']).optional() }),
   z.strictObject({ action: z.literal('previewLaunch'), id: z.uuid(), approved: z.literal(true) }),
   z.strictObject({ action: z.literal('previewSecrets'), id: z.uuid(), approved: z.literal(true), reopen: z.boolean().optional() }),
-  z.strictObject({ action: z.literal('previewSetupStatus'), id: z.uuid(), requestId: z.uuid() }),
+  z.strictObject({ action: z.literal('previewSetupStatus'), id: z.uuid() }),
 ]);
 type Owner = Awaited<ReturnType<typeof discoverProjectOwners>>[number];
 type Client = ReturnType<typeof connectPreviewDaemon>;
@@ -66,6 +69,11 @@ export class DashboardWorkflows {
     signal?.addEventListener('abort', abort, { once: true });
     try { return await operation(client); }
     finally { signal?.removeEventListener('abort', abort); await client.close(); }
+  }
+  reviews(project?: string): PreviewReviewSummary[] {
+    return [...this.drafts.values()]
+      .filter(draft => draft.reviewed && Date.now() - draft.touched <= 30 * 60_000 && (!project || draft.project === project))
+      .map(draft => ({ id: draft.id, project: draft.project, name: draft.description.spec.name, file: draft.file, expiresAt: new Date(draft.touched + 30 * 60_000).toISOString() }));
   }
   private put(draft: Omit<Draft, 'id' | 'touched'>): Draft {
     for (const [id, item] of this.drafts) if (Date.now() - item.touched > 30 * 60_000 && !item.busy) this.drafts.delete(id);
@@ -114,8 +122,17 @@ export class DashboardWorkflows {
     const executes = nodes.some(([, node]) => ['command', 'job', 'postgres', 'redis', 'external-postgres', 'external-redis'].includes(node.type));
     const executionBlocked = owner && executes && !await this.withOwner(owner, async (_client, info) => info.allowExec)
       ? 'This owner does not allow execution. Explicitly shut down this project’s owner, then start it with --allow-exec. Shutdown stops its previews and ends secret approvals; data is retained.' : undefined;
+    let setup: SecretSetupStatus | undefined;
+    if (draft.setupId) {
+      try { setup = await this.project(draft.project, false, draft.roots, client => client.secretsStatus(draft.setupId!)); }
+      catch (error) {
+        if (!(error instanceof PreviewError) || error.code !== 'NOT_FOUND') throw error;
+        // Owner restart or bounded request history can end setup without losing this review.
+        draft.setupId = undefined;
+      }
+    }
     draft.reviewed = true;
-    return { ...this.view(draft), inspection, inspectionError, executionBlocked, sources: draft.roots,
+    return { ...this.view(draft), setup, inspection, inspectionError, executionBlocked, sources: draft.roots,
       commands: nodes.flatMap(([id, node]) => 'command' in node && node.command ? [`${id}: ${node.command.join(' ')} · ${node.cwd}`] : []),
       managedData: nodes.filter(([, node]) => node.type === 'postgres' || node.type === 'redis').map(([id]) => id),
       secretIds: draft.spec ? secretRequirements(draft.spec, new Set()).map(item => item.id) : draft.description.secrets?.map(item => item.id) ?? [],
@@ -143,7 +160,7 @@ export class DashboardWorkflows {
           }
         } catch { /* Non-Git and missing folders remain selectable by their recorded identity. */ }
       }
-      return { result: { projects: [...projects.values()].sort((a, b) => a.directory.localeCompare(b.directory)) } };
+      return { result: { projects: [...projects.values()].sort((a, b) => a.directory.localeCompare(b.directory)), reviews: this.reviews() } };
     }
     if (p.action === 'previewPrepare') {
       const project = await canonicalDirectory(p.project);
@@ -179,14 +196,22 @@ export class DashboardWorkflows {
       return { result: this.view(this.put({ project, description: { ...direct.description, prerequisites: direct.inspection?.prerequisites }, inspectionError: direct.inspection?.error?.message, bindings: direct.bindings, existing, roots: [...new Set(roots)], expected: expected(existing), changes: [], attemptId: p.attemptId })) };
     }
     const draft = this.drafts.get(p.id);
-    if (!draft || Date.now() - draft.touched > 30 * 60_000) throw new PreviewError('NOT_FOUND', 'This configuration view expired. Open it again.');
+    if (!draft || Date.now() - draft.touched > 30 * 60_000) throw new PreviewError('NOT_FOUND', 'This review is no longer available. Choose a configuration file or paste it again in New preview. Saved secrets are unchanged.');
     if (draft.busy) throw new PreviewError('BUSY', 'This configuration is being updated. Wait for it to finish.');
     const savingFile = p.action === 'configurationSave' ? draft.document?.file : undefined;
     if (savingFile && this.savingFiles.has(savingFile)) throw new PreviewError('BUSY', 'This file is being saved. Reload after the save finishes.');
     if (savingFile) this.savingFiles.add(savingFile);
-    draft.busy = true; draft.touched = Date.now();
+    draft.busy = true;
+    if (p.action !== 'previewSetupStatus') draft.touched = Date.now();
     try {
       await this.fresh(draft);
+      if (p.action === 'previewResume') {
+        if (!draft.reviewed) throw new PreviewError('NOT_FOUND', 'This review has already been applied. Check the preview’s current status.');
+        if (!isDeepStrictEqual(expected(await this.status(draft.project, draft.roots, draft.description.spec.name)), draft.expected)) {
+          throw new PreviewError('STALE_ATTEMPT', 'This preview changed after review. Prepare its current configuration again before starting.');
+        }
+        return { result: await this.review(draft) };
+      }
       if (p.action === 'configurationSave') {
         if (draft.document) {
           draft.document = await updateConfigurationDocument(draft.document, p.changes, { allowedRoots: [...draft.roots, dirname(draft.document.file)], signal });
@@ -213,7 +238,10 @@ export class DashboardWorkflows {
         }
         return { result: await this.review(draft) };
       }
-      if (p.action === 'previewSetupStatus') return { result: await this.project(draft.project, false, draft.roots, client => client.secretsStatus(p.requestId)) };
+      if (p.action === 'previewSetupStatus') {
+        if (!draft.setupId) throw new PreviewError('NOT_FOUND', 'No private setup has been requested for this review.');
+        return { result: await this.project(draft.project, false, draft.roots, client => client.secretsStatus(draft.setupId!)) };
+      }
       if (!draft.reviewed) throw new PreviewError('INVALID_INPUT', 'Review the configuration before starting it.');
       throwIfAborted(signal);
       if (p.action === 'previewLaunch' && !draft.setupId) {

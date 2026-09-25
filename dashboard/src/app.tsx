@@ -38,7 +38,7 @@ export function App() {
   const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
   const [acting, setActing] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<{ project?: string; resumeId?: string }>();
   const mutation = useRef(false);
   const selectedOwner = typeof selection === "object" ? selection.owner : undefined;
   useEffect(() => {
@@ -153,7 +153,7 @@ export function App() {
       ? owners.find((owner) => owner.id === selection.owner)
       : undefined;
   function previewStarted(result: LaunchResult) {
-    setCreating(false);
+    setCreating(undefined);
     setRevision(value => value + 1);
     select({ owner: result.owner, name: result.name });
   }
@@ -259,6 +259,7 @@ export function App() {
                 acting={acting}
                 revision={revision}
                 onStarted={previewStarted}
+                onPrepare={(resumeId) => setCreating({ project: selected.project, resumeId })}
               />
             ) : (
               <div className="page">
@@ -279,11 +280,11 @@ export function App() {
             <Overview owners={owners} loading={!loaded}
               query={query} setQuery={setQuery} filter={filter} setFilter={setFilter}
               mutate={mutate} acting={acting}
-              onNewPreview={() => setCreating(true)}
+              onNewPreview={() => setCreating({})}
               select={entry => select({ owner: entry.owner.id, name: entry.name })} />
           )}
         </main>
-        {creating && <NewPreview onClose={() => setCreating(false)} onStarted={previewStarted} />}
+        {creating && <NewPreview {...creating} onClose={() => setCreating(undefined)} onStarted={previewStarted} />}
         <Toaster
           theme={dark ? "dark" : "light"}
           position="bottom-right"

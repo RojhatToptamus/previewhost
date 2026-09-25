@@ -24,12 +24,20 @@ Selecting a folder does not move an existing preview or share its database data.
 Use its existing configuration file, or enter YAML/JSON without creating a file.
 Default lookup accepts `preview.yaml` or `preview.yml`; invalid or conflicting files require correction.
 Relative source paths resolve from the file's directory, or the selected project for pasted input.
-Review all source folders, commands, jobs, and managed databases before allowing startup.
+Use **Configuration guide** for examples, or optionally copy a prompt for an agent to inspect your project.
+An agent is not required. Review source folders, commands, jobs, and managed databases before allowing startup.
 
 Private setup handles secret approval, missing values, and owner unlock. After completion, return
 and continue startup. Cancellation requires an explicit new request; it never starts the application.
-Closing a review does not cancel an open private form. Pasted configuration is not retained after
-closing the dialog; enter it again or use a configuration file.
+Closing a review does not cancel an open private form. Return to **Continue setup** on the preview,
+or the unfinished reviews in **New preview**, to check setup and explicitly start the application.
+Refresh does not discard a reviewed configuration. Multiple reviews stay separate.
+
+Reviews remain available for 30 minutes after your last review or change, with at most 16 retained.
+Configuration stays in the dashboard process, not browser storage. When it exits or a review expires,
+choose the file or paste configuration again. Saved secrets remain.
+If you close the browser tab, restore the closed tab. A new
+`previewhost dashboard` process cannot recover an old process’s unfinished reviews.
 
 Existing owners keep their execution permissions. The dashboard does not restart an owner to
 change those permissions. If it was started without execution permission, explicitly shut it down

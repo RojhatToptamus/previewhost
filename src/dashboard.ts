@@ -88,7 +88,7 @@ export async function startDashboard(options: {
 
   async function readOwner(owner: Awaited<ReturnType<typeof discover>>[number]) {
     const project = (owner.connection ?? owner.retained)?.projectDirectory;
-    const identity = { id: owner.id, project, git: project ? await readProjectGit(project, controller.signal) : undefined };
+    const identity = { id: owner.id, project, reviews: project ? workflows.reviews(project) : [], git: project ? await readProjectGit(project, controller.signal) : undefined };
     if (owner.retained) {
       try { return { ...identity, offline: true, previews: await offlinePreviews(owner.retained), requests: [] }; }
       catch (error) { return { ...identity, offline: true, error: failure(error) }; }
@@ -155,7 +155,7 @@ export async function startDashboard(options: {
       for (const result of results) {
         let item = result;
         if (Buffer.byteLength(JSON.stringify(item)) > limits.controlBytes - 128) {
-          item = { id: item.id, project: item.project, git: item.git, error: { code: 'BUSY', message: 'This project has too much detail to display. Inspect it through the CLI.' } };
+          item = { id: item.id, project: item.project, git: item.git, reviews: [], error: { code: 'BUSY', message: 'This project has too much detail to display. Inspect it through the CLI.' } };
         }
         const size = Buffer.byteLength(JSON.stringify(item)) + 1;
         if (bytes + size > limits.controlBytes) break;

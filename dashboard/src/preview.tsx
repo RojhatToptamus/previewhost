@@ -18,18 +18,21 @@ export function Preview({
   acting,
   revision,
   onStarted,
+  onPrepare,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
   revision: number;
   onStarted(result: LaunchResult): void;
+  onPrepare(resumeId?: string): void;
 }) {
   const [view, updateView] = usePreviewView(entry.owner.id, entry.name);
   const [configurationVisited, setConfigurationVisited] = useState(view.tab === "configuration");
   const { attemptId, clearAfter, source, query, wrapLogs, showContext } = view;
   const { owner, preview: p } = entry;
   const retained = attempts(p);
+  const reviews = owner.reviews?.filter(review => review.name === entry.name) ?? [];
   const tab = !retained.length && view.tab === "logs" ? "activity" : view.tab;
   const selected = attemptId
     ? retained.find((attempt) => attempt.id === attemptId)
@@ -43,7 +46,7 @@ export function Preview({
     ...(hostnameUrl && hostnameUrl !== p!.url ? [{ label: "Hostname", url: hostnameUrl }] : []),
     { label: "Localhost", url: p!.url! },
   ] : [];
-  const primary = !canOpen
+  const primary = !canOpen && !(reviews.length && !retained.length)
     ? actions.find((action) => !action.danger)
     : undefined;
   const context = hint(entry);
@@ -66,6 +69,7 @@ export function Preview({
             </Status>
           </div>
           <div className="header-actions">
+            {!retained.length && <Button variant={primary ? "outline" : "default"} disabled={acting || Boolean(owner.error)} onClick={() => onPrepare(reviews.length === 1 ? reviews[0].id : undefined)}>{reviews.length ? "Continue setup" : "Prepare preview"}</Button>}
             {canOpen && <AppLink url={p!.url!} variant="default" />}
             {actions.map((action) => (
               <Button
@@ -167,7 +171,13 @@ export function Preview({
           </TabsContent>
           {(["logs", "configuration"] as const).map((view) => (
             <TabsContent key={view} value={view} className="diagnostics-panel" forceMount={view === "configuration" && configurationVisited ? true : undefined}>
-              {view === "configuration" && configurationVisited ? <ConfigurationPanel
+              {view === "configuration" && configurationVisited && !retained.length ? (
+                <div className="diagnostic-body">
+                  <Notice title={reviews.length ? "Configuration awaits review" : "No startup configuration retained"}>
+                    {reviews.length ? "Continue setup to review the configuration and start the preview." : "Choose a configuration file or paste YAML/JSON using Prepare preview. Saved secrets remain available."}
+                  </Notice>
+                </div>
+              ) : view === "configuration" && configurationVisited ? <ConfigurationPanel
                 entry={entry} attemptId={p?.active?.id ?? p?.latest?.id ?? p?.candidate?.id} revision={revision} onStarted={onStarted}
                 snapshot={selected && <Diagnostics entry={entry} revision={revision} clearAfter={clearAfter}
                   setClearAfter={clearAfter => updateView({ clearAfter })} tab="configuration" selected={selected}

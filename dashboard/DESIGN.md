@@ -187,6 +187,11 @@ Do not add a component merely to replace working native behavior. Shared CSS own
 - Show pending feedback only during actual work. Prevent duplicate submissions and preserve the control's size.
 - Explain disabled actions when the reason is not evident from nearby state.
 
+New preview links to configuration examples and offers an optional agent prompt. Keep manual input complete.
+Unfinished reviews are recovered by their exact server-side draft ID; never store configuration in browser storage.
+Private setup stays in its separate tab. Returning refreshes its status; only an explicit Start launches the application.
+State the review retention limit where recovery is offered.
+
 Dialogs have a title, relevant consequences, and explicit actions. Keep focus inside while open, support dismissal where safe, and return focus to the trigger. Never stack dialogs. Confirm destructive scope using actual environment and database names.
 
 ## 6. States and safety copy

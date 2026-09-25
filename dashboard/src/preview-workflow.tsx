@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PreviewStatus, SecretSetupStatus } from "../../src/contracts";
 import type { PreviewReview } from "../../src/dashboard-workflows";
 import { call, errorMessage } from "./lib/api";
@@ -59,6 +59,7 @@ export function PreviewReviewDialog({
           busy={busy}
           setBusy={setBusy}
           onBack={onClose}
+          onClose={() => onClose(stale)}
           onStarted={onStarted}
           onStale={() => setStale(true)}
         />
@@ -74,6 +75,7 @@ export function PreviewReviewStep({
   onBack,
   onStarted,
   onStale,
+  onClose,
 }: {
   review: PreviewReview;
   busy: boolean;
@@ -81,12 +83,13 @@ export function PreviewReviewStep({
   onBack(stale?: boolean): void;
   onStarted(result: LaunchResult): void;
   onStale?(): void;
+  onClose(): void;
 }) {
   const [approved, setApproved] = useState(false);
   const [error, setError] = useState("");
   const [needsSecrets, setNeedsSecrets] = useState(false);
   const [stale, setStale] = useState(false);
-  const [setup, setSetup] = useState<SecretSetupStatus>();
+  const [setup, setSetup] = useState<SecretSetupStatus | undefined>(review.setup);
   const replacement = Boolean(review.existing?.active);
   const spec = review.description.spec;
   const services = spec.type === "environment" ? Object.values(spec.services) : [spec];
@@ -105,7 +108,7 @@ export function PreviewReviewStep({
     review.secretIds.length > 0 ||
     review.managedData.length > 0;
   async function run(action: "launch" | "secrets" | "status") {
-    if (busy || !approved) return;
+    if (busy || (action !== "status" && !approved)) return;
     setBusy(true);
     setError("");
     try {
@@ -131,7 +134,6 @@ export function PreviewReviewStep({
           await call<SecretSetupStatus>({
             action: "previewSetupStatus",
             id: review.id,
-            requestId: setup.id,
           }),
         );
       }
@@ -162,6 +164,26 @@ export function PreviewReviewStep({
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!setupPending || busy) return;
+    const controller = new AbortController();
+    let checking = false;
+    const check = () => {
+      if (document.hidden || checking) return;
+      checking = true;
+      void call<SecretSetupStatus>({ action: "previewSetupStatus", id: review.id }, controller.signal)
+        .then(result => { if (!controller.signal.aborted) setSetup(result); })
+        .catch(problem => { if (!controller.signal.aborted) setError(errorMessage(problem)); })
+        .finally(() => { checking = false; });
+    };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      controller.abort();
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [setupPending, busy, review.id]);
   return (
     <>
       <DialogHeader>
@@ -293,7 +315,7 @@ export function PreviewReviewStep({
           <Checkbox
             id="preview-approval"
             checked={approved}
-            disabled={busy || Boolean(setup) || Boolean(review.executionBlocked)}
+            disabled={busy || Boolean(review.executionBlocked)}
             onCheckedChange={(value) => setApproved(value === true)}
           />
           <FieldLabel htmlFor="preview-approval">
@@ -316,9 +338,9 @@ export function PreviewReviewStep({
             error={setup.state === "partial"}
           >
             {setup.state === "complete"
-              ? "Continue when you are ready to start with the reviewed configuration."
+              ? `Secrets are ready. ${replacement ? "Apply configuration" : "Start preview"} when you are ready to run this configuration.`
               : setupPending
-                ? "Complete or cancel setup in the private form, then check its status here. Closing this review does not cancel the private form."
+                ? "Complete setup in the private tab, then return here. You can close this review and continue from New preview."
                 : "The new configuration has not started. Open a new private request to continue."}
             {setup.browser === "failed" && (
               <p>
@@ -336,20 +358,20 @@ export function PreviewReviewStep({
         )}
       </div>
       <DialogFooter>
-        <Button variant="outline" disabled={busy} onClick={() => onBack(stale)}>
-          Back
+        <Button variant="outline" disabled={busy} onClick={() => setup ? onClose() : onBack(stale)}>
+          {setup ? "Close" : "Back"}
         </Button>
         {setupPending && (
           <Button
             variant="outline"
-            disabled={busy}
+            disabled={busy || !approved || stale || Boolean(review.executionBlocked)}
             onClick={() => void run("secrets")}
           >
             Open private form
           </Button>
         )}
         <Button
-          disabled={busy || !approved || stale || Boolean(review.executionBlocked)}
+          disabled={busy || (!setupPending && (!approved || stale || Boolean(review.executionBlocked)))}
           onClick={() =>
             void run(
               setupPending

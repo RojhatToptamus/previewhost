@@ -186,12 +186,12 @@ export function Activity(props: Props) {
               )}
               {request.state === "expired" && (
                 <p>
-                  If setup is still needed, ask your agent for a new request.
+                  Review the configuration to request private setup again.
                 </p>
               )}
               {request.state === "partial" && (
                 <p>
-                  Ask your agent to check this request’s result before continuing.
+                  Check this request’s result before continuing. Earlier approvals and saved values remain.
                 </p>
               )}
             </div>

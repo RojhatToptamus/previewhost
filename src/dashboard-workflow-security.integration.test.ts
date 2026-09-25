@@ -16,7 +16,7 @@ import { createPreviewRuntime } from './runtime.js';
 import { SecretSetup } from './secrets-setup.js';
 import { testKeystore } from './testSupport/keystore.js';
 import type { PreviewStatus, RuntimeOptions, SecretSetupStatus } from './contracts.js';
-import type { ConfigurationView, PreviewReview } from './dashboard-workflows.js';
+import type { ConfigurationView, PreviewReview, PreviewReviewSummary } from './dashboard-workflows.js';
 
 async function fixture(t: TestContext, authorize: RuntimeOptions['authorize'] = () => true) {
   const isolated = await testKeystore(t);
@@ -82,34 +82,59 @@ test('canceling dashboard direct binding setup reaches owner authorization and l
   assert.deepEqual(f.privateUrls, []);
 });
 
-test('dashboard canceled private setup needs an explicit resume and delayed entry never launches the reviewed recipe', { timeout: 15_000 }, async t => {
+test('dashboard restores exact direct reviews after canceled or delayed private setup without starting or saving a recipe', { timeout: 15_000 }, async t => {
   const f = await fixture(t);
-  await writeFile(join(f.project, 'app.mjs'), `import fs from 'node:fs'; import http from 'node:http'; fs.writeFileSync('started','yes'); http.createServer((q,r)=>r.end(process.env.TOKEN)).listen(+process.env.PORT,process.env.HOST);`);
-  await writeFile(join(f.project, 'preview.yaml'), `name: app\ntype: command\ncwd: .\ncommand: [${JSON.stringify(process.execPath)}, app.mjs]\nenv:\n  TOKEN: {secret: test/app}\n`);
-  const review = (await f.api<PreviewReview>({ action: 'previewPrepare', project: f.project })).result;
+  await writeFile(join(f.project, 'app.mjs'), `import fs from 'node:fs'; import http from 'node:http'; fs.writeFileSync('started','yes'); http.createServer((q,r)=>r.end(process.env.LABEL+':'+(process.env.TOKEN?'present':'absent'))).listen(+process.env.PORT,process.env.HOST);`);
+  const text = `name: app\ntype: command\ncwd: .\ncommand: [${JSON.stringify(process.execPath)}, app.mjs]\nenv:\n  LABEL: original\n  TOKEN: {secret: test/app}\n`;
+  const review = (await f.api<PreviewReview>({ action: 'previewPrepare', project: f.project, format: 'yaml', text })).result;
+  const other = (await f.api<PreviewReview>({ action: 'previewPrepare', project: f.project, format: 'json', text: JSON.stringify({ name: 'app', type: 'command', cwd: '.', command: [process.execPath, 'app.mjs'], env: { LABEL: 'alternate' } }) })).result;
+  const reviews = async () => {
+    const result = (await f.api<{ reviews: PreviewReviewSummary[] }>({ action: 'previewProjects' })).result;
+    assert.ok(Array.isArray(result.reviews), 'Reviewed configurations must remain discoverable after closing the form');
+    return result.reviews;
+  };
+  assert.deepEqual((await reviews()).map(item => item.id).sort(), [review.id, other.id].sort());
+  assert.equal(review.file, undefined);
+  // Choosing a file still reports a genuine read failure; it cannot substitute a direct review.
+  assert.ok((await f.api({ action: 'previewPrepare', project: f.project })).error);
   assert.equal((await f.api({ action: 'previewLaunch', id: review.id, approved: true })).error?.code, 'SECRET_REQUIRED');
   const first = (await f.api<SecretSetupStatus>({ action: 'previewSecrets', id: review.id, approved: true })).result;
   assert.equal(first.state, 'pending');
   assert.equal((await f.privateCall('cancel')).result.state, 'canceled');
   assert.equal((await f.api({ action: 'previewLaunch', id: review.id, approved: true })).error?.code, 'SECRET_REQUIRED');
-  assert.equal((await f.api<SecretSetupStatus>({ action: 'previewSetupStatus', id: review.id, requestId: first.id })).result.state, 'canceled');
+  const beforePoll = (await reviews()).find(item => item.id === review.id)!.expiresAt;
+  assert.equal((await f.api<SecretSetupStatus>({ action: 'previewSetupStatus', id: review.id })).result.state, 'canceled');
+  assert.equal((await reviews()).find(item => item.id === review.id)!.expiresAt, beforePoll);
+  const canceled = (await f.api<PreviewReview>({ action: 'previewResume', id: review.id })).result;
+  assert.equal(canceled.id, review.id);
+  assert.equal(canceled.setup?.id, first.id);
+  assert.equal(canceled.setup?.state, 'canceled');
+  assert.equal((await f.api<PreviewReview>({ action: 'previewResume', id: other.id })).result.setup, undefined);
+  assert.equal((await f.api({ action: 'previewSetupStatus', id: other.id })).error?.code, 'NOT_FOUND');
   assert.equal(f.privateUrls.length, 1);
   assert.deepEqual(await f.runtime.list(), []);
   await delay(1050); // Real private-form launch cooldown.
   const resumed = (await f.api<SecretSetupStatus>({ action: 'previewSecrets', id: review.id, approved: true, reopen: true })).result;
   assert.equal(resumed.state, 'pending');
   assert.equal(f.privateUrls.length, 2);
+  assert.equal((await f.api<PreviewReview>({ action: 'previewResume', id: review.id })).result.setup?.id, resumed.id);
   assert.equal((await f.privateCall('approve')).result.requirements[0].selected, true);
   assert.equal((await f.api({ action: 'previewLaunch', id: review.id, approved: true })).error?.code, 'SECRET_REQUIRED');
   const saved = await f.privateCall('save', { values: { 'test/app': 'FAKE_private_value' } });
   assert.equal(saved.result.state, 'complete');
-  assert.equal((await f.api<SecretSetupStatus>({ action: 'previewSetupStatus', id: review.id, requestId: resumed.id })).result.state, 'complete');
+  assert.equal((await f.api<PreviewReview>({ action: 'previewResume', id: review.id })).result.setup?.state, 'complete');
   assert.deepEqual(await f.runtime.list(), []);
   await assert.rejects(readFile(join(f.project, 'started')), { code: 'ENOENT' });
   const launched = (await f.api<{ status: PreviewStatus }>({ action: 'previewLaunch', id: review.id, approved: true })).result.status;
   const ready = await f.runtime.wait('app', launched.candidate!.id);
   assert.equal(ready.state, 'ready');
-  assert.equal(await (await fetch(ready.url!)).text(), 'FAKE_private_value');
+  assert.equal(await (await fetch(ready.url!)).text(), 'original:present');
+  assert.deepEqual((await reviews()).map(item => item.id), [other.id]);
+  assert.equal((await f.api({ action: 'previewResume', id: review.id })).error?.code, 'NOT_FOUND');
+  assert.equal((await f.api({ action: 'previewResume', id: other.id })).error?.code, 'STALE_ATTEMPT');
+  assert.equal((await f.api({ action: 'previewLaunch', id: other.id, approved: true })).error?.code, 'STALE_ATTEMPT');
+  assert.equal((await f.runtime.get('app')).active!.id, ready.id);
+  for (const file of ['preview.yml', 'preview.yaml']) await assert.rejects(readFile(join(f.project, file)), { code: 'ENOENT' });
 });
 
 test('CLI and MCP selected files reach dashboard configuration while direct replacements clear the origin', { timeout: 20_000 }, async t => {

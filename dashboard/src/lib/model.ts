@@ -4,9 +4,11 @@ import type {
   SecretSetupSummary,
 } from "../../../src/contracts";
 
+import type { PreviewReviewSummary } from "../../../src/dashboard-workflows";
 import type { ProjectGit } from "../../../src/dashboard-identity";
 
 export type Owner = {
+  reviews?: PreviewReviewSummary[];
   git?: ProjectGit;
   id: string;
   project?: string;
@@ -198,6 +200,7 @@ export function entries(owner: Owner): Entry[] {
     ...new Set([
       ...(owner.previews?.map((p) => p.name) ?? []),
       ...(owner.requests?.map((r) => r.name) ?? []),
+      ...(owner.reviews?.map((review) => review.name) ?? []),
     ]),
   ];
   return names.length
@@ -239,7 +242,7 @@ export function hint(entry: Entry) {
   if (p?.latest?.state === "canceled")
     return "Start preview uses the same configuration and current source.";
   if (!p)
-    return "Ask your agent to continue when setup is complete and you want to start this worktree.";
+    return "Review the configuration before starting. Saving secrets does not start the app.";
   return p?.data
     ? "Start again uses the same configuration, current source and retained database; it does not reload YAML."
     : "Start again uses the same configuration and current source without reloading YAML; the URL may change.";
