@@ -277,7 +277,6 @@ test("reset keeps deletion and startup outcomes in context with real PostgreSQL"
     const stopped = await runtime.get(spec.name);
     await runtime.rerunJob(spec.name, stopped.latest!.id, "seed");
     await expect.poll(() => readFile(join(directory, "partial-seed"), "utf8").catch(() => "")).toBe("written");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
     await page.getByRole("button", { name: "Cancel startup", exact: true }).click();
     await expect(page.getByRole("button", { name: "Start preview", exact: true })).toBeVisible();

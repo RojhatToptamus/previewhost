@@ -56,7 +56,8 @@ Use the [recovery guide](troubleshooting.md#stored-secrets-are-missing-or-inacce
 
 ![Secret Manager showing stored reference names and automatic unlock controls](../assets/dashboard-secrets.png)
 
-In the dashboard's **Secret Manager**, create or unlock its session, then find the reference and select **Edit**.
+In the dashboard's **Secret Manager**, create or unlock its session, then use **New secret** or select **Edit** beside an existing reference.
+New secret refuses an existing name; it never overwrites a value. Neither action grants a preview permission to use a reference.
 The list shows names, never stored values. Saving changes future starts in all projects that use that reference.
 Running applications keep the value they already received.
 Search covers all stored references. Use **Next** and **Previous** to browse pages of up to 128 names.

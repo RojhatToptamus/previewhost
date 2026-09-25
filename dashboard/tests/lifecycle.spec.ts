@@ -190,7 +190,6 @@ test("linked worktrees stay grouped, discoverable and independently controllable
       if (!await button.isVisible()) await page.getByRole("button", { name: "Toggle Sidebar" }).click();
       await button.click();
     };
-    const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click();
     const search = page.getByRole("searchbox", { name: "Search previews" });
     async function filterBy(name: string) {
       await page.getByRole("tab", { name, exact: true }).click();
@@ -216,7 +215,6 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await expect(tableRows).toHaveCount(1);
     await capture(1);
     visible = 10;
-    await refresh();
     await expect(tableRows).toHaveCount(10);
     await expect(nav.locator(".preview-nav")).toHaveCount(0);
     await expect(page.getByRole("navigation", { name: "Dashboard", exact: true }).getByRole("button", { name: "Overview", exact: true })).toHaveAttribute("aria-current", "page");
@@ -356,18 +354,17 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await action(navigationRow(0), "Recheck status");
     await expect(navigationRow(0).locator(".preview-nav")).toHaveAccessibleName(/Ready$/);
     rejectRecheck = true;
-    await refresh();
+    await action(navigationRow(1), "Recheck status");
     await expect(details.locator(".preview-title")).toContainText("Unavailable");
     await expect(details.getByRole("link", { name: "Open app", exact: true })).toHaveCount(0);
     await expect(details.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
     const stoppedNeighbor = await fixtures[1].runtime.stop(fixtures[1].name);
     rejectRecheck = false;
-    await refresh();
+    await action(navigationRow(1), "Recheck status");
     await expect(details.locator(".preview-title")).toContainText("Stopped");
     const restartedNeighbor = await fixtures[1].runtime.startAgain(fixtures[1].name, stoppedNeighbor.latest!.id);
     await fixtures[1].runtime.wait(fixtures[1].name, restartedNeighbor.candidate!.id);
     listGate = undefined; releaseLists();
-    await refresh();
     await expect(details.locator(".preview-title")).toContainText("Ready");
     const neighborUrl = (await fixtures[1].runtime.get(fixtures[1].name)).url!;
     await overview();
@@ -394,7 +391,7 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await overview();
     expect(await atlas.locator(".preview-nav").count()).toBeGreaterThan(20);
     const beforeRefresh = await groupScroll.evaluate(element => element.scrollTop);
-    await refresh();
+    await page.waitForResponse(response => response.url().endsWith("/api") && response.request().postDataJSON()?.action === "list");
     await expect.poll(() => groupScroll.evaluate(element => element.scrollTop)).toBe(beforeRefresh);
     await expect(tableRows).toHaveCount(100);
     // Renaming a source during an open menu reorders rows without discarding the interaction.
@@ -483,7 +480,6 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await action(navigationRow(0), "Remove entry…");
     await page.getByRole("button", { name: "Remove entry", exact: true }).click();
     await fixtures[0].daemon.closed;
-    await refresh();
     await expect(navigationRow(0)).toHaveCount(0);
     await expect(page.getByText("Preview no longer listed", { exact: true })).toHaveCount(0);
     listGate = undefined; releaseLists();

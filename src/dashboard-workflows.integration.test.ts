@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startDashboard } from './dashboard.js';
@@ -76,4 +78,34 @@ test('dashboard edits recipes and direct bindings without leaking literals, raci
   assert.equal((await runtime.wait('direct', directApply.candidate!.id)).state, 'ready');
   assert.equal(await (await fetch((await runtime.get('direct')).url!)).text(), 'unsaved:PRIVATE_fixture_literal');
   assert.equal(await readFile(file, 'utf8'), 'broken: [');
+});
+
+test('project discovery merges directory aliases while retaining branches and missing folders', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-project-alias-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project'), alias = join(root, 'alias'), linked = join(root, 'linked'), missing = join(root, 'missing');
+  await mkdir(project);
+  await symlink(project, alias, 'dir');
+  const git = (...args: string[]) => promisify(execFile)('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', '-C', project, ...args]);
+  await git('init', '-b', 'main');
+  await git('-c', 'user.name=Previewhost Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'fixture');
+  await git('worktree', 'add', '-b', 'feature', linked);
+  let launch = '';
+  const dashboard = await startDashboard({
+    discover: async () => [alias, project, linked, missing].map(directory => ({
+      id: createHash('sha256').update(directory).digest('hex'), tokenFile: join(root, 'unused-token'),
+      connection: { projectDirectory: directory, pid: process.pid, endpoint: 'http://127.0.0.1:1' },
+    })),
+    openBrowser: async url => { launch = url; },
+  });
+  t.after(() => dashboard.close());
+  await dashboard.open();
+  const response = await fetch(dashboard.endpoint + '/api', { method: 'POST', headers: {
+    'content-type': 'application/json', origin: dashboard.endpoint, authorization: `Bearer ${new URL(launch).hash.slice(1)}`,
+  }, body: JSON.stringify({ action: 'previewProjects' }) });
+  assert.equal(response.status, 200);
+  const { result } = await response.json() as { result: { projects: Array<{ directory: string; branch?: string }> } };
+  assert.deepEqual(result.projects, [
+    { directory: linked, branch: 'feature' }, { directory: missing }, { directory: project, branch: 'main' },
+  ]);
 });

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   ConfigurationBindingChange,
   EnvironmentValue,
+  PreviewDescription,
 } from "../../src/contracts";
 import type {
   ConfigurationView,
   PreviewReview,
 } from "../../src/dashboard-workflows";
-import type { Entry } from "./lib/model";
+import { bindingLabels as labels, type Entry } from "./lib/model";
 import { call, errorMessage } from "./lib/api";
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
@@ -53,15 +54,9 @@ import {
   type LaunchResult,
 } from "./preview-workflow";
 
+import { SecretReferencePicker } from "./secret-reference-picker";
+
 type Binding = ConfigurationView["bindings"][number];
-const labels: Record<string, string> = {
-  literal: "Literal",
-  secret: "Secret",
-  fromEnv: "Owner input",
-  service: "Service URL",
-  publicUrl: "Public URL",
-  browserUrl: "Browser URL",
-};
 const bindingId = (binding: { service?: string; key: string }) =>
   `${binding.service ?? ""}/${binding.key}`;
 const bindingType = (value: Binding["value"] | string) =>
@@ -532,7 +527,7 @@ export function ConfigurationPanel({
           })}
           row={editing.row}
           service={editing.service}
-          environment={spec?.type === "environment"}
+          spec={configuration.description.spec}
           existingKeys={visible.map((row) => row.key)}
           onClose={() => setEditing(undefined)}
           onSave={stage}
@@ -567,14 +562,14 @@ export function ConfigurationPanel({
 function BindingEditor({
   row,
   service,
-  environment,
+  spec,
   existingKeys,
   onClose,
   onSave,
 }: {
   row?: Binding;
   service?: string;
-  environment: boolean;
+  spec: PreviewDescription["spec"];
   existingKeys: string[];
   onClose(): void;
   onSave(change: ConfigurationBindingChange): void;
@@ -584,6 +579,10 @@ function BindingEditor({
   const [reference, setReference] = useState(
     row?.value ? String(Object.values(row.value)[0]) : "",
   );
+  const environment = spec.type === "environment";
+  const primary = environment ? spec.primary : "";
+  const services = environment ? Object.entries(spec.services).filter(([id, node]) =>
+    type === "service" ? node.type !== "job" && id !== service : ["command", "static", "attach"].includes(node.type)) : [];
   const [error, setError] = useState("");
   const [replaceLiteral, setReplaceLiteral] = useState(
     !row || row.value !== null,
@@ -675,8 +674,12 @@ function BindingEditor({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="binding-type">Value type</FieldLabel>
-              <Select value={type} onValueChange={setType}>
+              <FieldLabel htmlFor="binding-type">Value source</FieldLabel>
+              <Select value={type} onValueChange={next => {
+                setType(next);
+                setReference(next === "publicUrl" ? primary : "");
+                setError("");
+              }}>
                 <SelectTrigger id="binding-type">
                   <SelectValue />
                 </SelectTrigger>
@@ -733,32 +736,31 @@ function BindingEditor({
             ) : (
               <Field>
                 <FieldLabel htmlFor="binding-reference">
-                  {type === "secret"
-                    ? "Secret reference"
-                    : type === "fromEnv"
-                      ? "Owner input name"
-                      : "Service name"}
+                  {type === "secret" ? "Secret reference" : type === "fromEnv" ? "Input name"
+                    : type === "publicUrl" ? "Primary service" : "Service"}
                 </FieldLabel>
-                <Input
-                  id="binding-reference"
-                  value={reference}
-                  onChange={(event) => setReference(event.target.value)}
-                  required
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder={type === "secret" ? "my-project/dev/api" : ""}
-                />
+                {type === "secret" ? <SecretReferencePicker value={reference} onChange={setReference} />
+                  : type === "fromEnv" ? <Input id="binding-reference" value={reference}
+                    onChange={event => setReference(event.target.value)} required autoComplete="off" spellCheck={false} placeholder="DEV_TOKEN" />
+                  : type === "publicUrl" ? <Input id="binding-reference" value={primary} readOnly />
+                  : <Select value={reference} onValueChange={setReference}>
+                    <SelectTrigger id="binding-reference"><SelectValue placeholder="Choose a service" /></SelectTrigger>
+                    <SelectContent><SelectGroup>
+                      {services.map(([id]) => <SelectItem key={id} value={id}>{id}</SelectItem>)}
+                    </SelectGroup></SelectContent>
+                  </Select>}
                 <FieldDescription>
                   {type === "secret"
-                    ? "Use a project-specific reference, or an exact existing reference to share its value. Approval and missing values are handled in private setup."
+                    ? "Uses a value stored in Secret Manager. Permission and missing values are handled in private setup."
                     : type === "fromEnv"
-                      ? "An input explicitly selected by this preview’s owner. This is not an arbitrary shell variable."
+                      ? "Uses an input selected when the project runtime started, such as DEV_TOKEN. Other shell variables are unavailable."
                       : type === "service"
-                        ? "Uses the service’s internal HTTP or database connection URL and waits for it to become ready."
+                        ? "Uses an internal HTTP or database connection URL. Waits for the selected service to be ready."
                         : type === "publicUrl"
-                          ? "Uses the primary HTTP service’s numeric public origin."
-                          : "Uses an HTTP service’s public .localhost alias for browser requests."}
+                          ? "Uses the primary service’s numeric address, such as http://127.0.0.1:49837. Available only for the primary service."
+                          : "Uses the selected service’s .localhost address for browser requests. Available for HTTP services only."}
                 </FieldDescription>
+                {(type === "service" || type === "browserUrl") && !services.length && <FieldDescription>No eligible services in this configuration.</FieldDescription>}
               </Field>
             )}
             {error && <FieldError>{error}</FieldError>}
@@ -769,7 +771,7 @@ function BindingEditor({
             </Button>
             <Button
               type="submit"
-              disabled={type === "literal" && !replaceLiteral}
+              disabled={type === "literal" ? !replaceLiteral : !reference.trim()}
             >
               Keep change
             </Button>

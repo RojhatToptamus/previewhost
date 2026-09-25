@@ -148,14 +148,20 @@ export class DashboardWorkflows {
       const projects = new Map<string, { directory: string; branch?: string }>();
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_')));
       for (const owner of await this.discover()) {
-        const directory = (owner.connection ?? owner.retained)?.projectDirectory;
-        if (!directory || projects.has(directory)) continue;
+        const recorded = (owner.connection ?? owner.retained)?.projectDirectory;
+        if (!recorded) continue;
+        const directory = await canonicalDirectory(recorded).catch(() => recorded);
+        if (projects.has(directory)) continue;
         projects.set(directory, { directory });
         try {
           const { stdout } = await promisify(execFile)('git', ['-C', directory, 'worktree', 'list', '--porcelain', '-z'], { env, signal, timeout: 2000, maxBuffer: 262144 });
           let item: { directory: string; branch?: string } | undefined;
           for (const field of stdout.split('\0')) {
-            if (field.startsWith('worktree ')) { item = { directory: field.slice(9) }; projects.set(item.directory, item); }
+            if (field.startsWith('worktree ')) {
+              const recorded = field.slice(9);
+              const directory = await canonicalDirectory(recorded).catch(() => recorded);
+              item = projects.get(directory) ?? { directory }; projects.set(directory, item);
+            }
             else if (item && field.startsWith('branch refs/heads/')) item.branch = field.slice(18);
           }
         } catch { /* Non-Git and missing folders remain selectable by their recorded identity. */ }

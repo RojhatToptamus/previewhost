@@ -122,6 +122,8 @@ Every entry offers Recheck status and Remove entry. Removal explains blockers in
 an unreachable owner never counts as stopped. The server rechecks cleanup evidence and rejects
 changed records before removal.
 
+Folder selectors stay within their trigger width. Show branch and path on separate lines; retain full paths for copying and manual entry. Resolve filesystem aliases before listing known folders.
+
 Paths stay on one line. Let parent directories truncate while preserving the final segments at full contrast. Use the shared `Path` component; never use right-to-left text direction to fake truncation.
 
 ### View contracts
@@ -130,9 +132,9 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 | --- | --- |
 | Previews | Compare worktrees, status, and available applications in aligned rows. Rows open details; Open app opens the running application. |
 | Activity | Show actionable failures, services, jobs, private setup, and managed data. Identify the attempt that owns each resource section. Put recovery beside the affected resource. |
-| Logs | Put search, attempt, and source above output. Use Log options for wrapping, search context, and Clear view. The header Refresh also retrieves logs. Explain hidden and omitted output separately; do not imply captured logs are live. |
+| Logs | Put search, attempt, and source above output. Use Log options for wrapping, search context, and Clear view. Refresh lives in this toolbar and retrieves current output and environment state without changing the view. Status elsewhere updates automatically. Explain hidden and omitted output separately; do not imply captured logs are live. |
 | Configuration | Distinguish the editable current declaration/file from recorded attempts. Keep Save file and Review and apply outside the scrolling body. Direct configuration can apply without saving; Save as preview.yaml remains explicit. |
-| Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
+| Secret Manager | Search stored references; New secret and Edit share the private value dialog. Creation stores a value without granting a preview permission. Never fetch or display its stored value. |
 
 Long lists need bounded scrolling without burying actions. Environment tables stop growing at 320px or 45% of viewport height, with an internal scrollbar and sticky header. Secret lists use the existing bounded scroll area. An empty environment list uses a short message without a scroll box. Short lists should not gain artificial filler rows.
 
@@ -276,3 +278,5 @@ Configuration editors preserve undisclosed values on the server. Show removed bi
 Keep edits when switching diagnostic tabs. A stale file or attempt needs an explicit reload,
 never a silent merge. Review lists the actual sources, execution scope and job/data effects;
 private secret approval stays separate. Use the same review for New preview and Apply.
+
+Variable editors derive service choices from the current configuration: internal URLs exclude jobs and self; browser URLs include HTTP services; the application URL uses the primary service automatically. Search secret reference names through Secret Manager, with explicit entry of a new name for private setup. Selecting a reference stages a binding, never grants permission. Keep the value-source guidance visible.

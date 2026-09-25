@@ -17,6 +17,7 @@ export function Preview({
   mutate,
   acting,
   revision,
+  onRefresh,
   onStarted,
   onPrepare,
 }: {
@@ -24,6 +25,7 @@ export function Preview({
   mutate: Mutate;
   acting: boolean;
   revision: number;
+  onRefresh(): void;
   onStarted(result: LaunchResult): void;
   onPrepare(resumeId?: string): void;
 }) {
@@ -179,7 +181,7 @@ export function Preview({
                 </div>
               ) : view === "configuration" && configurationVisited ? <ConfigurationPanel
                 entry={entry} attemptId={p?.active?.id ?? p?.latest?.id ?? p?.candidate?.id} revision={revision} onStarted={onStarted}
-                snapshot={selected && <Diagnostics entry={entry} revision={revision} clearAfter={clearAfter}
+                snapshot={selected && <Diagnostics entry={entry} revision={revision} onRefresh={onRefresh} clearAfter={clearAfter}
                   setClearAfter={clearAfter => updateView({ clearAfter })} tab="configuration" selected={selected}
                   retained={retained} selectAttempt={id => updateView({ attemptId: id, clearAfter: undefined, source: "" })}
                   source={source} setSource={source => updateView({ source })} query={query} setQuery={query => updateView({ query })}
@@ -203,6 +205,7 @@ export function Preview({
                 <Diagnostics
                   entry={entry}
                   revision={revision}
+                  onRefresh={onRefresh}
                   clearAfter={clearAfter}
                   setClearAfter={(clearAfter) => updateView({ clearAfter })}
                   tab={view}

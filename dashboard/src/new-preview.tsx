@@ -190,20 +190,28 @@ export function NewPreview({
                     <SelectTrigger id="project-choice">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="project-picker">
                       <SelectGroup>
                         <SelectItem value="custom">
                           Enter a folder path
                         </SelectItem>
-                        {projects.map((item) => (
+                        {projects.map((item) => {
+                          const folder = item.directory.split("/").filter(Boolean).at(-1) ?? item.directory;
+                          const label = [folder, item.branch].filter(Boolean).join(" · ");
+                          return (
                           <SelectItem
                             key={item.directory}
                             value={item.directory}
+                            textValue={label}
+                            aria-labelledby={undefined}
+                            aria-label={[item.branch, item.directory].filter(Boolean).join(" · ")}
                           >
-                            {item.branch ? `${item.branch} · ` : ""}
-                            {item.directory}
+                            <span className="project-choice">
+                              <span className="project-branch">{label}</span>
+                              <Path value={item.directory} />
+                            </span>
                           </SelectItem>
-                        ))}
+                        ); })}
                       </SelectGroup>
                     </SelectContent>
                   </Select>

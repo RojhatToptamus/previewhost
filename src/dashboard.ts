@@ -27,7 +27,7 @@ const actionSchema = z.discriminatedUnion('action', [
   secretListSchema.extend({ action: z.literal('listSecrets') }),
   unlockSchema.extend({ action: z.literal('unlockKeystore') }),
   z.strictObject({ action: z.enum(['rememberKeystore', 'forgetKeystore']) }),
-  z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
+  z.strictObject({ action: z.enum(['createSecret', 'updateSecret']), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('resetData'), owner: ownerId, resources: requestSchemas.deleteData.shape.expected.unwrap().shape.resources }).required({ expected: true }),
   requestSchemas.remove.extend({ action: z.literal('remove'), owner: ownerId }),
@@ -144,11 +144,14 @@ export async function startDashboard(options: {
       updates.add(work);
       try { return await work; } finally { updates.delete(work); }
     }
-    if (p.action === 'updateSecret') {
-      const update = store.update('user', p.id, p.value, { signal });
+    if (p.action === 'createSecret' || p.action === 'updateSecret') {
+      const update = p.action === 'createSecret' ? store.add('user', p.id, p.value, { signal }) : store.update('user', p.id, p.value, { signal });
       updates.add(update);
       try {
-        if (!await update) throw new PreviewError('SECRET_REQUIRED', 'This reference was removed. Refresh the list; its value was not recreated.');
+        if (!await update) {
+          if (p.action === 'createSecret') throw new PreviewError('ALREADY_EXISTS', 'This secret reference already exists. Its value was not changed.');
+          throw new PreviewError('SECRET_REQUIRED', 'This reference was removed. Refresh the list; its value was not recreated.');
+        }
         return { id: p.id };
       } finally { updates.delete(update); }
     }

@@ -214,12 +214,6 @@ export function App() {
             >
               <MoonIcon />
             </Toggle>
-            <Button
-              variant="outline"
-              onClick={() => setRevision((value) => value + 1)}
-            >
-              Refresh
-            </Button>
           </div>
         </header>
         <Navigation
@@ -241,8 +235,8 @@ export function App() {
           ) : error ? (
             <div className="page">
               <Notice title="Dashboard disconnected" error>
-                {error} Your previews may still be running. Use Refresh, or run{" "}
-                <code>previewhost dashboard</code> to reopen it.
+                {error} Your previews may still be running.
+                <Button variant="outline" onClick={() => setRevision(value => value + 1)}>Retry connection</Button>
               </Notice>
             </div>
           ) : selection ? (
@@ -260,6 +254,7 @@ export function App() {
                 mutate={mutate}
                 acting={acting}
                 revision={revision}
+                onRefresh={() => setRevision(value => value + 1)}
                 onStarted={previewStarted}
                 onPrepare={(resumeId) => setCreating({ project: selected.project, resumeId })}
               />

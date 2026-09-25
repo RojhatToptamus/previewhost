@@ -391,7 +391,7 @@
 .preview-nav-row[data-active="true"] > [data-slot="dropdown-menu-trigger"]:is(:hover, :focus-visible, [data-state="open"]) {
   background: var(--border-2);
 }
-.project-heading { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.project-heading { font-weight: 400; display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .project-heading > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-heading code { font-size: 11px; font-weight: 400; color: var(--t4); }
 .project-count { color: var(--t4); font-size: 11px; font-weight: 400; width: 24px; text-align: center; }
@@ -670,6 +670,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.project-picker {
+  width: var(--radix-select-trigger-width);
+  max-width: var(--radix-select-content-available-width);
+}
+.project-picker [data-slot="select-item"] > span:last-child,
+#project-choice [data-slot="select-value"] {
+  min-width: 0;
+  flex: 1;
+}
+.project-choice {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.project-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#project-choice:has(.project-choice) { height: auto; min-height: 32px; }
 .status {
   font-size: 12px;
   white-space: nowrap;
@@ -887,12 +908,12 @@
   font-size: 12px;
 }
 .secret-scroll {
-  flex: 1;
-  max-height: 520px;
-  min-height: 160px;
+  flex: none;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.secret-scroll [data-slot="scroll-area-viewport"] { max-height: min(520px, calc(100dvh - 280px)); }
 .secret-row {
   display: flex;
   align-items: center;
@@ -907,6 +928,7 @@
   background: var(--subtle);
 }
 .secret-row code {
+  flex: 1;
   overflow-wrap: anywhere;
   min-width: 0;
 }
@@ -915,6 +937,21 @@
   -webkit-text-security: disc;
   min-height: 100px;
 }
+.reference-picker {
+  width: var(--radix-popover-trigger-width);
+  max-width: var(--radix-popover-content-available-width);
+}
+.reference-options { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+.reference-option {
+  width: 100%;
+  height: auto;
+  min-height: 32px;
+  justify-content: space-between;
+  text-align: left;
+  font-weight: 400;
+}
+.reference-option > span { overflow-wrap: anywhere; white-space: normal; }
+.reference-message { display: flex; align-items: center; gap: 8px; padding: 8px; color: var(--t3); font-size: 12px; }
 .workflow-dialog[data-slot="dialog-content"] {
   max-width: 720px;
   display: flex;

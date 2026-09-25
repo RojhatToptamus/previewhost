@@ -231,6 +231,10 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
   page,
   context,
 }) => {
+  async function recheck() {
+    await page.getByRole("button", { name: "Actions for app", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Recheck status", exact: true }).click();
+  }
   const directory = await mkdtemp(join(tmpdir(), "previewhost-react-"));
   const runtimes: Awaited<ReturnType<typeof createPreviewRuntime>>[] = [];
   const daemons: Awaited<ReturnType<typeof startDaemon>>[] = [];
@@ -464,7 +468,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.getByRole("searchbox", { name: "Search logs" }).press("Escape");
     failLogs = true;
     await page
-      .getByRole("button", { name: "Refresh", exact: true })
+      .getByRole("button", { name: "Refresh logs", exact: true })
       .last()
       .click();
     await expect(
@@ -476,14 +480,14 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(page.locator(".logs")).toHaveCount(0);
     failLogs = false;
     await page
-      .getByRole("button", { name: "Refresh", exact: true })
+      .getByRole("button", { name: "Refresh logs", exact: true })
       .last()
       .click();
     await expect(page.locator(".logs")).toContainText("missing table");
     const top = (await page.locator(".diagnostic-toolbar").boundingBox())!.y;
     slowLogs = true;
     await page
-      .getByRole("button", { name: "Refresh", exact: true })
+      .getByRole("button", { name: "Refresh logs", exact: true })
       .last()
       .click();
     await page.getByRole("tab", { name: "Configuration", exact: true }).click();
@@ -552,12 +556,12 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     );
     const yml = join(directory, "first/preview.yml");
     await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await expect(page.locator(".save-row")).toContainText("preview.yml");
     await expect(page.getByRole("button", { name: "Save as preview.yaml" })).toHaveCount(0);
     await expect(readFile(join(directory, "first/preview.yaml"))).rejects.toMatchObject({ code: "ENOENT" });
     await rm(yml);
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await page.getByRole("button", { name: "Save as preview.yaml" }).click();
     await expect
       .poll(() =>
@@ -566,7 +570,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       .toContain("name: app");
     await expect(page.getByRole("button", { name: "Save as preview.yaml" })).toHaveCount(0);
     await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
     await expect(page.getByText("Configuration needs attention", { exact: true })).toBeVisible();
     await expect(page.getByText(/Both preview.yaml and preview.yml exist/)).toBeVisible();
@@ -579,7 +583,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await page.setViewportSize({ width: 1360, height: 900 });
     await rm(yml);
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await expect(page.getByText("Configuration needs attention", { exact: true })).toHaveCount(0);
     await page.getByRole("tab", { name: "Configuration", exact: true }).click();
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
@@ -657,12 +661,12 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       await expect.poll(async () => (await runtimes[1].logs(current.name, currentId, { source: "web" })).text).toContain(text.slice(-30));
     };
     await emit(Array.from({ length: 100 }, (_, index) => `before clear ${index}`).join("\n"));
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("before clear 99");
     await logPanel.evaluate(el => el.scrollTop = 80);
     const scrollTop = await logPanel.evaluate(el => el.scrollTop);
     await emit("refresh marker");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("refresh marker");
     expect(await logPanel.evaluate(el => el.scrollTop)).toBe(scrollTop);
     await page.getByRole("searchbox", { name: "Search logs" }).fill("marker");
@@ -673,7 +677,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await logOption("Clear view");
     await expect(page.locator(".logs")).not.toContainText("refresh marker");
     await emit("after clear marker 🙂");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("after clear marker 🙂");
     await expect(page.locator(".logs")).not.toContainText("refresh marker");
     await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");
@@ -724,7 +728,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(page.locator(".logs")).toContainText("refresh marker");
     await logOption("Clear view");
     await emit("x".repeat(70000) + "retained marker 🙂");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Earlier output omitted" })).toBeVisible();
     await expect(page.locator(".logs")).toContainText("retained marker 🙂");
     await logOption("Show earlier logs");
@@ -739,7 +743,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       },
     });
     expect((await runtimes[1].wait(current.name, failedApi.candidate!.id)).state).toBe("failed");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.getByRole("combobox", { name: "Diagnostic attempt" })).toContainText(currentId.slice(0, 8));
     await expect(page.locator(".logs")).not.toContainText("API startup failed");
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
@@ -779,7 +783,6 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     };
     const preparing = await runtimes[0].start(pipeline);
     await expect.poll(async () => (await runtimes[0].get(pipeline.name)).candidate?.services?.prepare.state).toBe("starting");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("button", { name: "Overview", exact: true }).click();
     await page.locator('.overview-table .preview-name[aria-label$=" · onboarding"]').click();
     await expect(page.getByRole("row").filter({ hasText: "migrate" }).last()).toContainText("prepare");

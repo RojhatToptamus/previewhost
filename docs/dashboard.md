@@ -66,7 +66,7 @@ Separate clones and non-Git folders stay separate. Matching names show a disting
 When Git metadata is unavailable, folder labels remain usable. Branch labels reflect current
 source; a preview spanning repositories stays under its owner's project.
 
-The list fills as project checks finish. Refresh checks the selected project before the rest.
+The list fills as project checks finish and updates automatically while the dashboard is visible.
 Browser Back returns to the previous view. Each preview keeps its diagnostic selections
 for this browser session, including after reload. Runtime information is fetched again.
 
@@ -111,7 +111,7 @@ Choose the attempt before comparing output. A failed replacement and a serving a
 Then select a service or job, or use **All output**.
 Logs are bounded tails, not a permanent archive.
 
-The header's **Refresh** retrieves current logs and environment status. Search, source, attempt,
+**Refresh logs** in the Logs toolbar retrieves current output and environment status. Search, source, attempt,
 and scroll position remain selected; logs do not update automatically.
 The **Log options** menu offers line wrapping and surrounding lines for search matches.
 Its **Clear view** action hides output through the current cursor in this view only. Refresh shows newer output.
@@ -127,7 +127,13 @@ When a replacement fails, **Failed update configuration** opens its input file o
 
 Select a command service or setup job to add, edit, or remove a binding. Literal values remain
 undisclosed; replacing one requires an explicit new value. Secret bindings contain reference
-names, not credentials. Use an exact existing name only for intentional sharing.
+names, not credentials. Search existing references or enter a new name for private setup.
+Selecting a reference does not grant permission to use it. Use an exact existing name only for intentional sharing.
+
+Service and browser URL choices come from the selected configuration. **Service URL** waits for
+an internal service or database connection; **Browser URL** uses an HTTP service’s `.localhost` address.
+**Application URL** selects the primary service’s numeric origin automatically.
+**Runtime input** uses an environment input explicitly selected when the runtime started.
 
 - **Save file** updates the selected file without changing the running application. Unedited
   values, comments, and relative paths remain. Formatting can change. Concurrent changes are rejected.
@@ -143,7 +149,8 @@ changing their bindings does not rerun them. Use the existing explicit job rerun
 Removing a binding keeps its stored secret and existing owner approval. Changing a stored value
 affects future starts that use that exact reference, including other projects; it does not restart them.
 
-**Secret Manager** creates or unlocks the dashboard’s keystore session, then lists references for editing.
+**Secret Manager** creates or unlocks the dashboard’s keystore session, then lists references. **New secret** stores a new value without granting any preview access.
+**Edit** replaces an existing value without restarting applications.
 Search covers all stored reference names. Use **Next** and **Previous** to browse bounded pages.
 Its **Keystore options** menu offers automatic unlock controls on macOS. Project owners unlock separately through private setup.
 **Open private form** handles missing values and access approval.

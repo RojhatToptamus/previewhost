@@ -14,7 +14,7 @@ const { connectPreviewDaemon } = await import(new URL("../../dist/client.js", im
 const { SecretSetup } = await import(new URL("../../dist/secrets-setup.js", import.meta.url).href) as typeof import("../../src/secrets-setup");
 const { keychain } = await import(new URL("../../dist/keychain.js", import.meta.url).href) as typeof import("../../src/keychain");
 
-test("private setup and dashboard preserve unlock, approval and update boundaries", async ({ page, context }) => {
+test("private setup and dashboard preserve unlock, approval, creation and update boundaries", async ({ page, context }) => {
   const directory = await mkdtemp(join(tmpdir(), "previewhost-browser-keystore-"));
   const originalHome = process.env.HOME;
   const originalGet = keychain.get, originalAdd = keychain.add, originalRemove = keychain.remove;
@@ -38,7 +38,8 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     SecretSetup.prototype.openBrowser = async url => { privateUrl = url; };
     const project = join(directory, "project"); await mkdir(project);
     await writeFile(join(project, "app.mjs"), `import http from 'node:http';http.createServer((q,s)=>s.end(process.env.APP_TOKEN)).listen(Number(process.env.PORT),'127.0.0.1');`);
-    runtime = await createPreviewRuntime({ allowedRoots: [project], authorize: () => true });
+    let authorizationRequests = 0;
+    runtime = await createPreviewRuntime({ allowedRoots: [project], authorize: () => { authorizationRequests++; return true; } });
     other = await createPreviewRuntime({ allowedRoots: [project], authorize: () => true });
     const tokenFile = join(directory, "control", "token");
     daemon = await startDaemon({ runtime, tokenFile, port: 0, owner: {
@@ -103,7 +104,9 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     await setup.getByRole("button", { name: "Save secrets", exact: true }).click();
     await expect(setup.getByRole("heading", { name: "Secret setup complete" })).toBeVisible();
     expect((await client.secretsStatus(request.id)).state).toBe("complete");
-    page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+    page.on("console", message => {
+      if (message.type() === "error") errors.push(message.text());
+    });
     expect(await runtime.list()).toEqual([]);
     expect((await client.secretsStatus(expired.id)).state).toBe("expired");
     await page.getByRole("button", { name: "Overview", exact: true }).click();
@@ -138,6 +141,65 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     expect((await client.secretsStatus(pending.id)).state).toBe("canceled");
     await expect(privateSetup.getByText("Latest request: Complete", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Secret Manager", exact: true }).click();
+
+    const newSecret = page.getByRole("button", { name: "New secret", exact: true });
+    const reference = page.getByLabel("Reference name", { exact: true });
+    const privateValue = page.getByLabel("Value", { exact: true });
+    const createdId = "project/dev/created";
+    const approvalsBeforeCreation = authorizationRequests;
+    await newSecret.click();
+    await expect(reference).toBeFocused();
+    await reference.fill("project/dev/canceled");
+    await privateValue.fill("FAKE_canceled");
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(newSecret).toBeFocused();
+    expect(await runtime.keystore.has("user", "project/dev/canceled")).toBe(false);
+    await newSecret.click();
+    await expect(reference).toHaveValue("");
+    await expect(privateValue).toHaveValue("");
+    await reference.fill("invalid reference");
+    await privateValue.fill("FAKE_created");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText(/Use 1–128 letters/)).toBeVisible();
+    await expect(reference).toBeFocused();
+    await expect(reference).toHaveValue("invalid reference");
+    await expect(privateValue).toHaveValue("FAKE_created");
+    expect(await runtime.keystore.has("user", "invalid reference")).toBe(false);
+    await reference.fill(createdId);
+    // Hold only delivery so the browser's pending state and value clearing can be observed.
+    let releaseCreate!: () => void;
+    const holdCreate = new Promise<void>(resolve => { releaseCreate = resolve; });
+    await page.route("**/api", async route => {
+      if (route.request().postDataJSON().action === "createSecret") await holdCreate;
+      await route.continue();
+    });
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(privateValue).toHaveValue("");
+    await expect(privateValue).toBeDisabled();
+    await expect(page.getByRole("button", { name: /Saving…$/ })).toBeDisabled();
+    releaseCreate();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await page.unroute("**/api");
+    await expect(newSecret).toBeFocused();
+    await expect(page.getByRole("button", { name: `Edit ${createdId}`, exact: true })).toBeVisible();
+    expect(await runtime.keystore.get("user", createdId)).toBe("FAKE_created");
+    expect(authorizationRequests).toBe(approvalsBeforeCreation);
+    expect((await runtime.inspect({ ...spec, env: { CREATED: { secret: createdId } } })).secrets![0].selected).toBe(false);
+    expect((await other.inspect({ ...spec, env: { CREATED: { secret: createdId } } })).secrets![0].selected).toBe(false);
+    expect(await page.locator("body").innerText()).not.toContain("FAKE_created");
+    await newSecret.click();
+    await expect(privateValue).toHaveValue("");
+    await reference.fill(createdId);
+    await privateValue.fill("FAKE_overwrite");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("This secret reference already exists. Its value was not changed.")).toBeVisible();
+    await expect(reference).toHaveValue(createdId);
+    await expect(privateValue).toHaveValue("");
+    await expect(privateValue).toBeFocused();
+    expect(await runtime.keystore.get("user", createdId)).toBe("FAKE_created");
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(newSecret).toBeFocused();
 
     const edit = page.getByRole("button", { name: "Edit project/dev/token", exact: true });
     await expect(edit).toBeVisible(); await edit.click();
@@ -174,10 +236,11 @@ test("private setup and dashboard preserve unlock, approval and update boundarie
     await page.screenshot({ path: "/tmp/previewhost-keystore-desktop.png" });
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await page.setViewportSize({ width: 320, height: 800 });
-    await expect(page.locator(".secret-row code")).toHaveCSS("color", "rgb(237, 237, 237)");
+    await expect(page.locator(".secret-row code").filter({ hasText: "project/dev/token" })).toHaveCSS("color", "rgb(237, 237, 237)");
     await page.screenshot({ path: "/tmp/previewhost-keystore-narrow-dark.png" });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    expect(errors).toEqual([]);
+    // The deliberate duplicate is the only expected browser resource error.
+    expect(errors).toEqual(["Failed to load resource: the server responded with a status of 400 (Bad Request)"]);
   } finally {
     await client?.close(); await dashboard?.close(); await daemon?.close();
     await runtime?.close(); await other?.close();
@@ -273,7 +336,6 @@ test("Secret Manager searches all references and keeps bounded pages usable afte
     await expect(edit).toBeFocused();
     expect(await store.get("user", names[129])).toBe("FAKE_updated");
     expect(await store.get("user", names[128])).toBe("FAKE_original");
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(search).toHaveValue("API-TOKEN-129");
     await expect(rows).toHaveCount(1);
     expect(await page.locator("body").innerText()).not.toContain("FAKE_");
@@ -293,7 +355,6 @@ test("Secret Manager searches all references and keeps bounded pages usable afte
     await next.click();
     await expect(rows).toHaveCount(2);
     await store.remove("user", names[128]); await store.remove("user", names[129]);
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByText("No more references", { exact: true })).toBeVisible();
     await previous.click();
     await expect(rows).toHaveCount(128);

@@ -385,12 +385,12 @@ External data
 and user-secret entries are excluded from deletion. Jobs retain their normal permissions.
 
 The dashboard can reopen an owner’s pending private form. Secret Manager also lists
-user-reference names and edits an existing entry in a dashboard dialog, without
+user-reference names and creates or edits an entry in a dashboard dialog, without
 requiring a running owner. Internal database entries are excluded.
-The authenticated dashboard session may submit a replacement value to the keystore;
+The authenticated dashboard session may submit a new or replacement value to the keystore;
 it cannot read stored values or grant runtime access. Values stay out of browser
 storage, URLs, and responses. Cancel clears the field without a write. Saving uses
-the existing update-only operation and never recreates a removed entry.
+the existing add-only or update-only operation: creation rejects an existing name, and editing never recreates a removed entry.
 Editing changes future reads of the exact reference; it does not restart previews,
 change bindings, or extend approvals. Agent setup still uses separate, expiring
 private-form capabilities; no MCP or owner-control value-write operation is added.

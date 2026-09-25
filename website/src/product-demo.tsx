@@ -95,12 +95,12 @@ function Configuration({ preview }: { preview: Preview }) {
     <p className="demo-section-label">Source directories</p>
     <dl className="demo-source-list">{["frontend", "api"].map(source => <div key={source}><dt>{source}</dt><dd><code>{preview.path}/{source}</code></dd></div>)}</dl>
       <p className="demo-section-label">Environment bindings</p>
-      <table className="demo-binding-table"><thead><tr><th>Name</th><th>Type</th><th>Reference</th></tr></thead><tbody>
+      <div className="demo-table"><table className="demo-binding-table"><thead><tr><th>Name</th><th>Type</th><th>Reference</th></tr></thead><tbody>
         <tr><th scope="row"><code>frontend.<wbr />API_URL</code></th><td>Service URL</td><td><code>api</code></td></tr>
         <tr><th scope="row"><code>frontend.<wbr />NEXT_PUBLIC_API_URL</code></th><td>Browser URL</td><td><code>api</code></td></tr>
         <tr><th scope="row"><code>api.<wbr />DATABASE_URL</code></th><td>Service URL</td><td><code>database</code></td></tr>
         <tr><th scope="row"><code>api.<wbr />REDIS_URL</code></th><td>Service URL</td><td><code>cache</code></td></tr>
-      </tbody></table>
+      </tbody></table></div>
     <details className="demo-yaml"><summary>YAML</summary><pre tabIndex={0} aria-label={`${preview.project} configuration`}><code>{yaml}</code></pre></details>
   </div>;
 }
@@ -153,13 +153,12 @@ function PreviewDetail({ preview }: { preview: Preview }) {
     <div ref={panel} className="demo-panel" id="example-view-panel" role="tabpanel" aria-labelledby={`example-view-${view}`} tabIndex={0}>
       <div key={view} className="demo-view-content">
         {view === "activity" && <>
-          <div className="demo-attempt-line"><span>Serving</span><Status value="Ready" /></div>
           <p className="demo-section-label">Services · Serving</p>
-            <table className="demo-services"><thead><tr><th>Service</th><th>Runtime</th><th>Status</th><th className="demo-connection">Connection</th><th><span className="landing-sr-only">Actions</span></th></tr></thead><tbody>{services.map(service => <tr key={service.name}>
+            <div className="demo-table"><table className="demo-services"><thead><tr><th>Service</th><th>Runtime</th><th>Status</th><th className="demo-connection">Connection</th><th><span className="landing-sr-only">Actions</span></th></tr></thead><tbody>{services.map(service => <tr key={service.name}>
               <th scope="row"><service.icon aria-hidden="true" /><span>{service.name}</span></th><td>{service.runtime}</td><td><Status value="Ready" /></td>
               <td className="demo-connection"><code>{service.type === "HTTP" ? `${preview.project}--${service.name}.localhost:${preview.port}` : "Managed · this environment"}</code></td>
               <td>{service.type === "HTTP" && <button type="button" onClick={() => showLogs(service.name)} aria-label={`View ${service.name} logs`}>Logs</button>}</td>
-            </tr>)}</tbody></table>
+            </tr>)}</tbody></table></div>
           <div className="demo-job"><div><p className="demo-section-label">Setup jobs</p><span><Terminal aria-hidden="true" /><strong>migrate</strong><Status value="Succeeded" /></span></div><button type="button" onClick={() => showLogs("migrate")} aria-label="View migration logs">Logs</button></div>
         </>}
         {view === "logs" && <div className="demo-logs">

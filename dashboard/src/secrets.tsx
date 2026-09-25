@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { KeystoreStatus as StoreStatus, SecretList as SecretPage } from "../../src/keystore";
 import { toast } from "sonner";
-import { MoreHorizontalIcon } from "lucide-react";
+import { KeyRoundIcon, MoreHorizontalIcon } from "lucide-react";
 import { call, errorMessage } from "./lib/api";
 import { Button } from "./components/ui/button";
 import {
@@ -9,7 +9,6 @@ import {
 } from "./components/ui/dropdown-menu";
 import {
   Dialog,
-  DialogTrigger,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -30,7 +29,7 @@ import { ScrollArea } from "./components/ui/scroll-area";
 import { Spinner } from "./components/ui/spinner";
 import { EmptyState, Loading, Notice, SearchField } from "./components/shared";
 
-type SecretList = SecretPage & { keystore: StoreStatus };
+export type SecretList = SecretPage & { keystore: StoreStatus };
 export function SecretManager({ revision }: { revision: number }) {
   const [unlockRevision, setUnlockRevision] = useState(0);
   const [query, setQuery] = useState("");
@@ -39,7 +38,7 @@ export function SecretManager({ revision }: { revision: number }) {
   const [loading, setLoading] = useState(true);
   const after = cursors.at(-1);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState<string>();
+  const [editing, setEditing] = useState<{ id?: string }>();
   useEffect(() => {
     if (editing) return;
     const controller = new AbortController();
@@ -75,8 +74,12 @@ export function SecretManager({ revision }: { revision: number }) {
   }, [revision, editing, unlockRevision, query, after]);
   return (
     <div className="page secrets-page">
-      <SecretManagerHeader status={list?.keystore} onUnlock={() => setUnlockRevision(value => value + 1)} />
-      {error && <Notice title="Secrets unavailable" error>{error} Use Refresh to try again.</Notice>}
+      <SecretManagerHeader status={list?.keystore} onUnlock={() => setUnlockRevision(value => value + 1)}>
+        {list?.keystore.state === "unlocked" && <Button onClick={() => setEditing({})}>New secret</Button>}
+      </SecretManagerHeader>
+      {error && <Notice title="Secrets unavailable" error>{error}
+        <Button variant="outline" onClick={() => setUnlockRevision(value => value + 1)}>Retry</Button>
+      </Notice>}
       {!list ? (
         !error && <Loading>Loading secret references…</Loading>
       ) : list.keystore.state !== "unlocked" ? null : (
@@ -93,7 +96,7 @@ export function SecretManager({ revision }: { revision: number }) {
           </div>
           {error ? null : !list.ids.length ? (
             <EmptyState title={query.trim() ? "No matching references" : after ? "No more references" : "No stored secrets"}>
-              {query.trim() ? "Try another reference name." : after ? "Go back to earlier references." : "Add secrets through private setup when your agent requests them."}
+              {query.trim() ? "Try another reference name." : after ? "Go back to earlier references." : "Create a reference with New secret, or add one during a preview’s private setup."}
             </EmptyState>
           ) : (
             <ScrollArea
@@ -104,13 +107,12 @@ export function SecretManager({ revision }: { revision: number }) {
             >
               <div className="secret-list">
                 {list.ids.map((id) => (
-                  <SecretRow
-                    key={id}
-                    id={id}
-                    disabled={loading}
-                    open={editing === id}
-                    setOpen={(open) => setEditing(open ? id : undefined)}
-                  />
+                  <div className="secret-row" key={id}>
+                    <KeyRoundIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    <code>{id}</code>
+                    <Button variant="ghost" size="sm" aria-label={"Edit " + id}
+                      onClick={() => setEditing({ id })}>Edit</Button>
+                  </div>
                 ))}
               </div>
             </ScrollArea>
@@ -123,27 +125,20 @@ export function SecretManager({ revision }: { revision: number }) {
           </nav>}
         </section>
       )}
+      {editing && <SecretEditor id={editing.id} onClose={() => setEditing(undefined)} />}
     </div>
   );
 }
 
-function SecretRow({
-  id,
-  disabled,
-  open,
-  setOpen,
-}: {
-  id: string;
-  disabled: boolean;
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}) {
+function SecretEditor({ id, onClose }: { id?: string; onClose(): void }) {
+  const [reference, setReference] = useState(id ?? "");
+  const nameInput = useRef<HTMLInputElement>(null);
+  const opener = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const value = useRef<HTMLTextAreaElement>(null);
   const pending = useRef(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (!open) return;
     const clear = () => {
       if (value.current) value.current.value = "";
     };
@@ -152,16 +147,21 @@ function SecretRow({
       clear();
       window.removeEventListener("pagehide", clear);
     };
-  }, [open]);
-  function changeOpen(next: boolean) {
+  }, []);
+  function close() {
     if (pending.current) return;
     if (value.current) value.current.value = "";
     setError("");
-    setOpen(next);
+    onClose();
   }
   async function save(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending.current || !value.current) return;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(reference)) {
+      setError("Use 1–128 letters, numbers, dots, dashes, underscores or slashes, starting with a letter or number.");
+      nameInput.current?.focus();
+      return;
+    }
     if (
       !value.current.value.length ||
       value.current.value.includes("\0") ||
@@ -171,7 +171,7 @@ function SecretRow({
       value.current.focus();
       return;
     }
-    const input = { action: "updateSecret", id, value: value.current.value };
+    const input = { action: id ? "updateSecret" : "createSecret", id: reference, value: value.current.value };
     value.current.value = "";
     pending.current = true;
     setSaving(true);
@@ -180,7 +180,7 @@ function SecretRow({
     try {
       await call(input);
       saved = true;
-      toast.success("Secret updated. Running apps are unchanged.");
+      toast.success(id ? "Secret updated. Running apps are unchanged." : "Secret created.");
     } catch (error) {
       setError(
         error instanceof Error && error.cause
@@ -191,24 +191,20 @@ function SecretRow({
       input.value = "";
       pending.current = false;
       setSaving(false);
-      if (saved) changeOpen(false);
+      if (saved) close();
       else requestAnimationFrame(() => value.current?.focus());
     }
   }
   return (
-    <div className="secret-row">
-      <code>{id}</code>
-      <Dialog open={open} onOpenChange={changeOpen}>
-        <DialogTrigger asChild>
-          <Button variant="outline" size="sm" disabled={disabled} aria-label={"Edit " + id}>
-            Edit
-          </Button>
-        </DialogTrigger>
+      <Dialog open onOpenChange={open => { if (!open) close(); }}>
         <DialogContent
           showCloseButton={false}
           onOpenAutoFocus={(event) => {
+            if (id) { event.preventDefault(); value.current?.focus(); }
+          }}
+          onCloseAutoFocus={event => {
             event.preventDefault();
-            value.current?.focus();
+            if (opener.current?.isConnected) opener.current.focus();
           }}
         >
           <form
@@ -217,16 +213,23 @@ function SecretRow({
             className="flex min-w-0 flex-col gap-5"
           >
             <DialogHeader>
-              <DialogTitle>Edit secret</DialogTitle>
-              <code className="break-anywhere">{id}</code>
+              <DialogTitle>{id ? "Edit secret" : "New secret"}</DialogTitle>
+              {id && <code className="break-anywhere">{id}</code>}
               <DialogDescription>
-                Replace this value for future starts in every project that uses
-                this reference. Running apps stay unchanged.
+                {id ? "Replace this value for future starts in every project that uses this reference. Running apps stay unchanged."
+                  : "Save a value for private setup. Each preview still needs your permission to use it."}
               </DialogDescription>
             </DialogHeader>
             <FieldGroup>
+              {!id && <Field>
+                <FieldLabel htmlFor="secret-reference">Reference name</FieldLabel>
+                <Input id="secret-reference" ref={nameInput} value={reference} onChange={event => setReference(event.target.value)}
+                  required maxLength={128} disabled={saving}
+                  placeholder="my-project/dev/api" autoComplete="off" spellCheck={false} />
+                <FieldDescription>Use a project-specific name. Reusing a reference shares its value after approval.</FieldDescription>
+              </Field>}
               <Field data-invalid={Boolean(error)} data-disabled={saving}>
-                <FieldLabel htmlFor="secret-value">New value</FieldLabel>
+                <FieldLabel htmlFor="secret-value">{id ? "New value" : "Value"}</FieldLabel>
                 <Textarea
                   id="secret-value"
                   ref={value}
@@ -251,7 +254,7 @@ function SecretRow({
                 type="button"
                 variant="outline"
                 disabled={saving}
-                onClick={() => changeOpen(false)}
+                onClick={close}
               >
                 Cancel
               </Button>
@@ -263,11 +266,10 @@ function SecretRow({
           </form>
         </DialogContent>
       </Dialog>
-    </div>
   );
 }
 
-function SecretManagerHeader({ status, onUnlock }: { status?: StoreStatus; onUnlock(): void }) {
+function SecretManagerHeader({ status, onUnlock, children }: { status?: StoreStatus; onUnlock(): void; children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -307,6 +309,7 @@ function SecretManagerHeader({ status, onUnlock }: { status?: StoreStatus; onUnl
   return <>
     <div className="secrets-heading">
       <h1>Secret Manager</h1>
+      <div className="flex items-center gap-2">
       {status?.state === "unlocked" && status.canRemember && <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" disabled={busy} aria-label="Keystore options">
@@ -324,6 +327,8 @@ function SecretManagerHeader({ status, onUnlock }: { status?: StoreStatus; onUnl
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>}
+      {children}
+      </div>
     </div>
     <p className="summary">Changes apply on the next start in every project using the reference.</p>
     {status && status.state !== "unlocked" && <form onSubmit={submit} className="flex max-w-xl flex-col gap-4">

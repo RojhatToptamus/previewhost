@@ -113,11 +113,13 @@ test('navigation, source filters and search have clear keyboard focus and useful
   await expect(sourcePicker).toHaveText('migrate');
   await expect(sourcePicker).toBeFocused();
   await expect(page.locator('.demo-log-output')).toContainText('create products and stock_movements');
+  const searchBorder = await page.locator('.demo-search').evaluate(element => getComputedStyle(element).borderColor);
   await sourcePicker.press('Shift+Tab');
   const search = page.getByRole('searchbox', { name: 'Search example logs' });
   await expect(search).toBeFocused();
   await expect(search).toHaveCSS('outline-style', 'none');
-  await expect(page.locator('.demo-search')).toHaveCSS('outline-style', 'solid');
+  await expect(page.locator('.demo-search')).toHaveCSS('outline-style', 'none');
+  await expect(page.locator('.demo-search')).not.toHaveCSS('border-color', searchBorder);
   await search.fill('missing line');
   await expect(page.locator('.demo-log-output')).toHaveText('No matching output.');
   await views.getByRole('tab', { name: 'Logs', exact: true }).press('End');

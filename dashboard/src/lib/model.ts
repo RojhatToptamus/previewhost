@@ -302,3 +302,12 @@ export function visibleEntries(
         (a.name ?? "").localeCompare(b.name ?? ""),
     );
 }
+
+export const bindingLabels: Record<string, string> = {
+  literal: "Value",
+  secret: "Secret",
+  fromEnv: "Runtime input",
+  service: "Service URL",
+  publicUrl: "Application URL",
+  browserUrl: "Browser URL",
+};
