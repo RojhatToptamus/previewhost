@@ -54,7 +54,7 @@ Do not use faint text for instructions, errors, or required decisions. Check tex
 
 The dashboard applies `ph-dark` to `body` and saves the choice as `previewhost.theme`. Components do not implement their own theme preferences.
 
-Use one restrained boundary per group. Avoid decorative shadows, gradients, accent stripes, nested cards, and status dots or pills. Focus outlines remain visible; they are not decorative shadows.
+Use one restrained boundary per group. Avoid decorative shadows, gradients, accent stripes, nested cards, and status dots or pills. Keyboard focus remains visible without adding a second boundary.
 
 ## 3. Typography and geometry
 
@@ -79,7 +79,7 @@ Use the existing outline icon set. Icons support labels; they do not decorate he
 
 Hover, focus, selection, and loading must not change control geometry. Keep motion brief and functional. Honor reduced-motion preferences; only animate progress while work is pending.
 
-Use a single 2px keyboard focus outline, without an additional ring or focus border. Input groups draw it around the group; menu items use their highlighted row. Destructive menu items use the shared red tint. Hover uses `--hover`; the selected navigation row uses `--sel`. Color feedback lasts 120ms; sidebar movement uses a 180ms ease-out transition.
+For bordered controls, keyboard focus changes the existing border color; do not add an outer outline or ring. Input groups highlight the group border. Borderless controls retain a single keyboard focus outline; menu items use their highlighted row. Destructive menu items use the shared red tint. Hover uses `--hover`; the selected navigation row uses `--sel`. Color feedback lasts 120ms; sidebar movement uses a 180ms ease-out transition.
 
 ## 4. Layout and navigation
 

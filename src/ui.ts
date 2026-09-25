@@ -65,6 +65,7 @@ input:not([type=checkbox]),select { height:var(--control-height); padding:0 10px
 input::placeholder,textarea::placeholder { color:var(--t4); }
 input:not(:disabled):hover,select:not(:disabled):hover,textarea:not(:disabled):hover { border-color:var(--t5); }
 input:disabled,select:disabled,textarea:disabled { opacity:.6; cursor:not-allowed; background:var(--subtle); }
+:is(button:not(.brand),.button,input:not([type=checkbox]),select,textarea):focus-visible { outline:none; border-color:var(--t4); }
 [aria-invalid=true] { border-color:var(--err)!important; }
 textarea { padding:12px; resize:vertical; }
 .loading { display:flex; align-items:center; gap:8px; }

@@ -113,13 +113,27 @@
 [data-slot="collapsible-trigger"] {
   translate: none;
 }
-/* One focus indicator, including buttons composed as Radix triggers. Input groups
-   put it on the group; menus use their highlighted row instead. */
-:focus-visible:not([data-slot="input-group-control"]):not([role^="menuitem"]):not([role="option"]):not([role="dialog"]):not([role="alertdialog"]),
-[data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible) {
+/* Borderless controls keep a keyboard cue. Bordered controls highlight their
+   existing edge; input groups own the edge around their borderless input. */
+:where(:focus-visible):not(:where([data-slot="input-group-control"], [role^="menuitem"], [role="option"], [role="dialog"], [role="alertdialog"])) {
   outline: 2px solid var(--t4);
   outline-offset: 2px;
   box-shadow: none;
+}
+:is(.group\/button:not([data-variant="link"]), [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="checkbox"]):focus-visible,
+[data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible) {
+  outline: none;
+  border-color: var(--t4);
+  box-shadow: none;
+}
+.group\/button[data-variant="link"]:focus-visible {
+  outline: none;
+  background: var(--hover);
+  text-decoration: underline;
+}
+[aria-invalid="true"]:focus-visible,
+[data-slot="input-group"]:has([aria-invalid="true"]:focus-visible) {
+  border-color: var(--err);
 }
 [data-slot="sidebar-trigger"] {
   color: var(--t3);
