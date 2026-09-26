@@ -4,6 +4,7 @@ Previewhost starts your app and its services on your machine, assigns local URLs
 
 ## Choose your starting point
 
+- [Dashboard](dashboard.md): choose a local folder, review a file or pasted configuration, and start the preview yourself.
 - [MCP setup](mcp.md): register a coding client, approve project access, and ask your agent for a preview.
 - [CLI quickstart](first-preview.md): run a frontend and API from your terminal, replace them, and stop them.
 - [Node.js library](library.md): manage previews inside a program, from runtime creation through cleanup.
@@ -21,7 +22,7 @@ For example, you can preview a checkout change in one Git worktree while another
 Each worktree has its own background process, called an **owner**, that manages its previews and managed database data.
 You can also connect services from different repositories in one preview.
 
-![Previewhost dashboard with three Storefront worktrees and their individual preview states](../assets/dashboard-worktrees.png)
+![Previewhost dashboard with pinned projects, multiple worktrees, and ready, failed, and stopped previews](../assets/dashboard-worktrees.png)
 
 A preview can serve static files, start an HTTP application, or connect to an existing local server.
 An **environment** groups services and setup jobs under one preview name.
@@ -30,7 +31,7 @@ Its **primary** service receives requests at the environment URL.
 ## How a preview works
 
 1. Prepare your application dependencies in an existing checkout or worktree.
-2. Describe its services in [preview.yaml](recipes.md), or supply a spec through MCP or the library.
+2. Describe its services in [preview.yaml](recipes.md), or supply configuration directly through the dashboard, CLI, MCP, or library.
 3. Start the preview. Previewhost runs setup jobs and waits for service readiness.
 4. Open the returned URL and try the application.
 5. Read logs or replace the preview after changes. When you finish, stop the preview.
@@ -40,7 +41,8 @@ The configuration connects services through named bindings. For example, an API 
 
 ![A running environment with frontend, API, databases, and completed setup jobs](../assets/dashboard.png)
 
-The [dashboard](dashboard.md) shows service status and logs across projects that use CLI or MCP owners.
+The [dashboard](dashboard.md) starts previews, edits environment variables, and shows service status and logs across automatic project owners.
+It uses the same owners as CLI and MCP. Secret Manager stores credentials; each owner still needs approval to use them.
 Each start or replacement creates an **attempt**, so a failed update has separate status from the version that still works.
 
 Replacement keeps the local URL and switches new requests only after the new services are ready.

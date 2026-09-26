@@ -115,7 +115,7 @@ test("New preview keeps configuration through review and preserves unsaved servi
     await dashboard.open();
     await page.goto(launch);
     await expect(page).toHaveTitle("Previews · Previewhost");
-    const create = page.getByRole("button", { name: "New preview", exact: true });
+    const create = page.getByRole("main").getByRole("button", { name: "New preview", exact: true });
     await create.focus();
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog");

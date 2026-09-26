@@ -26,7 +26,15 @@ test('manual private setup survives review dismissal and reload without reading 
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   try {
     await dashboard.open(); await page.goto(launch);
-    await page.getByRole('button', { name: 'New preview', exact: true }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const sidebarTrigger = page.getByRole('button', { name: 'Toggle Sidebar', exact: true });
+    await sidebarTrigger.click();
+    await page.getByRole('navigation', { name: 'Dashboard', exact: true }).getByRole('button', { name: 'New preview', exact: true }).click();
+    await expect(page.getByRole('combobox', { name: 'Project folder', exact: true })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(sidebarTrigger).toBeFocused();
+    await page.setViewportSize({ width: 1360, height: 900 });
+    await page.getByRole('navigation', { name: 'Dashboard', exact: true }).getByRole('button', { name: 'New preview', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('textbox', { name: 'Absolute project folder' }).fill(project);
     await dialog.getByRole('combobox', { name: 'Configuration', exact: true }).click();

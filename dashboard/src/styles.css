@@ -373,17 +373,12 @@
 }
 .project-navigation[data-slot="sidebar-group"] { padding-top: 4px; padding-bottom: 4px; }
 .project-toggle {
-  width: 100%;
   height: auto;
   min-height: 32px;
-  padding: 5px 7px;
-  gap: 8px;
-  justify-content: flex-start;
-  text-align: left;
+  padding-block: 5px;
   background: transparent;
 }
 .project-toggle:is(:hover, :focus-visible, [aria-expanded="true"]) { background: transparent; }
-.more-projects-toggle:is(:hover, :focus-visible) { background: var(--hover); }
 :is(.preview-nav-row, .project-nav-row) > [data-slot="dropdown-menu-trigger"]:is(:hover, :focus-visible, [data-state="open"]) {
   background: var(--sel);
   color: var(--t1);
@@ -397,7 +392,6 @@
 .project-count { color: var(--t4); font-size: 11px; font-weight: 400; width: 24px; text-align: center; }
 .navigation-label { padding: 12px 20px 4px; color: var(--t4); font-size: 11px; }
 .navigation-error { padding: 8px 20px; color: var(--err); font-size: 12px; }
-.more-projects-toggle { justify-content: flex-start; flex-shrink: 0; margin: 8px 12px; padding: 0 7px; gap: 8px; color: var(--t4); background: transparent; }
 .project-nav-row .project-count { visibility: hidden; }
 @media (hover: hover) and (pointer: fine) {
   :is(.preview-nav-row, .project-nav-row, .overview-table tr) [data-slot="dropdown-menu-trigger"] { opacity: 0; }

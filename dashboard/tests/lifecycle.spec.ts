@@ -261,9 +261,9 @@ test("linked worktrees stay grouped, discoverable and independently controllable
       await expect(projectOptions(name)).toBeEnabled();
     }
     await organize("atlas", "Pin project");
-    await expect(nav.locator(".project-toggle:visible")).toHaveCount(1);
+    await expect(nav.locator(".project-toggle:visible")).toHaveCount(6);
     await expect(projectOptions("atlas")).toBeFocused();
-    await nav.getByRole("button", { name: "More projects", exact: true }).click();
+    await expect(nav.locator(".navigation-label")).toHaveText(["Pinned", "Projects"]);
     await organize("ledger-api", "Pin project");
     await organize("ledger-api", "Move up");
     await expect(projectOptions("ledger-api")).toBeFocused();
@@ -277,12 +277,13 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await expect(nav.getByRole("alert")).toHaveCount(0);
     await page.reload();
     await expect(tableRows).toHaveCount(10);
-    await expect(nav.locator(".project-toggle:visible")).toHaveCount(2);
+    await expect(nav.locator(".project-toggle:visible")).toHaveCount(6);
     await expect(nav.locator(".project-toggle:visible").first()).toHaveAccessibleName("atlas");
     await organize("ledger-api", "Unpin project");
     await organize("atlas", "Unpin project");
     await expect(nav.locator(".project-toggle:visible")).toHaveCount(6);
     await expect(projectOptions("atlas")).toBeFocused();
+    await expect(nav.locator(".navigation-label")).toHaveText(["Projects"]);
     // A failed non-command service keeps a focused log action on its own row.
     await rowFor(tableRows, 3).locator(".overview-status").click();
     await page.locator(".service-table tr").filter({ hasText: "api" }).getByRole("button", { name: "Logs", exact: true }).click();
@@ -379,7 +380,7 @@ test("linked worktrees stay grouped, discoverable and independently controllable
     await expect(toggle).toBeFocused();
     expect(await toggle.evaluate(element => {
       const style = getComputedStyle(element);
-      return style.borderColor !== "rgba(0, 0, 0, 0)" && style.borderWidth !== "0px";
+      return style.outlineStyle !== "none" && style.outlineWidth !== "0px";
     })).toBe(true);
     await page.keyboard.press("Space");
     await expect(atlas.locator(".preview-nav")).toHaveCount(0);

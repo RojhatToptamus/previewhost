@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRightIcon, LayoutGridIcon, KeyRoundIcon, MoreHorizontalIcon, PinIcon, PinOffIcon, ArrowUpIcon, ArrowDownIcon } from "lucide-react";
+import { PlusIcon, ChevronRightIcon, LayoutGridIcon, KeyRoundIcon, MoreHorizontalIcon, PinIcon, PinOffIcon, ArrowUpIcon, ArrowDownIcon } from "lucide-react";
 import { authenticated, call, errorMessage, type Mutate } from "./lib/api";
 import { entryLabel, projectGroups, state, type Owner, type ProjectGroup } from "./lib/model";
 import type { Selection } from "./lib/view-state";
@@ -19,14 +19,14 @@ type NavigationProps = {
   select(value: Selection): void;
   mutate: Mutate;
   acting: boolean;
+  onNewPreview(): void;
 };
 type Preferences = { pinnedProjects: string[] };
 
-export function Navigation({ owners, selection, select, mutate, acting }: NavigationProps) {
+export function Navigation({ owners, selection, select, mutate, acting, onNewPreview }: NavigationProps) {
   const { setOpenMobile } = useSidebar();
   // Disclosure stays here so closing the mobile Sheet keeps the navigation state.
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [preferences, setPreferences] = useState<Preferences>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -56,8 +56,7 @@ export function Navigation({ owners, selection, select, mutate, acting }: Naviga
   useEffect(() => {
     if (!selectedGroup) return;
     setExpanded(current => current.includes(selectedGroup) ? current : [...current, selectedGroup]);
-    if (!pins?.includes(selectedGroup)) setMoreOpen(true);
-  }, [selectedGroup, selectedOwner?.id, selectedName, pins]);
+  }, [selectedGroup, selectedOwner?.id, selectedName]);
   function navigate(value: Selection) {
     select(value);
     setOpenMobile(false);
@@ -67,7 +66,6 @@ export function Navigation({ owners, selection, select, mutate, acting }: Naviga
     setSaving(true);
     try {
       const saved = await call<Preferences>({ action: "saveNavigationPreferences", pinnedProjects });
-      if (!pinnedProjects.includes(project)) setMoreOpen(true);
       focusAfterSave.current = project;
       setPreferences(saved);
       setError("");
@@ -79,10 +77,8 @@ export function Navigation({ owners, selection, select, mutate, acting }: Naviga
   function renderGroup(group: ProjectGroup) {
     const index = pinned.findIndex(item => item.id === group.id);
     return <ProjectNavigation key={group.id} group={group}
-      hidden={Boolean(pins?.length) && index < 0 && !moreOpen}
       open={expanded.includes(group.id)}
       onOpenChange={open => {
-        if (open && !preferences) setMoreOpen(true);
         setExpanded(current => open ? [...current, group.id] : current.filter(id => id !== group.id));
       }}
       pinned={index >= 0} preferencesDisabled={!preferences || saving}
@@ -112,6 +108,11 @@ export function Navigation({ owners, selection, select, mutate, acting }: Naviga
               <KeyRoundIcon /> Secret Manager
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => { setOpenMobile(false); onNewPreview(); }}>
+              <PlusIcon /> New preview
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent role="navigation" aria-label="Projects">
@@ -121,9 +122,8 @@ export function Navigation({ owners, selection, select, mutate, acting }: Naviga
         </div>}
         {pinned.length > 0 && <p className="navigation-label">Pinned</p>}
         {[...pinned, ...others].flatMap((group, index) => [
-          pins?.length && others.length > 0 && index === pinned.length
-            ? <Button key="more-projects" variant="ghost" className="more-projects-toggle" aria-expanded={moreOpen}
-                onClick={() => setMoreOpen(value => !value)}><ChevronRightIcon className={moreOpen ? "rotate-90" : ""} />More projects</Button>
+          others.length > 0 && index === pinned.length
+            ? <p key="projects-label" className="navigation-label">Projects</p>
             : null,
           renderGroup(group),
         ])}
@@ -132,9 +132,8 @@ export function Navigation({ owners, selection, select, mutate, acting }: Naviga
   );
 }
 
-function ProjectNavigation({ group, hidden, selection, select, mutate, acting, open, onOpenChange, menuRef, pinned, preferencesDisabled, onPin, onMove, canMoveUp, canMoveDown }: Omit<NavigationProps, "owners"> & {
+function ProjectNavigation({ group, selection, select, mutate, acting, open, onOpenChange, menuRef, pinned, preferencesDisabled, onPin, onMove, canMoveUp, canMoveDown }: Omit<NavigationProps, "owners" | "onNewPreview"> & {
   group: ProjectGroup;
-  hidden: boolean;
   open: boolean;
   onOpenChange(open: boolean): void;
   menuRef(element: HTMLButtonElement | null): void;
@@ -157,11 +156,11 @@ function ProjectNavigation({ group, hidden, selection, select, mutate, acting, o
   }, [open, selected?.owner.id, selected?.name]);
   const projectLabel = [group.label.name, group.label.qualifier].filter(Boolean).join(" · ");
   return (
-    <SidebarGroup className={hidden ? "project-navigation hidden" : "project-navigation"}>
+    <SidebarGroup className="project-navigation">
       <Collapsible open={open} onOpenChange={onOpenChange}>
         <div className="project-nav-row">
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="project-toggle" title={group.directory}
+            <SidebarMenuButton className="project-toggle" title={group.directory}
               aria-label={projectLabel} aria-description={`${group.entries.length} previews`}>
               <ChevronRightIcon className={open ? "rotate-90" : ""} />
               <span className="project-heading">
@@ -169,7 +168,7 @@ function ProjectNavigation({ group, hidden, selection, select, mutate, acting, o
                 {group.label.qualifier && <code>{group.label.qualifier}</code>}
               </span>
               <span className="project-count" aria-hidden="true">{group.entries.length}</span>
-            </Button>
+            </SidebarMenuButton>
           </CollapsibleTrigger>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

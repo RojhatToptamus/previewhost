@@ -46,10 +46,10 @@ and relaunch with `--allow-exec`. This stops that owner's previews; managed data
 
 ## Find the right preview
 
-![Preview overview with separate Storefront worktrees](../assets/dashboard-worktrees.png)
+![Preview overview with multiple projects and separate worktree states](../assets/dashboard-worktrees.png)
 
 **Overview** compares previews across projects. Each row identifies the project and worktree.
-Names open details; **Open app** opens the serving application, even if a later update failed.
+Rows open details; **Open app** opens the serving application, even if a later update failed.
 Preview details show its hostname and numeric localhost URL when available, with open
 and copy actions. They are different browser origins; switching does not bypass CORS.
 Search by branch, folder, preview name, or source path. **All**, **Active**, **Needs attention**,
@@ -58,7 +58,8 @@ Active and Needs attention. An unavailable owner is not assumed inactive.
 
 The sidebar groups linked Git worktrees by repository. Expand several projects to compare worktrees.
 Project menus offer **Pin project**, **Unpin project**, and **Move up/down** among pins.
-Pins appear first; **More projects** reveals the remaining projects alphabetically.
+Pinned projects appear first under **Pinned**. The remaining projects appear alphabetically under **Projects**.
+Use **New preview** in the sidebar to start from any page.
 These preferences survive dashboard restarts and do not change running previews, data, or secrets.
 Without pins, all projects remain visible. Preview menus appear on hover or keyboard focus,
 and stay visible for the selected preview and on touch screens.
@@ -121,20 +122,43 @@ Other windows, agents, and the stored log buffer are unchanged.
 
 ## Save configuration and manage secrets
 
+### Choose the configuration
+
 **Current configuration** opens the exact input file when the attempt records one; otherwise it
 opens the retained direct configuration. **Recorded attempt** remains a read-only historical view.
 When a replacement fails, **Failed update configuration** opens its input file or retained declaration for correction.
 **Project configuration file** explicitly selects an existing root file when it differs from that attempt.
 
-Select a command service or setup job to add, edit, or remove a binding. Literal values remain
-undisclosed; replacing one requires an explicit new value. Secret bindings contain reference
-names, not credentials. Search existing references or enter a new name for private setup.
-Selecting a reference does not grant permission to use it. Use an exact existing name only for intentional sharing.
+The editor changes environment variables for command services and setup jobs. To change commands,
+sources, services, or readiness settings, edit the configuration file or prepare new YAML/JSON through **New preview**.
 
-Service and browser URL choices come from the selected configuration. **Service URL** waits for
-an internal service or database connection; **Browser URL** uses an HTTP service’s `.localhost` address.
-**Application URL** selects the primary service’s numeric origin automatically.
-**Runtime input** uses an environment input explicitly selected when the runtime started.
+### Add, edit, or remove a variable
+
+![Configuration editor with service selection and environment variable bindings](../assets/dashboard-configuration.png)
+
+1. Open the preview's **Configuration** tab. For an environment, select its **Service or job**.
+2. Choose **Add variable**, or **Edit** beside an existing variable.
+3. Enter the variable name and choose its **Value source**.
+4. Choose **Keep change** to stage the edit. To remove a variable, use its **Remove** action.
+5. Save and apply the changes as described below.
+
+| Value source | Where the value comes from |
+| --- | --- |
+| Value | Text supplied in the configuration, such as `NODE_ENV: development`. Use a secret reference for credentials. |
+| Secret | A value stored in Secret Manager, such as `shop/dev/api-token`. Selection does not grant access. |
+| Service URL | An internal HTTP or database connection URL. Startup waits for the selected service to be ready. |
+| Browser URL | An HTTP service's `.localhost` address for browser requests. It does not add a readiness dependency. |
+| Application URL | The primary service's numeric address. The primary service is selected automatically. |
+| Runtime input | An input explicitly selected when the owner started, such as `--env DEV_TOKEN`. Other shell variables are unavailable. |
+
+Service choices come from the selected configuration. Jobs cannot supply service URLs; browser URLs require HTTP services.
+Existing literal values are not displayed. To replace one, select **Replace the existing value** and enter the replacement.
+
+For a secret, search stored reference names or enter a new name for later private setup.
+Unlock Secret Manager to browse existing names. Entering a reference does not require browsing.
+Use an exact existing name only for intentional sharing. See [Bind a secret in the dashboard](secrets.md#bind-a-secret-in-the-dashboard).
+
+### Save and apply changes
 
 - **Save file** updates the selected file without changing the running application. Unedited
   values, comments, and relative paths remain. Formatting can change. Concurrent changes are rejected.
@@ -146,6 +170,12 @@ an internal service or database connection; **Browser URL** uses an HTTP service
 Replacement keeps the old app serving until the new attempt is ready. It does not roll back
 source edits, migrations, or partial database writes. Successful once-only jobs stay completed;
 changing their bindings does not rerun them. Use the existing explicit job rerun when needed.
+
+If the file or preview changes after review, reload and review the current configuration before trying again.
+Previewhost rejects stale changes instead of overwriting newer work. Direct configuration remains in owner memory;
+save it to a file if you need it after owner shutdown.
+
+### Manage stored secrets
 
 Removing a binding keeps its stored secret and existing owner approval. Changing a stored value
 affects future starts that use that exact reference, including other projects; it does not restart them.

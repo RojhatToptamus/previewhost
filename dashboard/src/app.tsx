@@ -217,6 +217,7 @@ export function App() {
           </div>
         </header>
         <Navigation
+          onNewPreview={() => setCreating({})}
           owners={owners}
           selection={selection}
           select={select}

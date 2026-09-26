@@ -135,7 +135,8 @@ export function NewPreview({
         showCloseButton={!busy}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          if (opener.current?.isConnected) opener.current.focus();
+          if (opener.current?.isConnected && !opener.current.closest('[role="dialog"][data-state="closed"]')) opener.current.focus();
+          else document.querySelector<HTMLButtonElement>('[data-slot="sidebar-trigger"]')?.focus();
         }}
       >
         {review ? (

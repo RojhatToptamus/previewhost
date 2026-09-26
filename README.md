@@ -16,7 +16,7 @@ When you replace a preview, its local URL stays the same.
 New requests switch only after the replacement services pass readiness checks.
 Stop ends owned processes and retains managed database data.
 
-![Previewhost dashboard showing a frontend, API, PostgreSQL, Redis, and completed migration and seed jobs](./assets/dashboard.png)
+![Fieldnotes preview with pinned projects, a frontend, API, PostgreSQL, Redis, and completed setup jobs](./assets/dashboard.png)
 
 ## Get started
 
@@ -33,11 +33,12 @@ Choose the interface you need:
 
 | Interface | Guide |
 | --- | --- |
+| Dashboard | [Dashboard guide](docs/dashboard.md): choose a local folder, review its configuration, and start a preview. |
 | Coding agent | [MCP setup](docs/mcp.md): register a client and ask it to preview your application. |
 | Terminal | [First preview with the CLI](docs/first-preview.md): run a frontend and backend, replace them, and stop them. |
 | Node.js program | [Node.js library](docs/library.md): start a runtime, request a page, and close it. |
 
-Each guide includes its installation steps. The [introduction](docs/introduction.md) explains how previews, environments, and project owners work.
+Start with [installation](docs/installation.md) if Previewhost is not installed. The [introduction](docs/introduction.md) explains previews, environments, and project owners.
 
 Default lookup uses root `preview.yaml`, then `preview.yml`. If both exist, select one with `--file` or keep one default.
 New configurations save as `preview.yaml` only when neither file exists.
@@ -65,7 +66,7 @@ The dashboard opens in your browser. Use **New preview** to select a local folde
 | Connect or manage local data | [Databases](docs/databases.md) |
 | Supply private credentials | [Secrets](docs/secrets.md) |
 | Preview existing task checkouts | [Worktrees](docs/worktrees.md) |
-| Inspect previews in the browser | [Dashboard](docs/dashboard.md) |
+| Start and manage previews in the browser | [Dashboard](docs/dashboard.md) |
 | Diagnose errors | [Troubleshooting](docs/troubleshooting.md) |
 | Embed the runtime | [Node.js library](docs/library.md) |
 | Look up fields and commands | [API and CLI reference](docs/api.md) |
