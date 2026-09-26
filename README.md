@@ -3,31 +3,30 @@
 </p>
 
 <h1 align="center">previewhost</h1>
-  <p align="center">
-    <a href="https://www.npmjs.com/package/previewhost">
-      <img src="https://img.shields.io/npm/v/previewhost.svg?style=flat-square" alt="NPM version" />
-    </a>
-  </p>
-Previewhost runs local previews of applications and their services.
-Use it to try changes in separate worktrees or connect a frontend, APIs, and local databases across repositories.
-It assigns ports, supplies service URLs, and runs setup jobs before dependent services start.
 
-When you replace a preview, its local URL stays the same.
-New requests switch only after the replacement services pass readiness checks.
-Stop ends owned processes and retains managed database data.
+<p align="center">
+  <a href="https://www.npmjs.com/package/previewhost">
+    <img src="https://img.shields.io/npm/v/previewhost.svg?style=flat-square" alt="NPM version" />
+  </a>
+</p>
+
+Previewhost runs local previews for full-stack apps.
+
+Run multiple isolated previews side by side for different Git worktrees or repositories. Each preview can start your frontend, backend, databases, Redis, setup jobs, and other services together.
+
+Previewhost assigns local URLs and ports, starts services in dependency order, and keeps managed data separate between environments. Use it from the dashboard, CLI, Node.js library, or through MCP with your coding agent.
+
+Secrets stay as references in configuration and can be entered privately outside the agent chat. Service and job logs are available in one place.
 
 ![Fieldnotes preview with pinned projects, a frontend, API, PostgreSQL, Redis, and completed setup jobs](./assets/dashboard.png)
 
 ## Get started
 
 Previewhost requires Node.js 22.23 or later.
-macOS and Linux support x64 and arm64. Windows requires x64.
-Native commands and automatic project owners run on macOS, Linux, and Windows.
-See the [platform and database requirements](docs/installation.md#requirements).
-Linux requires procps (`/bin/ps`) and `lsof` (`/usr/bin/lsof`).
-Automatic unlock requires macOS 13 or later.
 
-For an existing installation, read the [reset instructions](#reset-required-for-earlier-installations) before updating.
+```sh
+npm install -g previewhost
+```
 
 Choose the interface you need:
 
@@ -37,6 +36,10 @@ Choose the interface you need:
 | Coding agent | [MCP setup](docs/mcp.md): register a client and ask it to preview your application. |
 | Terminal | [First preview with the CLI](docs/first-preview.md): run a frontend and backend, replace them, and stop them. |
 | Node.js program | [Node.js library](docs/library.md): start a runtime, request a page, and close it. |
+
+Previewhost supports macOS, Linux, and Windows. See the [platform and database requirements](docs/installation.md#requirements) for architecture, system dependency, and database details.
+
+For an existing installation, read the [reset instructions](#reset-required-for-earlier-installations) before updating.
 
 Start with [installation](docs/installation.md) if Previewhost is not installed. The [introduction](docs/introduction.md) explains previews, environments, and project owners.
 
@@ -52,6 +55,7 @@ previewhost dashboard
 ```
 
 `--allow-exec` permits trusted commands and managed database operations with your user permissions, without a sandbox.
+
 The dashboard opens in your browser. Use **New preview** to select a local folder and configuration, or **Configuration** to edit bindings and apply changes. Keep its terminal open; closing the dashboard does not stop previews.
 
 ## Documentation
@@ -95,8 +99,7 @@ See [keystore recovery](docs/troubleshooting.md#stored-secrets-are-missing-or-in
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for source builds and verification.
-The [documentation website](https://github.com/RojhatToptamus/previewhost/blob/main/website/README.md) renders the same Markdown guides with
-search, page outlines, and light and dark themes. Run `npm run dev:docs` after installing
-repository dependencies. Website code and build output are excluded from the npm package. The bundled agent skill includes its referenced guides and product screenshots.
+
+Run `npm run dev:docs` to start the documentation site locally.
 
 See [NOTICE](NOTICE) for attribution and [LICENSE](LICENSE) for the MIT license.
