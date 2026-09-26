@@ -54,7 +54,7 @@ Do not use faint text for instructions, errors, or required decisions. Check tex
 
 The dashboard applies `ph-dark` to `body` and saves the choice as `previewhost.theme`. Components do not implement their own theme preferences.
 
-Use one restrained boundary per group. Avoid decorative shadows, gradients, accent stripes, nested cards, and status dots or pills. Focus outlines remain visible; they are not decorative shadows.
+Use one restrained boundary per group. Avoid decorative shadows, gradients, accent stripes, nested cards, and status dots or pills. Keyboard focus remains visible without adding a second boundary.
 
 ## 3. Typography and geometry
 
@@ -75,17 +75,17 @@ Use Geist for interface text and Geist Mono for machine values. Mono belongs on 
 
 Treat these as shared recipes, not reasons to scatter literal values across components. Keep control heights aligned within a row. Use `gap` for relationships within a group. Prefer existing spacing steps: 4, 8, 12, 16, 20, 24, and 32px.
 
-Use the existing outline icon set. Icons support labels; they do not decorate headings. Every icon-only control needs an accessible name. Do not use emoji as interface icons.
+Use the existing outline icon set. Icons support recognition, not decoration. Activity uses neutral 16px icons beside resource names: terminal for commands/jobs, file-code for static content, link for attached services, database for PostgreSQL, and layers for Redis. Map verified service types only; do not infer frameworks from names or commands. Keep type text and hide supplementary icons from assistive technology. Every icon-only control needs an accessible name. Do not use emoji as interface icons.
 
-Hover, focus, selection, and loading must not change control geometry. Keep motion brief and functional. Honor reduced-motion preferences; only animate progress while work is pending.
+Hover, focus, selection, and loading must not change control geometry. Active labels change color, never weight, size, or position. Reserve underline space in every tab state. Align sidebar icons and disclosure chevrons on one axis, with labels on another. Keep motion brief and functional. Honor reduced-motion preferences; only animate progress while work is pending.
 
-Use a single 2px keyboard focus outline, without an additional ring or focus border. Input groups draw it around the group; menu items use their highlighted row. Destructive menu items use the shared red tint. Hover uses `--hover`; the selected navigation row uses `--sel`. Color feedback lasts 120ms; sidebar movement uses a 180ms ease-out transition.
+For bordered controls, keyboard focus changes the existing border color; do not add an outer outline or ring. Input groups highlight the group border. Borderless controls retain a single keyboard focus outline; menu items use their highlighted row. Destructive menu items use the shared red tint. Hover uses `--hover`; the selected navigation row uses `--sel`. Color feedback lasts 120ms; sidebar movement uses a 180ms ease-out transition.
 
 ## 4. Layout and navigation
 
 Keep one application shell. The sidebar owns preview navigation and Secret Manager. On narrow screens, use the existing Sheet; do not build a second navigation model.
 
-A preview has one persistent identity and action header, followed immediately by Activity, Logs, and Configuration tabs. Tab changes must not move the header or tabs. Content scrolls within its workspace.
+Keep only essential navigation fixed: the app header and the preview diagnostic tabs. The preview title, actions, folder, and addresses scroll with the page. All three preview tabs share a bounded work area below their navigation, with internal scrolling for activity, output, or configuration. Include toolbars and action footers within that height. The outer workspace scrolls the metadata away when the user chooses. Switching tabs and refreshing never scroll the workspace automatically. Selecting another preview starts at its header.
 
 Keep the brand above the expanded sidebar. Place its toggle at the start of the content header, followed by a separator and compact navigation context. Preview breadcrumbs offer a return to Previews and identify the project and worktree, including when the sidebar is collapsed. On narrow screens, keep the current context and hide the parent breadcrumb. Use a 24px desktop content gutter and 16px narrow-screen gutter.
 
@@ -103,29 +103,26 @@ with `(folder)`. Keep exact paths and configured names in details and accessible
 Branch labels describe current source, not a historical build. A multi-repository application belongs under its owner's
 project; its other sources remain visible in configuration and searchable from Overview.
 
-Start sidebar project groups collapsed and expand one project at a time. Opening a preview
-reveals its group and scrolls the selected row into view. Sort projects and worktrees
-alphabetically so status changes do not move navigation targets. Keep the open project while
-the dashboard is open, including across mobile drawer dismissal. Use one sidebar scroll area;
-keep the expanded project's heading sticky so its collapse control remains reachable. Every
-row stays mounted while open, so refresh cannot evict a focused action or confirmation.
+The sidebar is a stable project/worktree navigator. Keep one chevron per project; do not add a folder icon beside it. Expansion changes the chevron, not the background; reserve the selection fill for the current preview. Start groups collapsed and let users keep several expanded. Opening a preview reveals its group without closing another. Worktree labels stay alphabetic so status changes do not move navigation targets. Keep disclosure choices when dismissing the narrow-screen drawer.
 
-Overview owns search, status filtering, and comparison in one table with repository divider
-rows. Its global count links clear search and apply the corresponding status filter. Within
-groups, active work comes first, then entries needing attention, with newer startup attempts
-first within each category. Calculate distinguishing labels from the complete group before
-filtering. No separate recent-history list or project lifecycle is stored.
+Project menus offer Pin project, Unpin project, and Move up/down among pins. Place the quiet New preview action after Overview and Secret Manager. Use the same button and leading icon slot for these actions and project chevrons, so their centers share one vertical axis. Pinned projects appear under a muted Pinned heading in the chosen order; omit that heading when no visible project is pinned. Show the remaining alphabetic list under Projects without an extra disclosure. Omit empty sections. Pins are local navigation preferences, stored separately from project configuration. They do not start, stop, authorize, or remove anything. Preserve undiscovered pins without inventing project rows. Reordering and partial discovery must not unmount focused menus or confirmations.
+
+Overview is a cross-project comparison list, not another project tree. Use one row per preview, with project identity first and the distinguishing worktree/preview beneath. Put All, Active, Needs attention, and Inactive beside search; changing a filter preserves the query. Active and Needs attention may overlap when an update fails while an earlier app serves. Unknown owners are not Inactive. Keep active work first, then attention, then other entries, with newer startup attempts first within each category. Derive distinguishing labels from the complete group before filtering. Do not present startup order as recent usage.
+
+Use a single subtle table boundary and row separators, without shaded project divider rows. Align status and actions in compact columns; identity uses the remaining width. The full row opens details, with a named keyboard target; action controls operate independently. Use pointer cursors for clickable rows and controls. Keep Open app visible when available. Avoid summary metrics and duplicate filter controls.
 
 Use the shortest distinguishing parent suffix for groups with matching names. Long labels
 may wrap in Overview; sidebar labels truncate and retain their full accessible context.
 
 Each row has a separate action menu; using it must not navigate. Keep sidebar action triggers
-inside their rows, aligned with the name and visible for mouse, keyboard, and touch. Include
+inside their rows, aligned with the name. Secondary menu triggers may appear on hover, keyboard focus, selection, or while open; keep their space reserved and their keyboard target mounted. Show them continuously on touch devices. Pin/unpin and reorder return focus to the project menu. Healthy Ready and Stopped words may be omitted from sidebar rows, but remain in their accessible names and in Overview/details. Always show startup, failure, and unavailable states. Include
 project/worktree identity in accessible action names and status in navigation names. The mobile
 Sheet has a visible close control. Reuse the same actions in overview and details.
 Every entry offers Recheck status and Remove entry. Removal explains blockers in its review;
 an unreachable owner never counts as stopped. The server rechecks cleanup evidence and rejects
 changed records before removal.
+
+Folder selectors stay within their trigger width. Show branch and path on separate lines; retain full paths for copying and manual entry. Resolve filesystem aliases before listing known folders.
 
 Paths stay on one line. Let parent directories truncate while preserving the final segments at full contrast. Use the shared `Path` component; never use right-to-left text direction to fake truncation.
 
@@ -133,13 +130,15 @@ Paths stay on one line. Let parent directories truncate while preserving the fin
 
 | View | Primary purpose and structure |
 | --- | --- |
-| Previews | Compare worktrees, status, and available applications in aligned rows. Names open details; Open app opens the running application. |
-| Activity | Show actionable failures, serving/latest attempts with start times, services, jobs, private setup, and managed data. Put recovery beside the affected resource. |
-| Logs | Put search, attempt, and source above output. Use Log options for wrapping, search context, and Clear view. The header Refresh also retrieves logs. Explain hidden and omitted output separately; do not imply captured logs are live. |
-| Configuration | Show the selected attempt's configuration, bindings, and sources. Keep Save as preview.yaml outside the scrolling body when no default file exists. Otherwise identify the existing file. |
-| Secret Manager | Search stored references, then edit a selected reference in the existing dialog. Never fetch or display its stored value. |
+| Previews | Compare worktrees, status, and available applications in aligned rows. Rows open details; Open app opens the running application. |
+| Activity | Show actionable failures, services, jobs, private setup, and managed data. Identify the attempt that owns each resource section. Put recovery beside the affected resource. |
+| Logs | Put search, attempt, and source above output. Use Log options for wrapping, search context, and Clear view. Refresh lives in this toolbar and retrieves current output and environment state without changing the view. Status elsewhere updates automatically. Explain hidden and omitted output separately; do not imply captured logs are live. |
+| Configuration | Distinguish the editable current declaration/file from recorded attempts. Keep Save file and Review and apply outside the scrolling body. Direct configuration can apply without saving; Save as preview.yaml remains explicit. |
+| Secret Manager | Search stored references; New secret and Edit share the private value dialog. Creation stores a value without granting a preview permission. Never fetch or display its stored value. |
 
-Long lists need bounded scrolling without burying actions. The environment table uses a 320px height capped at 45% of viewport height, with its own scrollbar and sticky header. Secret lists use the existing bounded scroll area. An empty environment list uses a short message without a scroll box. Short lists should not gain artificial filler rows.
+Long lists need bounded scrolling without burying actions. Environment tables stop growing at 320px or 45% of viewport height, with an internal scrollbar and sticky header. Secret lists use the existing bounded scroll area. An empty environment list uses a short message without a scroll box. Short lists should not gain artificial filler rows.
+
+Activity tables and log output use one subtle boundary with the shared panel radius. Do not add enclosing section cards or nested boxes. Keep failed-resource errors and focused Logs actions beside the resource; do not repeat job failures in a separate summary. Attempt IDs belong in diagnostic selectors. Show a log status line only for search results, hidden output, or truncation; loading belongs in an existing control without changing toolbar height.
 
 Tables compare values. Give each column enough room for its content; do not squeeze references into an action-width column. Reserve compact right columns for actions. Use row separators without extra lines above the first row or below the last.
 
@@ -186,6 +185,11 @@ Do not add a component merely to replace working native behavior. Shared CSS own
 - Use a toast for a completed operation that lacks sufficient local feedback. Keep errors beside the affected field or task when recovery needs attention.
 - Show pending feedback only during actual work. Prevent duplicate submissions and preserve the control's size.
 - Explain disabled actions when the reason is not evident from nearby state.
+
+New preview links to configuration examples and offers an optional agent prompt. Keep manual input complete.
+Unfinished reviews are recovered by their exact server-side draft ID; never store configuration in browser storage.
+Private setup stays in its separate tab. Returning refreshes its status; only an explicit Start launches the application.
+State the review retention limit where recovery is offered.
 
 Dialogs have a title, relevant consequences, and explicit actions. Keep focus inside while open, support dismissal where safe, and return focus to the trigger. Never stack dialogs. Confirm destructive scope using actual environment and database names.
 
@@ -269,3 +273,10 @@ Before finishing a UI change:
 - Verify focus visibility, tab order, dialogs, selection, copy feedback, and scroll ownership.
 - Use disposable data. Never capture secret values or private capabilities.
 - State what was actually tested and what remains unverified.
+
+Configuration editors preserve undisclosed values on the server. Show removed bindings with Undo.
+Keep edits when switching diagnostic tabs. A stale file or attempt needs an explicit reload,
+never a silent merge. Review lists the actual sources, execution scope and job/data effects;
+private secret approval stays separate. Use the same review for New preview and Apply.
+
+Variable editors derive service choices from the current configuration: internal URLs exclude jobs and self; browser URLs include HTTP services; the application URL uses the primary service automatically. Search secret reference names through Secret Manager, with explicit entry of a new name for private setup. Selecting a reference stages a binding, never grants permission. Keep the value-source guidance visible.

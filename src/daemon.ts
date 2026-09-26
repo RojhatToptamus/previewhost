@@ -161,11 +161,18 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         if (!options.owner) throw new PreviewError('INVALID_INPUT', 'This owner has no project directory. Save the original spec through the CLI, MCP, or library.');
         return runtime.saveConfiguration(p.name, p.attemptId, options.owner.projectDirectory, signal);
       }
+      case 'configureBindings': {
+        const p = parse(requestSchemas.configureBindings, value);
+        return runtime.configureBindings(p.name, p.attemptId, p.changes, p.options, {
+          projectDirectory: options.owner?.projectDirectory, signal,
+          secretsSetup: (spec, opts) => secrets.setup(spec, opts?.signal ?? signal, opts?.reopen),
+        });
+      }
       case 'secrets/list': parse(requestSchemas.list, value); return secrets.list();
       case 'secrets/open': return secrets.reopen(parse(secretRequestSchemas.status.pick({ id: true }), value).id, signal);
       case 'inspect': return runtime.inspect(parse(requestSchemas.inspect, value).spec);
-      case 'start': return runtime.start(parse(requestSchemas.start, value).spec);
-      case 'replace': { const p = parse(requestSchemas.replace, value); return runtime.replace(p.name, p.spec); }
+      case 'start': { const p = parse(requestSchemas.start, value); return runtime.start(p.spec, { expected: p.expected, sourceFile: p.sourceFile }); }
+      case 'replace': { const p = parse(requestSchemas.replace, value); return runtime.replace(p.name, p.spec, { expected: p.expected, sourceFile: p.sourceFile }); }
       case 'list': parse(requestSchemas.list, value); return runtime.list();
       case 'get': return runtime.get(parse(requestSchemas.get, value).name);
       case 'wait': { const p = parse(requestSchemas.wait, value); return runtime.wait(p.name, p.attemptId, { timeoutMs: p.timeoutMs, signal }); }

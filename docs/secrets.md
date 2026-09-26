@@ -18,6 +18,27 @@ Use a different reference for a different value. Preserve existing references un
 `--allow-exec` permits execution but does not select secrets or unlock the keystore.
 Managed databases also need an unlocked keystore for their generated credentials, even without user-secret references.
 
+## Bind a secret in the dashboard
+
+1. Open a preview's **Configuration** tab and select the command service or setup job that needs the value.
+2. Choose **Add variable**, enter a variable name such as `API_TOKEN`, and select **Secret** as its value source.
+3. Search for an existing reference, or enter a new name such as `shop/dev/api-token` and select **Use**.
+4. Choose **Keep change**. For file-backed configuration, choose **Save file**, then **Review and apply**.
+   For direct configuration, choose **Review and apply** without saving a file.
+5. Complete any requested private setup, then return to the review and confirm startup.
+
+Unlock Secret Manager to search stored names. You can enter a reference without unlocking it first.
+The selector never reads or displays secret values. Choosing a name does not grant the owner access to it.
+For a new preview, declare the same reference in its file or pasted configuration before review.
+
+**Save file** writes the reference into the selected configuration file, not the secret value.
+Direct edits do not create `preview.yaml` unless you choose **Save as preview.yaml**.
+Applying replaces a running environment or starts a stopped one; saving alone changes neither.
+
+Removing a variable binding keeps the stored value and existing owner approval.
+To change the credential itself, use [Secret Manager](#change-a-stored-value).
+See [configuration editing](dashboard.md#save-configuration-and-manage-secrets) for other value sources and file conflicts.
+
 ## Approve and enter values
 
 From the project with root `preview.yaml`, run:
@@ -48,17 +69,24 @@ Replace `REQUEST_ID` with the actual ID. A `complete` result means setup finishe
 Read the current configuration and preview status before starting or replacing the preview.
 If the agent turn ended, send it “Secrets saved. Continue.”
 
+For dashboard startup, return to its review and confirm **Start preview** or **Apply configuration** after setup completes.
+If you closed the review, use **Continue setup** on the preview or in **New preview**.
+Saving secrets never starts the application. See [dashboard recovery](troubleshooting.md#dashboard-setup-finished-but-the-preview-did-not-start).
+
 If setup is `pending` or `saving`, keep the same request ID.
 If you cancel the form, that request stays canceled. Partial saves retain completed writes.
 Use the [recovery guide](troubleshooting.md#stored-secrets-are-missing-or-inaccessible) for expired forms or access errors.
 
 ## Change a stored value
 
-![Secret Manager showing stored reference names and automatic unlock controls](../assets/dashboard-secrets.png)
+![Secret Manager showing stored reference names without exposing values](../assets/dashboard-secrets.png)
 
-In the dashboard's **Secret Manager**, create or unlock its session, then find the reference and select **Edit**.
+In the dashboard's **Secret Manager**, create or unlock its session, then use **New secret** or select **Edit** beside an existing reference.
+New secret refuses an existing name; it never overwrites a value. Neither action grants a preview permission to use a reference.
 The list shows names, never stored values. Saving changes future starts in all projects that use that reference.
 Running applications keep the value they already received.
+Use **Review and apply** on each affected preview when you want it to use the changed value.
+Successful once-only jobs do not run again automatically; see [job recovery](jobs.md#progress-and-recovery).
 Search covers all stored references. Use **Next** and **Previous** to browse pages of up to 128 names.
 
 You can also create the keystore from a terminal:
@@ -80,6 +108,10 @@ Pages reflect current storage. Refresh from the first page to include new names 
 Each command requests hidden password input when its session is locked. `set` then requests the secret value through hidden input.
 These commands do not grant an owner access to the reference.
 Keep passwords and secret values out of command arguments, configuration files, and agent chats.
+
+To remove a stored reference, use `previewhost secrets remove shop/dev/api-token`.
+This does not remove configuration bindings, stop running applications, or revoke the credential at its issuer.
+Future starts that need the reference require private setup again. The dashboard does not offer stored-secret deletion.
 
 ## Choose automatic unlock
 

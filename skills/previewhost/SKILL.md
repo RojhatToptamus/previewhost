@@ -52,10 +52,13 @@ An MCP denial remains a denial: do not switch to CLI or another daemon to bypass
 
 For a person comparing or managing local applications, suggest `previewhost dashboard`.
 It lists automatic project owners and retained data, including offline entries.
-Use its preview menus for stop, start, reset, data deletion, and entry removal. Configuration saving remains explicit and create-only.
+Use its preview menus for stop, start, reset, data deletion, and entry removal.
 Start preview reuses the retained configuration and current source without reloading YAML.
-The dashboard does not start owners or replace the private secret form.
-Keep ordinary startup in the existing CLI/MCP workflow; do not open management automatically for every preview.
+New preview can select an existing folder and start its owner after source and execution review.
+Configuration edits command/job environment bindings. Save file updates the selected file; Review and apply starts or replaces the environment separately.
+Direct configuration needs no file. Save as preview.yaml remains explicit and refuses to overwrite either default filename.
+Secret Manager stores values without granting runtime access. Selection and editing do not start applications; private setup still handles owner approval and unlock.
+Use CLI/MCP for agent-driven startup; do not open the dashboard automatically for every preview.
 
 The CLI examples use optional root `preview.yaml`, a preview named `app`, and the returned `ATTEMPT_ID`.
 Substitute the actual recipe, name, executable, and connection arguments.

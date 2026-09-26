@@ -178,7 +178,7 @@ test('a hung owner is bounded without blocking healthy-owner results', { timeout
   assert.ok(performance.now() - start < 6000);
 });
 
-test('Secret Manager updates existing references through the authenticated dashboard without returning values or changing approvals', { timeout: 15_000 }, async t => {
+test('Secret Manager creates and updates references through the authenticated dashboard without returning values or changing approvals', { timeout: 15_000 }, async t => {
   const { testKeystore } = await import('./testSupport/keystore.js');
   const fixture = await testKeystore(t);
   const opened: string[] = [];
@@ -199,6 +199,7 @@ test('Secret Manager updates existing references through the authenticated dashb
   };
   const list = (options = {}) => post({ action: 'listSecrets', ...options });
   const update = (id: string, value: string) => post({ action: 'updateSecret', id, value });
+  const create = (id: string, value: string) => post({ action: 'createSecret', id, value });
   assert.deepEqual((await list()).result, { ids: [], keystore: { state: 'unlocked', canRemember: process.platform === 'darwin' } });
   await fixture.store.add('user', 'shop/dev/api', 'FAKE_original');
   await fixture.store.add('user', 'another/dev/api', 'FAKE_other');
@@ -208,6 +209,22 @@ test('Secret Manager updates existing references through the authenticated dashb
   assert.equal((await list({ query: 'x'.repeat(129) })).error.code, 'INVALID_INPUT');
   assert.equal((await list({ after: 'invalid cursor' })).error.code, 'INVALID_INPUT');
   assert.equal((await post({ action: 'listSecrets', query: 'shop' }, 'invalid')).status, 401);
+  const creation = { action: 'createSecret', id: 'new/dev/api', value: 'FAKE_new' };
+  assert.equal((await post(creation, 'invalid')).status, 401);
+  assert.equal((await post(creation, token, 'http://evil.example')).status, 401);
+  assert.equal((await post({ ...creation, namespace: 'database' })).error.code, 'INVALID_INPUT');
+  assert.equal((await create('invalid space', 'FAKE_invalid')).error.code, 'INVALID_INPUT');
+  for (const value of ['', 'FAKE_\0', '🙂'.repeat(1025), '\ud800']) {
+    assert.equal((await create('new/dev/api', value)).error.code, 'INVALID_INPUT');
+  }
+  const creations = await Promise.all([create('new/dev/api', 'FAKE_first'), create('new/dev/api', 'FAKE_second')]);
+  const winner = creations.findIndex(result => result.status === 200);
+  assert.ok(winner >= 0);
+  assert.deepEqual(creations[winner].result, { id: 'new/dev/api' });
+  assert.equal(creations[1 - winner].error.code, 'ALREADY_EXISTS');
+  assert.equal(await fixture.store.get('user', 'new/dev/api'), winner === 0 ? 'FAKE_first' : 'FAKE_second');
+  assert.equal((await create('shop/dev/api', 'FAKE_overwrite')).error.code, 'ALREADY_EXISTS');
+  assert.deepEqual((await list({ query: 'new/dev' })).result.ids, ['new/dev/api']);
   const change = { action: 'updateSecret', id: 'shop/dev/api', value: 'FAKE_forbidden' };
   assert.equal((await post(change, 'invalid')).status, 401);
   assert.equal((await post(change, token, 'http://evil.example')).status, 401);
@@ -231,8 +248,9 @@ test('Secret Manager updates existing references through the authenticated dashb
   assert.equal(await fixture.store.get('user', 'another/dev/api'), 'FAKE_another');
   const runtime = await createPreviewRuntime({ allowedRoots: [fixture.directory], authorize: () => true });
   t.after(() => runtime.close());
-  const description = await runtime.inspect({ name: 'shop', type: 'command', cwd: fixture.directory, command: [process.execPath, 'app.mjs'], env: { API_SECRET: { secret: 'shop/dev/api' } } });
-  assert.equal(description.secrets![0].selected, false);
+  const description = await runtime.inspect({ name: 'shop', type: 'command', cwd: fixture.directory, command: [process.execPath, 'app.mjs'], env: { API_SECRET: { secret: 'shop/dev/api' }, NEW_SECRET: { secret: 'new/dev/api' } } });
+  assert.equal(description.secrets!.length, 2);
+  assert.ok(description.secrets!.every(secret => !secret.selected));
   await fixture.store.remove('user', 'shop/dev/api');
   assert.equal((await update('shop/dev/api', 'FAKE_not_recreated')).error.code, 'SECRET_REQUIRED');
   assert.equal(await fixture.store.has('user', 'shop/dev/api'), false);
@@ -240,14 +258,16 @@ test('Secret Manager updates existing references through the authenticated dashb
   assert.equal(opened.length, 0, 'Editing never launches another browser page');
   await fixture.control('lock');
   assert.equal((await list()).result.keystore.state, 'locked');
+  assert.equal((await create('locked/ref', 'FAKE_locked')).error.code, 'SECRET_STORE_UNAVAILABLE');
   await fixture.control('unlock');
-  assert.deepEqual((await list()).result.ids, ['another/dev/api']);
+  assert.deepEqual((await list()).result.ids, ['another/dev/api', 'new/dev/api']);
+  assert.equal(await fixture.store.has('user', 'locked/ref'), false);
   await dashboard.close();
   await assert.rejects(update('another/dev/api', 'FAKE_after_close'));
   assert.equal(await fixture.store.get('user', 'another/dev/api'), 'FAKE_another');
 });
 
-test('dashboard shutdown cancels and joins an in-flight keystore update', async t => {
+for (const action of ['updateSecret', 'createSecret'] as const) test(`dashboard shutdown cancels and joins an in-flight ${action}`, async t => {
   const { keystore } = await import('./testSupport/keystore.js');
   let launch = '';
   const dashboard = await startDashboard({ openBrowser: async url => { launch = url; } });
@@ -257,14 +277,14 @@ test('dashboard shutdown cancels and joins an in-flight keystore update', async 
   const entered = new Promise<void>(resolve => { enter = resolve; });
   const canceled = new Promise<void>(resolve => { cancel = resolve; });
   const completed = new Promise<boolean>(resolve => { complete = resolve; });
-  t.mock.method(keystore, 'update', (...args: Parameters<typeof keystore.update>) => {
+  t.mock.method(keystore, action === 'createSecret' ? 'add' : 'update', (...args: Parameters<typeof keystore.update>) => {
     args[3]!.signal!.addEventListener('abort', cancel, { once: true });
     enter();
     return completed;
   });
   const request = fetch(dashboard.endpoint + '/api', { method: 'POST', headers: {
     origin: dashboard.endpoint, authorization: 'Bearer ' + new URL(launch).hash.slice(1), 'content-type': 'application/json',
-  }, body: JSON.stringify({ action: 'updateSecret', id: 'shop/api', value: 'FAKE_inflight' }) }).catch(() => undefined);
+  }, body: JSON.stringify({ action, id: 'shop/api', value: 'FAKE_inflight' }) }).catch(() => undefined);
   await entered;
   let closed = false;
   const closing = dashboard.close().then(() => { closed = true; });

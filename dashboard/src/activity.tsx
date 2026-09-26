@@ -1,3 +1,4 @@
+import { DatabaseIcon, FileCode2Icon, LayersIcon, LinkIcon, TerminalIcon } from "lucide-react";
 import type { AttemptSummary, ServiceStatus } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import {
@@ -43,6 +44,17 @@ const types: Record<string, string> = {
   "external-postgres": "PostgreSQL",
   "external-redis": "Redis",
 };
+const serviceIcons = {
+  command: TerminalIcon, static: FileCode2Icon, attach: LinkIcon,
+  postgres: DatabaseIcon, "external-postgres": DatabaseIcon,
+  redis: LayersIcon, "external-redis": LayersIcon, job: TerminalIcon,
+};
+
+function ResourceName({ name, type }: { name: string; type: string }) {
+  const Icon = serviceIcons[type as keyof typeof serviceIcons];
+  return <span className="resource-name">{Icon && <Icon aria-hidden="true" />}<strong>{name}</strong></span>;
+}
+
 const tone = (value: string) =>
   value === "failed"
     ? "error"
@@ -61,59 +73,25 @@ export function Activity(props: Props) {
     : setupRequests.slice(-1);
   return (
     <>
-      {deletionNeedsRetry(p) ? (
-        <Notice title="Data deletion incomplete" error>
-          Managed data was deleted, but its database credential could not be
-          removed. Resolve the keystore error, then review data deletion again.
-        </Notice>
-      ) : needsCleanup(p) ? (
-        <Notice title="Cleanup needs attention" error>
-          Some owned resources could not be confirmed stopped. Inspect the
-          details before retrying cleanup.
+      {needsCleanup(p) ? (
+        <Notice title={deletionNeedsRetry(p) ? "Data deletion incomplete" : "Cleanup needs attention"} error>
+          <p>{deletionNeedsRetry(p)
+            ? "Managed data was deleted, but its database credential could not be removed. Resolve the keystore error, then review data deletion again."
+            : "Some owned resources could not be confirmed stopped. Keep these source directories until cleanup succeeds."}</p>
+          {p?.cleanup?.map(item => <div key={item.attemptId}>
+            <p>{item.error.message}</p>
+            {item.sources.map(source => <Path key={source} value={source} />)}
+          </div>)}
+          {p?.data?.cleanup && <p>{p.data.cleanup.message}</p>}
         </Notice>
       ) : openRequests.length ? (
         <Notice title="Private setup requested">
-          Approve access or enter missing values in the private form. Cancel
-          there.
+          Approve access or enter missing values in the private form. Cancel there.
         </Notice>
       ) : null}
       {p && (
         <>
-          {p.active && latest && p.active.id !== latest.id ? (
-            <div className="attempt-split">
-              {(
-                [
-                  ["Serving", p.active],
-                  ["Latest update", latest],
-                ] as const
-              ).map(([label, attempt]) => (
-                <div key={label}>
-                  <p className="text-muted-foreground">{label}</p>
-                  <code title={attempt.id}>{attempt.id.slice(0, 8)}</code>
-                  <Status tone={tone(attempt.state)}>
-                    {capitalize(attempt.state)}
-                  </Status>
-                  <AttemptTime attempt={attempt} />
-                  <AttemptFailure attempt={attempt} openLogs={openLogs} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            (p.active ?? latest) && (
-              <div className="attempt-line">
-                <span className="section-label">
-                  {p.active ? "Serving" : "Latest attempt"}
-                </span>
-                <code title={(p.active ?? latest)!.id}>
-                  {(p.active ?? latest)!.id.slice(0, 8)}
-                </code>
-                <AttemptTime attempt={(p.active ?? latest)!} />
-              </div>
-            )
-          )}
-          {!(p.active && latest && p.active.id !== latest.id) && latest && (
-            <AttemptFailure attempt={latest} openLogs={openLogs} />
-          )}
+          {latest && <AttemptFailure attempt={latest} servingId={p.active?.id} openLogs={openLogs} />}
           <Services {...props} />
           <Jobs {...props} />
         </>
@@ -122,24 +100,6 @@ export function Activity(props: Props) {
         <Notice title="Configuration needs attention" error>
           {owner.configuration.error.message}
           {p?.active ? " The running app is unchanged." : ""}
-        </Notice>
-      )}
-      {(p?.cleanup?.length || p?.data?.cleanup) && (
-        <Notice title="Cleanup needs attention" error>
-          <p>
-            {deletionNeedsRetry(p)
-              ? "Database credential removal is incomplete."
-              : "Keep these source directories until cleanup succeeds."}
-          </p>
-          {p.cleanup?.map((item) => (
-            <div key={item.attemptId}>
-              <p>{item.error.message}</p>
-              {item.sources.map((source) => (
-                <Path key={source} value={source} />
-              ))}
-            </div>
-          ))}
-          {p.data?.cleanup && <p>{p.data.cleanup.message}</p>}
         </Notice>
       )}
       {!!setupRequests.length && (
@@ -186,12 +146,12 @@ export function Activity(props: Props) {
               )}
               {request.state === "expired" && (
                 <p>
-                  If setup is still needed, ask your agent for a new request.
+                  Review the configuration to request private setup again.
                 </p>
               )}
               {request.state === "partial" && (
                 <p>
-                  Ask your agent to check this request’s result before continuing.
+                  Check this request’s result before continuing. Earlier approvals and saved values remain.
                 </p>
               )}
             </div>
@@ -210,33 +170,30 @@ function attemptScope(
   return preview.active ? "latest update" : "latest attempt";
 }
 
-function AttemptTime({ attempt }: { attempt: AttemptSummary }) {
-  const started = new Date(attempt.startedAt);
-  return (
-    <time className="attempt-time" dateTime={attempt.startedAt} title={started.toLocaleString()}>
-      {started.toLocaleTimeString()}
-    </time>
-  );
-}
-
 function AttemptFailure({
   attempt,
+  servingId,
   openLogs,
 }: {
   attempt: AttemptSummary;
+  servingId?: string;
   openLogs: Props["openLogs"];
 }) {
   if (attempt.state !== "failed") return null;
   const failed = Object.entries(attempt.services ?? {}).filter(
     ([, service]) => service.state === "failed",
   );
+  // Jobs own their errors. Services describes the serving attempt, so only
+  // failed replacement services need a separate diagnostic here.
+  const updates = failed.filter(([, service]) => service.type !== "job");
+  if (failed.length && (!servingId || servingId === attempt.id || !updates.length)) return null;
   return (
     <div className="attempt-failure">
       {failed.length ? (
-        failed.map(([name, service]) => (
+        updates.map(([name, service]) => (
           <div key={name}>
             <div className="flex items-center justify-between gap-3">
-              <strong>{name}</strong>
+              <strong>{name} <span className="error">· Update failed</span></strong>
               <Button
                 variant="ghost"
                 size="sm"
@@ -245,7 +202,7 @@ function AttemptFailure({
                 Logs
               </Button>
             </div>
-            {service.type !== "job" && service.error && (
+            {service.error && (
               <p className="text-muted-foreground">{service.error.message}</p>
             )}
           </div>
@@ -308,7 +265,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Address / data</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="text-right"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -318,7 +275,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
               return (
                 <TableRow key={name}>
                   <TableCell>
-                    <strong>{name}</strong>
+                    <ResourceName name={name} type={service.type} />
                     {service.error && (
                       <p className="error">{service.error.message}</p>
                     )}
@@ -347,7 +304,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
                   </TableCell>
                   <TableCell>
                     <div className="row-actions">
-                      {service.type === "command" && (
+                      {(service.type === "command" || service.state === "failed") && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -368,7 +325,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
               )
               .map((resource) => (
                 <TableRow key={resource.name}>
-                  <TableCell>{resource.name}</TableCell>
+                  <TableCell><ResourceName name={resource.name} type={resource.type} /></TableCell>
                   <TableCell>{types[resource.type]}</TableCell>
                   <TableCell>
                     {p.data?.cleanup ? "Needs cleanup" : "Retained"}
@@ -411,14 +368,14 @@ function Jobs({ entry, mutate, acting, openLogs }: Props) {
             <TableRow>
               <TableHead>Job</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="text-right"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {jobs.map(([name, job]) => (
               <TableRow key={name}>
                 <TableCell>
-                  <strong>{name}</strong>
+                  <ResourceName name={name} type="job" />
                   {!!job.waitingFor?.length && (
                     <p className="text-muted-foreground">
                       Waiting for <code>{job.waitingFor.join(", ")}</code>

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontalIcon } from "lucide-react";
+import { MoreHorizontalIcon, RotateCwIcon } from "lucide-react";
 import type {
   AttemptSummary,
   LogResult,
   PreviewDescription,
 } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
-import type { Entry } from "./lib/model";
+import { bindingLabels, type Entry } from "./lib/model";
 import { call, errorMessage } from "./lib/api";
 import { Button } from "./components/ui/button";
 import {
@@ -58,6 +58,7 @@ type Props = {
   mutate: Mutate;
   acting: boolean;
   revision: number;
+  onRefresh(): void;
   clearAfter?: number;
   setClearAfter: (after: number | undefined) => void;
 };
@@ -85,6 +86,7 @@ export function Diagnostics({
   mutate,
   acting,
   revision,
+  onRefresh,
   clearAfter,
   setClearAfter,
 }: Props) {
@@ -218,6 +220,10 @@ export function Diagnostics({
         {tab === "configuration" && loading && (
           <Spinner aria-label="Loading configuration" />
         )}
+        {tab === "logs" && <Button variant="outline" size="icon" disabled={loading}
+          onClick={onRefresh} aria-label="Refresh logs" title="Refresh logs">
+          {loading ? <Spinner /> : <RotateCwIcon />}
+        </Button>}
         {tab === "logs" && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -254,19 +260,18 @@ export function Diagnostics({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {tab === "logs" && (
+        {tab === "logs" && (query || clearAfter !== undefined || logs?.truncated) && (
           <div className="log-options">
             <p role="status" className="log-note">
-              {loading && <Spinner aria-label="Refreshing output" />}
               {logs
                 ? query
                   ? `${matches!.count} matching ${matches!.count === 1 ? "line" : "lines"}${showContext ? " · With context" : ""}`
-                  : "Captured output"
+                  : ""
                 : loading
                   ? "Loading output…"
                   : "Output unavailable"}
-              {logs && clearAfter !== undefined ? " · Earlier output hidden" : ""}
-              {logs?.truncated ? " · Earlier output omitted" : ""}
+              {logs && clearAfter !== undefined ? `${query ? " · " : ""}Earlier output hidden` : ""}
+              {logs?.truncated ? `${query || clearAfter !== undefined ? " · " : ""}Earlier output omitted` : ""}
             </p>
           </div>
         )}
@@ -341,14 +346,6 @@ export function Diagnostics({
   );
 }
 
-const bindingLabels: Record<string, string> = {
-  secret: "Secret",
-  fromEnv: "Owner input",
-  service: "Service URL",
-  publicUrl: "Public URL",
-  browserUrl: "Browser URL",
-};
-
 function Configuration({
   description,
 }: {
@@ -406,7 +403,7 @@ function Configuration({
                           ? "Secret"
                           : binding
                             ? bindingLabels[Object.keys(binding)[0]]
-                            : "Literal"}
+                            : bindingLabels.literal}
                       </TableCell>
                       <TableCell>
                         {secret ? (

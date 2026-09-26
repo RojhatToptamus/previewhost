@@ -359,6 +359,21 @@ Discovery validates private connection records and authenticates each owner iden
 It does not scan ports, launch owners, grant roots, or infer cleanup from an unreachable
 endpoint. One unresponsive owner has a bounded read deadline and does not hide others.
 
+New preview and Apply require an explicit review of project sources and execution. A new automatic
+owner uses the existing launch permissions; an existing owner's execution policy is unchanged.
+Selecting a folder or inspecting configuration does not create an owner or execute project code.
+Source access is granted through the existing owner operation only after review.
+
+Configuration editing keeps a bounded, expiring form draft in the dashboard process. Literal
+values and original file contents never reach the browser. Existing file writes compare the
+original content and file identity, preserve unrelated declarations, then publish by atomic rename.
+Dashboard saves to the same file are serialized. An external editor must still avoid writes during
+the final check-to-rename interval; this is not a filesystem-wide compare-and-swap. Symlinks are not edited.
+
+Apply checks the reviewed active/candidate/latest attempt IDs before admitting startup. Saving a
+file and starting an application are separate operations: failure never promises to undo the save.
+Direct binding changes are reconstructed from the exact retained declaration inside the owner.
+
 Dashboard reset requires a confirmation of the environment and its managed databases.
 It stops the preview, deletes its managed data after authorization, and starts the retained configuration again.
 Attempt IDs
@@ -370,17 +385,17 @@ External data
 and user-secret entries are excluded from deletion. Jobs retain their normal permissions.
 
 The dashboard can reopen an owner’s pending private form. Secret Manager also lists
-user-reference names and edits an existing entry in a dashboard dialog, without
+user-reference names and creates or edits an entry in a dashboard dialog, without
 requiring a running owner. Internal database entries are excluded.
-The authenticated dashboard session may submit a replacement value to the keystore;
+The authenticated dashboard session may submit a new or replacement value to the keystore;
 it cannot read stored values or grant runtime access. Values stay out of browser
 storage, URLs, and responses. Cancel clears the field without a write. Saving uses
-the existing update-only operation and never recreates a removed entry.
+the existing add-only or update-only operation: creation rejects an existing name, and editing never recreates a removed entry.
 Editing changes future reads of the exact reference; it does not restart previews,
 change bindings, or extend approvals. Agent setup still uses separate, expiring
 private-form capabilities; no MCP or owner-control value-write operation is added.
 
-Explicit configuration saving selects an exact retained attempt and writes only the
+**Save as preview.yaml** selects an exact retained attempt and writes only the
 automatic owner's root `preview.yaml`. It checks source access and refuses to save if `preview.yaml` or `preview.yml` exists, including a directory or symlink. Secret/input references
 remain unexpanded. No resolved environment or raw declaration is returned to the browser,
 and saving changes no running application. Literal strings originally supplied in a

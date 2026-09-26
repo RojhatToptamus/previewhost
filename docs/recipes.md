@@ -8,13 +8,20 @@ Save `preview.yaml` at the project root for the default CLI and MCP workflow.
 If it is absent, Previewhost reads `preview.yml`. If both exist, default lookup reports an error.
 Select a file explicitly or keep one default configuration.
 The file is optional: MCP and library calls also accept a spec object, and the CLI accepts JSON stdin.
+The dashboard's **New preview** accepts YAML or JSON directly without reading or creating a file.
 
 An explicit `--file` selection, MCP `file`, or direct spec bypasses default lookup, including a conflict between the two filenames. Previewhost does not merge configurations or ignore an invalid root file.
 Source paths in a file resolve relative to that file. Direct MCP and library specs require absolute paths.
 JSON stdin paths resolve from the current directory.
+Pasted dashboard configuration resolves source paths from the selected project folder.
 
 Use one YAML 1.2 document. Duplicate keys, aliases, tags, merge keys, and unknown fields are errors.
 For the complete schema and limits, see the [spec reference](api.md#specs).
+
+The dashboard can [edit command and job environment variables](dashboard.md#save-configuration-and-manage-secrets).
+File-backed edits require **Save file** before **Review and apply**. Direct edits need no file.
+Changes to services, commands, sources, or readiness settings use your editor or a new pasted configuration.
+Saving never applies changes to a running preview automatically.
 
 ## Choose a preview type
 

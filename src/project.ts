@@ -384,6 +384,7 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
     rerunJob: (name, id, job) => call(false, client => client.rerunJob(name, id, job)),
     startAgain: (name, id) => call(false, client => client.startAgain(name, id)),
     saveConfiguration: (name, id) => call(false, client => client.saveConfiguration(name, id)),
+    configureBindings: (name, id, changes, opts, request) => call(false, client => client.configureBindings(name, id, changes, opts, request)),
     secretsList: () => call(false, client => client.secretsList()),
     secretsOpen: (id, opts) => call(false, client => client.secretsOpen(id, opts)),
     remove: async (name, attemptId = null) => {
@@ -406,8 +407,8 @@ export function connectProject(options: ProjectOptions = {}): ReturnType<typeof 
       const context = await runtimeContext({ ...launch.info, inputs: launch.inputs });
       return inspectPreviewSpec(spec, { ...context, dataDirectory: launch.info.dataDirectory, dockerSocket: launch.info.dockerSocket }, privateDirectories);
     },
-    start: spec => call(true, client => client.start(spec)),
-    replace: (name, spec) => call(true, client => client.replace(name, spec)),
+    start: (spec, opts) => call(true, client => client.start(spec, opts)),
+    replace: (name, spec, opts) => call(true, client => client.replace(name, spec, opts)),
     list: async () => { const retained = await offline(); return retained ? offlinePreviews(retained.record) : call(false, client => client.list()); },
     get: async name => {
       const retained = await offline();

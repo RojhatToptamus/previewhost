@@ -87,7 +87,7 @@ export const secretsScript = "'use strict';" + themeScript + `
     const saved = warning + (request.saved.length ? 'Saved: ' + request.saved.join(', ') + '. ' : '');
     const reused = request.alreadyPresent.length ? 'Reused existing entries: ' + request.alreadyPresent.join(', ') + '. Those values were kept; any input for them was not applied. ' : '';
     finish(request.state === 'complete' ? 'Secret setup complete' : 'Some entries still need attention', saved + reused + (request.state === 'complete' ?
-      'No application was started. If your agent stopped waiting, return to it and send “Secrets saved—continue”.' :
+      'No application was started. Return to the dashboard or client that requested setup to continue. If an agent stopped waiting, tell it “Secrets saved—continue”.' :
       (request.error?.message || 'The request did not finish.') + ' Earlier approvals and saved values remain. Open a new setup request to recheck: ' + request.remaining.join(', ')), request.state === 'complete' ? '' : 'warning');
   }
   function describe(label, value, machine = false) {
@@ -107,7 +107,7 @@ export const secretsScript = "'use strict';" + themeScript + `
   document.getElementById('reveal').addEventListener('change', event => form.classList.toggle('show', event.target.checked));
   document.getElementById('cancel').addEventListener('click', async () => {
     controls().forEach(control => { control.disabled = true; });
-    try { await call('cancel', {}); finish(editing ? 'Secret edit canceled' : 'Secret setup canceled', editing ? 'The stored value was not changed. You can close this tab.' : 'No application was started. Earlier approvals and saved values remain. Return to your agent only when you want to resume setup.'); }
+    try { await call('cancel', {}); finish(editing ? 'Secret edit canceled' : 'Secret setup canceled', editing ? 'The stored value was not changed. You can close this tab.' : 'No application was started. Earlier approvals and saved values remain. Return to the dashboard or your client only when you want to resume setup.'); }
     catch (error) { finish('Could not cancel setup', error.message + (editing ? ' Close this tab; the private form expires automatically.' : ' Check setup status in your client before retrying.'), 'warning'); }
   });
   form.addEventListener('submit', async event => {
@@ -215,7 +215,7 @@ export const secretsScript = "'use strict';" + themeScript + `
     form.hidden = false; fields.querySelector('textarea')?.focus();
   }
   (async () => {
-    if (!/^[a-f0-9]{64}$/.test(capability)) throw new Error('This private link is unavailable. Open a new secret setup request from your client.');
+    if (!/^[a-f0-9]{64}$/.test(capability)) throw new Error('This private link is unavailable. Return to the dashboard or your client and reopen the private form.');
     render(await call('form', {}));
   })().catch(error => { finish('Private setup unavailable', error.message, 'warning'); });
 })();`;

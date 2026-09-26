@@ -3,6 +3,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { readProjectGit } from './dashboard-identity.js';
+import { navigationPreferences, navigationPreferencesSchema } from './dashboard-preferences.js';
 import { loadPreviewSpec, resolvePreviewFile } from './config.js';
 import { normalizeSources, parseSpec } from './spec.js';
 import { z } from 'zod';
@@ -12,10 +13,13 @@ import { readBody } from './daemon.js';
 import { failure, PreviewError, throwIfAborted } from './errors.js';
 import { openLocalBrowser } from './local-browser.js';
 import { reviewStaleProject, removeStaleProject, projectRecordSchema, deleteOfflineData, offlinePreviews, removeOfflineProject, discoverProjectOwners, ownerInfoSchema, type ProjectOwnerInfo } from './project.js';
+import { DashboardWorkflows } from './dashboard-workflows.js';
 import { Keystore, secretListSchema, unlockSchema } from './keystore.js';
 
 const ownerId = z.string().regex(/^[a-f0-9]{64}$/);
 const actionSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('navigationPreferences') }),
+  navigationPreferencesSchema.extend({ action: z.literal('saveNavigationPreferences') }),
   z.strictObject({ action: z.literal('list'), after: ownerId.optional() }),
   z.strictObject({ action: z.literal('recheck'), owner: ownerId }),
   z.strictObject({ action: z.literal('reviewRemoval'), owner: ownerId }),
@@ -23,7 +27,7 @@ const actionSchema = z.discriminatedUnion('action', [
   secretListSchema.extend({ action: z.literal('listSecrets') }),
   unlockSchema.extend({ action: z.literal('unlockKeystore') }),
   z.strictObject({ action: z.enum(['rememberKeystore', 'forgetKeystore']) }),
-  z.strictObject({ action: z.literal('updateSecret'), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
+  z.strictObject({ action: z.enum(['createSecret', 'updateSecret']), id: secretIdSchema, value: z.string().max(limits.secretBytes) }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('stop'), owner: ownerId }).required({ expected: true }),
   requestSchemas.stop.omit({ afterEngineRestart: true }).extend({ action: z.literal('resetData'), owner: ownerId, resources: requestSchemas.deleteData.shape.expected.unwrap().shape.resources }).required({ expected: true }),
   requestSchemas.remove.extend({ action: z.literal('remove'), owner: ownerId }),
@@ -37,7 +41,7 @@ const actionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('secretsOpen'), owner: ownerId, id: z.uuid() }),
 ]);
 
-/** An authenticated browser client of existing project operations. It never starts application owners. */
+/** Authenticated local management UI; startup uses the same project operations as CLI and MCP. */
 export async function startDashboard(options: {
   discover?: typeof discoverProjectOwners;
   openBrowser?: typeof openLocalBrowser;
@@ -83,9 +87,11 @@ export async function startDashboard(options: {
     } finally { clearTimeout(timer); clients.delete(client); await client.close(); }
   }
 
+  const workflows = new DashboardWorkflows(discover, withOwner);
+
   async function readOwner(owner: Awaited<ReturnType<typeof discover>>[number]) {
     const project = (owner.connection ?? owner.retained)?.projectDirectory;
-    const identity = { id: owner.id, project, git: project ? await readProjectGit(project, controller.signal) : undefined };
+    const identity = { id: owner.id, project, reviews: project ? workflows.reviews(project) : [], git: project ? await readProjectGit(project, controller.signal) : undefined };
     if (owner.retained) {
       try { return { ...identity, offline: true, previews: await offlinePreviews(owner.retained), requests: [] }; }
       catch (error) { return { ...identity, offline: true, error: failure(error) }; }
@@ -114,9 +120,19 @@ export async function startDashboard(options: {
   }
 
   async function dispatch(input: unknown, signal: AbortSignal) {
+    const work = workflows.dispatch(input, signal);
+    updates.add(work);
+    let workflow;
+    try { workflow = await work; } finally { updates.delete(work); }
+    if (workflow) return workflow.result;
     const parsed = actionSchema.safeParse(input);
     if (!parsed.success) throw new PreviewError('INVALID_INPUT', 'Invalid dashboard action. Refresh the page and try again.');
     const p = parsed.data;
+    if (p.action === 'navigationPreferences' || p.action === 'saveNavigationPreferences') {
+      const update = navigationPreferences(p.action === 'saveNavigationPreferences' ? { pinnedProjects: p.pinnedProjects } : undefined, signal);
+      updates.add(update);
+      try { return await update; } finally { updates.delete(update); }
+    }
     if (p.action === 'listSecrets' || p.action === 'unlockKeystore' || p.action === 'rememberKeystore' || p.action === 'forgetKeystore') {
       const work = (async () => {
         if (p.action === 'unlockKeystore') { const { action: _, ...input } = p; return store.unlock(input, { signal }); }
@@ -128,11 +144,14 @@ export async function startDashboard(options: {
       updates.add(work);
       try { return await work; } finally { updates.delete(work); }
     }
-    if (p.action === 'updateSecret') {
-      const update = store.update('user', p.id, p.value, { signal });
+    if (p.action === 'createSecret' || p.action === 'updateSecret') {
+      const update = p.action === 'createSecret' ? store.add('user', p.id, p.value, { signal }) : store.update('user', p.id, p.value, { signal });
       updates.add(update);
       try {
-        if (!await update) throw new PreviewError('SECRET_REQUIRED', 'This reference was removed. Refresh the list; its value was not recreated.');
+        if (!await update) {
+          if (p.action === 'createSecret') throw new PreviewError('ALREADY_EXISTS', 'This secret reference already exists. Its value was not changed.');
+          throw new PreviewError('SECRET_REQUIRED', 'This reference was removed. Refresh the list; its value was not recreated.');
+        }
         return { id: p.id };
       } finally { updates.delete(update); }
     }
@@ -147,7 +166,7 @@ export async function startDashboard(options: {
       for (const result of results) {
         let item = result;
         if (Buffer.byteLength(JSON.stringify(item)) > limits.controlBytes - 128) {
-          item = { id: item.id, project: item.project, git: item.git, error: { code: 'BUSY', message: 'This project has too much detail to display. Inspect it through the CLI.' } };
+          item = { id: item.id, project: item.project, git: item.git, reviews: [], error: { code: 'BUSY', message: 'This project has too much detail to display. Inspect it through the CLI.' } };
         }
         const size = Buffer.byteLength(JSON.stringify(item)) + 1;
         if (bytes + size > limits.controlBytes) break;
@@ -275,6 +294,7 @@ export async function startDashboard(options: {
     close: () => closing ??= (async () => {
       controller.abort();
       await Promise.all([Promise.allSettled(updates), ...[...clients].map(client => client.close())]);
+      workflows.close();
       store.close();
       await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
     })(),

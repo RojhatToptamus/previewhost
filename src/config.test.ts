@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { loadPreviewSpec, readPreviewSpec, resolvePreviewFile, savePreviewSpec } from './config.js';
+import { changeConfigurationBindings, configurationBindings, loadPreviewSpec, readConfigurationDocument, readPreviewSpec, resolvePreviewFile, savePreviewSpec, updateConfigurationDocument } from './config.js';
 import { limits, type PreviewSpec } from './contracts.js';
 import { parseSpec } from './spec.js';
 
@@ -25,15 +25,21 @@ test('default configuration lookup accepts either filename, rejects conflicts, a
   await assert.rejects(resolvePreviewFile(project), { code: 'INVALID_INPUT', message: /Both preview.yaml and preview.yml exist/ });
   assert.equal((await loadPreviewSpec(yaml)).name, 'preferred');
   assert.equal((await loadPreviewSpec(yml)).name, 'short');
+  const files: string[] = [];
   const spec = await readPreviewSpec(Readable.from(['{"name":"inline","type":"static","directory":"."}']), {
-    baseDirectory: project, format: 'json', fallbackProject: project,
+    baseDirectory: project, format: 'json', fallbackProject: project, onFile: file => files.push(file),
   });
   assert.equal(spec.name, 'inline');
+  assert.equal(files.length, 0);
   await assert.rejects(readPreviewSpec(Readable.from([' ']), {
     baseDirectory: project, format: 'json', fallbackProject: project,
   }), { code: 'INVALID_INPUT', message: /Both preview.yaml and preview.yml exist/ });
   await rm(yml);
   assert.equal(await resolvePreviewFile(project), yaml);
+  assert.equal((await readPreviewSpec(Readable.from([' ']), {
+    baseDirectory: project, format: 'json', fallbackProject: project, onFile: file => files.push(file),
+  })).name, 'preferred');
+  assert.deepEqual(files, [yaml]);
   await writeFile(yaml, 'services: [\n');
   await assert.rejects(loadPreviewSpec(await resolvePreviewFile(project)), { code: 'INVALID_INPUT' });
   await rm(yaml);
@@ -234,4 +240,182 @@ test('file input rejects special files without waiting for a producer and still 
   await symlink(join(directory, 'spec.json'), join(restricted, 'escape.json'));
   await assert.rejects(loadPreviewSpec(file, { allowedRoots: [restricted] }), { code: 'SOURCE_DENIED' });
   await assert.rejects(loadPreviewSpec(join(restricted, 'escape.json'), { allowedRoots: [restricted] }), { code: 'SOURCE_DENIED' });
+});
+
+test('binding edits preserve YAML comments, relative sources and untouched private declarations', async t => {
+  const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost edit yaml ')));
+  t.after(() => rm(project, { recursive: true, force: true }));
+  await mkdir(join(project, 'front end')); await mkdir(join(project, 'backend'));
+  const file = join(project, 'preview.yaml');
+  const original = `# Configuration owned by the project.
+name: shop
+type: environment
+primary: web
+services:
+  web:
+    type: command
+    cwd: './front end' # Keep paths portable.
+    command: [node, 'serve #literal', '--port', '{port}']
+    env:
+      KEEP: 'private-existing-literal' # Keep this comment and value.
+      MODE: development # Preserve the edited row's comment too.
+      REMOVE: obsolete
+      API_URL: {service: api}
+      TOKEN: {secret: shared/api}
+  migrate:
+    type: job
+    cwd: ./backend
+    command: [node, migrate.mjs]
+    env: {MODE: development}
+  api: {type: static, directory: ./backend}
+  database: {type: external-postgres, url: 'postgres://owner:private-database@127.0.0.1:5432/db'}
+`;
+  await writeFile(file, original);
+  const options = { allowedRoots: [project] };
+  const document = await readConfigurationDocument(file, options);
+  assert.ok(!JSON.stringify(document.bindings).includes('private-'));
+  assert.deepEqual(document.bindings.find(row => row.key === 'KEEP'), { service: 'web', key: 'KEEP', value: null });
+  assert.deepEqual(document.bindings.find(row => row.key === 'TOKEN')?.value, { secret: 'shared/api' });
+  assert.ok(document.bindings.every(row => row.service !== 'database'));
+  const saved = await updateConfigurationDocument(document, [
+    { service: 'web', key: 'MODE', value: 'production' },
+    { service: 'web', key: 'REMOVE', value: null },
+    { service: 'web', key: 'ADDED', value: { secret: 'shop/new' } },
+    { service: 'migrate', key: 'MODE', value: { fromEnv: 'MIGRATION_MODE' } },
+  ], options);
+  const text = await readFile(file, 'utf8');
+  assert.equal(saved.text, text);
+  for (const retained of ['# Configuration owned by the project.', "cwd: './front end' # Keep paths portable.",
+    "KEEP: 'private-existing-literal' # Keep this comment and value.", "# Preserve the edited row's comment too.", 'cwd: ./backend', 'directory: ./backend']) {
+    assert.ok(text.includes(retained), retained);
+  }
+  const loaded = await loadPreviewSpec(file);
+  assert.equal(loaded.type, 'environment');
+  if (loaded.type !== 'environment') throw new Error('Expected an environment');
+  assert.equal(loaded.services.web.type, 'command');
+  if (loaded.services.web.type !== 'command') throw new Error('Expected a command');
+  assert.deepEqual(loaded.services.web.command, ['node', 'serve #literal', '--port', '{port}']);
+  assert.equal(loaded.services.web.cwd, join(project, 'front end'));
+  assert.deepEqual(loaded.services.web.env, {
+    KEEP: 'private-existing-literal', MODE: 'production', API_URL: { service: 'api' }, TOKEN: { secret: 'shared/api' }, ADDED: { secret: 'shop/new' },
+  });
+  assert.equal(loaded.services.migrate.type, 'job');
+  if (loaded.services.migrate.type !== 'job') throw new Error('Expected a job');
+  assert.deepEqual(loaded.services.migrate.env, { MODE: { fromEnv: 'MIGRATION_MODE' } });
+  assert.equal(loaded.services.database.type, 'external-postgres');
+  if (loaded.services.database.type !== 'external-postgres') throw new Error('Expected external database');
+  assert.equal(loaded.services.database.url, 'postgres://owner:private-database@127.0.0.1:5432/db');
+  assert.equal(document.text, original);
+});
+
+test('JSON and direct binding edits retain literals, symbolic inputs and file permissions without mutating the input', async t => {
+  const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost edit json ')));
+  t.after(() => rm(project, { recursive: true, force: true }));
+  const file = join(project, 'preview.json');
+  const original: PreviewSpec = { name: 'site', type: 'command', cwd: '.', command: ['node', 'app.mjs'], env: {
+    KEEP: 'private-value', REMOVE: 'obsolete', TOKEN: { secret: 'shared/token' },
+  } };
+  await writeFile(file, JSON.stringify(original)); await chmod(file, 0o640);
+  const options = { allowedRoots: [project] };
+  const document = await readConfigurationDocument(file, options);
+  const unchanged = await updateConfigurationDocument(document, [{ key: 'ABSENT', value: null }], options);
+  assert.equal(unchanged.text, JSON.stringify(original));
+  assert.deepEqual(unchanged.identity, document.identity);
+  const changes = [{ key: 'REMOVE', value: null }, { key: 'TOKEN', value: { fromEnv: 'OWNER_TOKEN' } }, { key: 'EMPTY', value: '' }];
+  const direct = changeConfigurationBindings(document.spec, changes);
+  assert.equal(document.spec.type, 'command');
+  if (document.spec.type !== 'command') throw new Error('Expected a command');
+  assert.deepEqual(document.spec.env, original.env);
+  assert.deepEqual(configurationBindings(direct), [
+    { key: 'EMPTY', value: null }, { key: 'KEEP', value: null }, { key: 'TOKEN', value: { fromEnv: 'OWNER_TOKEN' } },
+  ]);
+  const saved = await updateConfigurationDocument(document, changes, options);
+  assert.deepEqual(saved.spec, direct);
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { ...original, env: {
+    KEEP: 'private-value', TOKEN: { fromEnv: 'OWNER_TOKEN' }, EMPTY: '',
+  } });
+  if (process.platform !== 'win32') assert.equal((await stat(file)).mode & 0o777, 0o640);
+});
+
+test('document updates reject external changes and symlinks without overwriting the file or linked target', async t => {
+  const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost edit stale ')));
+  t.after(() => rm(project, { recursive: true, force: true }));
+  const file = join(project, 'preview.yaml');
+  const original = 'name: site\ntype: command\ncwd: .\ncommand: [node, app.mjs]\nenv: {MODE: before}\n';
+  const options = { allowedRoots: [project] };
+  const changes = [{ key: 'MODE', value: 'after' }];
+  await writeFile(file, original);
+  const document = await readConfigurationDocument(file, options);
+  const external = original.replace('before', 'external');
+  await writeFile(file, external);
+  await assert.rejects(updateConfigurationDocument(document, changes, options), { code: 'STALE_ATTEMPT' });
+  assert.equal(await readFile(file, 'utf8'), external);
+  const reread = await readConfigurationDocument(file, options);
+  const replacement = join(project, 'replacement.yaml'); await writeFile(replacement, external); await rename(replacement, file);
+  await assert.rejects(updateConfigurationDocument(reread, changes, options), { code: 'STALE_ATTEMPT' });
+  const current = await readConfigurationDocument(file, options);
+  const target = join(project, 'target.yaml'); await rename(file, target); await symlink(target, file);
+  await assert.rejects(readConfigurationDocument(file, options), { code: 'INVALID_INPUT' });
+  await assert.rejects(updateConfigurationDocument(current, changes, options), { code: 'INVALID_INPUT' });
+  assert.equal(await readFile(target, 'utf8'), external);
+  assert.deepEqual((await readdir(project)).sort(), ['preview.yaml', 'target.yaml']);
+  // A parent alias with '..' must not silently select a different backend than the normal loader.
+  await mkdir(join(project, 'physical/config'), { recursive: true });
+  await mkdir(join(project, 'physical/backend'));
+  await mkdir(join(project, 'view/backend'), { recursive: true });
+  await symlink(join(project, 'physical/config'), join(project, 'view/config'));
+  const realFile = join(project, 'physical/config/preview.yaml');
+  const aliasFile = join(project, 'view/config/preview.yaml');
+  await writeFile(realFile, original.replace('cwd: .', 'cwd: ../backend'));
+  const loaded = await loadPreviewSpec(aliasFile);
+  assert.equal(loaded.type, 'command');
+  if (loaded.type !== 'command') throw new Error('Expected a command');
+  assert.equal(loaded.cwd, join(project, 'view/backend'));
+  await assert.rejects(readConfigurationDocument(aliasFile, options), (error: unknown) => {
+    assert.equal((error as { code: string }).code, 'INVALID_INPUT');
+    assert.ok((error as Error).message.includes(realFile));
+    return true;
+  });
+  const explicit = await readConfigurationDocument(realFile, options);
+  assert.equal(explicit.spec.type, 'command');
+  if (explicit.spec.type !== 'command') throw new Error('Expected a command');
+  assert.equal(explicit.spec.cwd, join(project, 'physical/backend'));
+});
+
+test('binding saves validate source scope and graph before publication and leave complete original files on failure', async t => {
+  const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost edit failures ')));
+  t.after(() => rm(project, { recursive: true, force: true }));
+  const source = join(project, 'source'); await mkdir(source);
+  const file = join(source, 'preview.yaml');
+  const original = 'name: site\ntype: environment\nprimary: web\nservices:\n  web: {type: command, cwd: ., command: [node, app.mjs], env: {KEEP: private-value}}\n  assets: {type: static, directory: ..}\n';
+  await writeFile(file, original);
+  await assert.rejects(readConfigurationDocument(file, { allowedRoots: [source] }), { code: 'SOURCE_DENIED' });
+  await assert.rejects(readConfigurationDocument(file, { allowedRoots: [] }), { code: 'SOURCE_DENIED' });
+  const options = { allowedRoots: [project] };
+  const document = await readConfigurationDocument(file, options);
+  for (const change of [
+    { service: 'web', key: 'PORT', value: '3000' },
+    { service: 'web', key: 'SELF', value: { service: 'web' } },
+    { service: 'assets', key: 'TOKEN', value: { secret: 'site/token' } },
+    { key: 'MODE', value: 'missing-service' },
+  ]) {
+    await assert.rejects(updateConfigurationDocument(document, [change], options), { code: 'INVALID_INPUT' });
+  }
+  const changes = [{ service: 'web', key: 'MODE', value: 'production' }];
+  await assert.rejects(updateConfigurationDocument(document, changes, { ...options, signal: AbortSignal.abort() }), { code: 'CLOSED' });
+  const originalRename = fs.rename;
+  const { syncBuiltinESMExports } = await import('node:module');
+  t.mock.method(fs, 'rename', async () => { throw new Error('private-filesystem-details'); }); syncBuiltinESMExports();
+  try { await assert.rejects(updateConfigurationDocument(document, changes, options), { code: 'INVALID_INPUT', message: /Cannot update the configuration file/ }); }
+  finally { t.mock.method(fs, 'rename', originalRename); syncBuiltinESMExports(); }
+  assert.equal(await readFile(file, 'utf8'), original);
+  assert.deepEqual(await readdir(source), ['preview.yaml']);
+  await writeFile(file, Buffer.concat([Buffer.from(`${original}# `), Buffer.from([0xff])]));
+  await assert.rejects(readConfigurationDocument(file, options), { code: 'INVALID_INPUT', message: /UTF-8/ });
+  await writeFile(file, 'name: site\nname: private-value\n');
+  await assert.rejects(readConfigurationDocument(file, options), (error: unknown) => {
+    assert.equal((error as { code: string }).code, 'INVALID_INPUT');
+    assert.ok(!(error as Error).message.includes('private-value'));
+    return true;
+  });
 });

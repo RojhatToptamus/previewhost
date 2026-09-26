@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MoonIcon } from "lucide-react";
 import { toast } from "sonner";
 import { authenticated, call, errorMessage, type Mutate } from "./lib/api";
@@ -15,6 +15,8 @@ import { Preview } from "./preview";
 import { SecretManager } from "./secrets";
 import { Navigation } from "./navigation";
 import { Overview } from "./overview";
+import { NewPreview } from "./new-preview";
+import type { LaunchResult } from "./preview-workflow";
 import { useSelection } from "./lib/view-state";
 import brandSvg from "../../assets/previewhost.svg?raw";
 
@@ -32,10 +34,13 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [selection, select] = useSelection();
+  const workspace = useRef<HTMLElement>(null);
+  useLayoutEffect(() => { workspace.current?.scrollTo(0, 0); }, [selection]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PreviewFilter>("all");
   const [revision, setRevision] = useState(0);
   const [acting, setActing] = useState(false);
+  const [creating, setCreating] = useState<{ project?: string; resumeId?: string }>();
   const mutation = useRef(false);
   const selectedOwner = typeof selection === "object" ? selection.owner : undefined;
   useEffect(() => {
@@ -149,6 +154,11 @@ export function App() {
     typeof selection === "object"
       ? owners.find((owner) => owner.id === selection.owner)
       : undefined;
+  function previewStarted(result: LaunchResult) {
+    setCreating(undefined);
+    setRevision(value => value + 1);
+    select({ owner: result.owner, name: result.name });
+  }
   const group = selected && projectGroups(owners).find(group => group.entries.some(entry => entry.owner.id === selected.id));
   const selectedEntry = group?.entries.find(entry => entry.owner.id === selected?.id && entry.name === (typeof selection === "object" ? selection.name : undefined));
   const label = selectedEntry && group ? entryLabel(selectedEntry, group) : undefined;
@@ -204,22 +214,25 @@ export function App() {
             >
               <MoonIcon />
             </Toggle>
-            <Button
-              variant="outline"
-              onClick={() => setRevision((value) => value + 1)}
-            >
-              Refresh
-            </Button>
           </div>
         </header>
         <Navigation
+          onNewPreview={() => setCreating({})}
           owners={owners}
           selection={selection}
           select={select}
           mutate={mutate}
           acting={acting}
         />
-        <main className="main-workspace">
+        <main className="main-workspace" ref={workspace}>
+          {authenticated && selection !== "secrets" && error && (
+            <div className="page">
+              <Notice title="Dashboard disconnected" error>
+                {error} Your previews may still be running.
+                <Button variant="outline" onClick={() => setRevision(value => value + 1)}>Retry connection</Button>
+              </Notice>
+            </div>
+          )}
           {!authenticated ? (
             <div className="page">
               <EmptyState title="Open from your terminal">
@@ -228,13 +241,6 @@ export function App() {
             </div>
           ) : selection === "secrets" ? (
             <SecretManager revision={revision} />
-          ) : error ? (
-            <div className="page">
-              <Notice title="Dashboard disconnected" error>
-                {error} Your previews may still be running. Use Refresh, or run{" "}
-                <code>previewhost dashboard</code> to reopen it.
-              </Notice>
-            </div>
           ) : selection ? (
             selected &&
             (selected.error || entries(selected).some((entry) => entry.name === selection.name)) ? (
@@ -250,6 +256,9 @@ export function App() {
                 mutate={mutate}
                 acting={acting}
                 revision={revision}
+                onRefresh={() => setRevision(value => value + 1)}
+                onStarted={previewStarted}
+                onPrepare={(resumeId) => setCreating({ project: selected.project, resumeId })}
               />
             ) : (
               <div className="page">
@@ -270,9 +279,11 @@ export function App() {
             <Overview owners={owners} loading={!loaded}
               query={query} setQuery={setQuery} filter={filter} setFilter={setFilter}
               mutate={mutate} acting={acting}
+              onNewPreview={() => setCreating({})}
               select={entry => select({ owner: entry.owner.id, name: entry.name })} />
           )}
         </main>
+        {creating && <NewPreview {...creating} onClose={() => setCreating(undefined)} onStarted={previewStarted} />}
         <Toaster
           theme={dark ? "dark" : "light"}
           position="bottom-right"

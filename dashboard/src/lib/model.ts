@@ -4,9 +4,11 @@ import type {
   SecretSetupSummary,
 } from "../../../src/contracts";
 
+import type { PreviewReviewSummary } from "../../../src/dashboard-workflows";
 import type { ProjectGit } from "../../../src/dashboard-identity";
 
 export type Owner = {
+  reviews?: PreviewReviewSummary[];
   git?: ProjectGit;
   id: string;
   project?: string;
@@ -198,6 +200,7 @@ export function entries(owner: Owner): Entry[] {
     ...new Set([
       ...(owner.previews?.map((p) => p.name) ?? []),
       ...(owner.requests?.map((r) => r.name) ?? []),
+      ...(owner.reviews?.map((review) => review.name) ?? []),
     ]),
   ];
   return names.length
@@ -239,13 +242,13 @@ export function hint(entry: Entry) {
   if (p?.latest?.state === "canceled")
     return "Start preview uses the same configuration and current source.";
   if (!p)
-    return "Ask your agent to continue when setup is complete and you want to start this worktree.";
+    return "Review the configuration before starting. Saving secrets does not start the app.";
   return p?.data
     ? "Start again uses the same configuration, current source and retained database; it does not reload YAML."
     : "Start again uses the same configuration and current source without reloading YAML; the URL may change.";
 }
 
-export type PreviewFilter = "all" | "active" | "attention" | "stopped";
+export type PreviewFilter = "all" | "active" | "attention" | "inactive";
 export function needsAttention(entry: Entry) {
   return !!(
     entry.owner.error ||
@@ -280,11 +283,14 @@ export function visibleEntries(
         (filter === "all" ||
           (filter === "active" && isActive(entry)) ||
           (filter === "attention" && needsAttention(entry)) ||
-          (filter === "stopped" &&
+          (filter === "inactive" &&
             !entry.owner.error &&
+            (!entry.owner.offline || !!entry.preview) &&
             !isActive(entry) &&
             !pending(entry).length &&
-            !needsCleanup(entry.preview)));
+            !needsCleanup(entry.preview) &&
+            !entry.preview?.url &&
+            !entry.preview?.data?.running));
     })
     .sort(
       (a, b) =>
@@ -296,3 +302,12 @@ export function visibleEntries(
         (a.name ?? "").localeCompare(b.name ?? ""),
     );
 }
+
+export const bindingLabels: Record<string, string> = {
+  literal: "Value",
+  secret: "Secret",
+  fromEnv: "Runtime input",
+  service: "Service URL",
+  publicUrl: "Application URL",
+  browserUrl: "Browser URL",
+};

@@ -34,7 +34,8 @@ previewhost --version
 previewhost --help
 ```
 
-Choose [First preview with the CLI](first-preview.md) for terminal use or [MCP setup](mcp.md) for a coding agent.
+Run `previewhost dashboard` to start a preview in your browser. See the [dashboard guide](dashboard.md#start-a-preview) for configuration and private setup.
+For terminal use, follow [First preview with the CLI](first-preview.md). For a coding agent, follow [MCP setup](mcp.md).
 If your editor cannot find the executable, follow the [PATH troubleshooting steps](troubleshooting.md#the-client-cannot-find-previewhost).
 
 ## Install in a project

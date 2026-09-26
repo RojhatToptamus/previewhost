@@ -81,10 +81,223 @@ test("repository groups keep clone identity, subprojects and multiple previews d
   ]);
 });
 
+test("New preview keeps configuration through review and preserves unsaved service edits across tabs", async ({ page }) => {
+  test.setTimeout(60_000);
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "previewhost-create-ui-")));
+  const project = join(directory, "existing-worktree-with-long-source-folder-name-for-layout-review");
+  await mkdir(project);
+  await writeFile(join(project, "server.cjs"), "require('http').createServer((q,r)=>r.end(process.env.APPLICATION_MODE)).listen(+process.env.PORT,process.env.HOST)");
+  const runtime = await createPreviewRuntime({ allowedRoots: [project], authorize: () => true });
+  const tokenFile = join(directory, "owner/token");
+  const daemon = await startDaemon({ runtime, tokenFile, port: 0, owner: {
+    projectDirectory: project, pid: process.pid, allowedRoots: [project], allowExec: true, inputKeys: [], secretIds: [],
+  } });
+  let launch = "";
+  let ownerAvailable = true;
+  const dashboard = await startDashboard({
+    discover: async () => [{ id: createHash("sha256").update(project).digest("hex"), tokenFile, connection: { endpoint: ownerAvailable ? daemon.endpoint : "http://127.0.0.1:1", pid: process.pid, projectDirectory: project } }],
+    openBrowser: async url => { launch = url; },
+  });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    const jobs = Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`prepare-${index}`, {
+      type: "job" as const, cwd: project, command: [process.execPath, "-e", `console.log('Preparation ${index}: ${"long command argument for review ".repeat(8)}')`],
+      env: { JOB_MODE: "fixture" },
+    }]));
+    const spec: PreviewSpec = { name: "from-dashboard", type: "environment", primary: "web", services: {
+      ...jobs,
+      web: { type: "command", cwd: project, command: [process.execPath, "server.cjs"], dependsOn: Object.keys(jobs), env: {
+        APPLICATION_MODE: "initial", ...Object.fromEntries(Array.from({ length: 28 }, (_, index) => [`OPTION_${index}`, "fixture"])),
+      } },
+    } };
+    const text = JSON.stringify(spec, null, 2);
+    await dashboard.open();
+    await page.goto(launch);
+    await expect(page).toHaveTitle("Previews · Previewhost");
+    const create = page.getByRole("main").getByRole("button", { name: "New preview", exact: true });
+    await create.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "New preview", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Project folder", exact: true })).toBeFocused();
+    await dialog.getByRole("combobox", { name: "Project folder", exact: true }).click();
+    await page.getByRole("option", { name: project, exact: true }).click();
+    await expect(dialog.getByRole("textbox", { name: "Absolute project folder" })).toHaveValue(project);
+    await dialog.getByRole("button", { name: "Review preview", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toBeVisible();
+    await dialog.getByRole("combobox", { name: "Configuration", exact: true }).click();
+    await page.getByRole("option", { name: "YAML or JSON without a file", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await dialog.getByRole("combobox", { name: "Format", exact: true }).click();
+    await page.getByRole("option", { name: "JSON", exact: true }).click();
+    await dialog.getByRole("textbox", { name: "Preview configuration", exact: true }).fill(text);
+    await dialog.getByRole("button", { name: "Review preview", exact: true }).press("Enter");
+    await expect(dialog.getByRole("heading", { name: "Start preview", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Start preview", exact: true })).toBeDisabled();
+    expect((await runtime.list())).toHaveLength(0);
+    for (const theme of ["light", "dark"]) {
+      // Theme changes use the existing control before reopening the review.
+      if (theme === "dark") {
+        await dialog.getByRole("button", { name: "Back", exact: true }).click();
+        await expect(dialog.getByRole("textbox", { name: "Preview configuration", exact: true })).toHaveValue(text);
+        await page.keyboard.press("Escape");
+        await expect(create).toBeFocused();
+        await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+        await create.click();
+        await dialog.getByRole("textbox", { name: "Absolute project folder" }).fill(project);
+        await dialog.getByRole("combobox", { name: "Configuration", exact: true }).click();
+        await page.getByRole("option", { name: "YAML or JSON without a file", exact: true }).click();
+        await dialog.getByRole("textbox", { name: "Preview configuration", exact: true }).fill(text);
+        await dialog.getByRole("button", { name: "Review preview", exact: true }).click();
+        await expect(dialog.getByRole("heading", { name: "Start preview", exact: true })).toBeVisible();
+      }
+      for (const width of [1360, 390]) {
+        await page.setViewportSize({ width, height: 700 });
+        await expect(dialog.getByRole("button", { name: "Start preview", exact: true })).toBeInViewport();
+        await expect(dialog.getByRole("button", { name: "Back", exact: true })).toBeInViewport();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        const body = dialog.locator(".workflow-body");
+        expect(await body.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+        await dialog.locator('.workflow-consent').scrollIntoViewIfNeeded();
+        await expect(dialog.getByRole("checkbox")).toBeInViewport();
+        await expect.poll(() => body.evaluate(element => {
+          const consent = element.querySelector('.workflow-consent')!;
+          return consent.getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom + 1;
+        })).toBe(true);
+        await page.screenshot({ path: `/tmp/previewhost-create-${width}-${theme}.png`, animations: "disabled" });
+      }
+    }
+    await dialog.getByRole("checkbox").focus();
+    await page.keyboard.press("Space");
+    await expect(dialog.getByRole("button", { name: "Start preview", exact: true })).toBeEnabled();
+    await dialog.getByRole("button", { name: "Start preview", exact: true }).press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Open app", exact: true })).toBeVisible();
+    const ready = await runtime.get(spec.name);
+    expect(await (await fetch(ready.url!)).text()).toBe("initial");
+    await expect(readFile(join(project, "preview.yaml"))).rejects.toMatchObject({ code: "ENOENT" });
+    await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit JOB_MODE", exact: true })).toBeVisible();
+    expect((await page.locator(".editable-env-table").boundingBox())!.height).toBeLessThan(180);
+    await page.screenshot({ path: "/tmp/previewhost-config-short-390-dark.png", animations: "disabled" });
+    await page.getByRole("combobox", { name: "Service or job", exact: true }).click();
+    await page.getByRole("option", { name: "web · command", exact: true }).click();
+    const viewport = page.locator('.editable-env-table [data-slot="scroll-area-viewport"]');
+    expect(await viewport.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    await page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Keep change", exact: true })).toBeDisabled();
+    await dialog.getByRole("checkbox", { name: "Replace the existing value", exact: true }).check();
+    await dialog.getByRole("textbox", { name: "Replacement value", exact: true }).fill("edited");
+    ownerAvailable = false;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Keep change", exact: true })).toBeDisabled();
+    ownerAvailable = true;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole("textbox", { name: "Replacement value", exact: true })).toHaveValue("edited");
+    await dialog.getByRole("button", { name: "Keep change", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Remove OPTION_0", exact: true }).click();
+    await page.getByRole("tab", { name: "Logs", exact: true }).click();
+    await expect(page.locator(".logs")).toBeVisible();
+    await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+    await expect(page.getByText("2 unsaved changes.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Undo removal of OPTION_0", exact: true }).click();
+    await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+    let listingUnavailable = true;
+    await page.route("**/api", async route => {
+      if (listingUnavailable && route.request().postDataJSON().action === "list") {
+        await route.fulfill({ json: { error: { code: "BUSY", message: "Listing is temporarily unavailable." } } });
+      } else await route.continue();
+    });
+    try {
+      await expect(page.getByText("Dashboard disconnected", { exact: true })).toBeVisible();
+      await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+      listingUnavailable = false;
+      await page.getByRole("button", { name: "Retry connection", exact: true }).click();
+      await expect(page.getByText("Dashboard disconnected", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+    } finally {
+      await page.unroute("**/api");
+    }
+    async function recheckOwner() {
+      await page.locator(".preview-detail").getByRole("button", { name: "Actions for from-dashboard", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Recheck status", exact: true }).click();
+    }
+    ownerAvailable = false;
+    await recheckOwner();
+    await expect(page.getByText("Status unavailable", { exact: true })).toBeVisible();
+    ownerAvailable = true;
+    await recheckOwner();
+    await expect(page.getByText("Status unavailable", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+    expect(await (await fetch(ready.url!)).text()).toBe("initial");
+    for (const theme of ["dark", "light"]) {
+      if (theme === "light") await page.getByRole("button", { name: "Dark mode", exact: true }).click();
+      for (const width of [1360, 390]) {
+        await page.setViewportSize({ width, height: 700 });
+        await expect(page.getByRole("button", { name: "Review and apply", exact: true })).toBeInViewport();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await page.locator('.configuration-source').scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `/tmp/previewhost-config-${width}-${theme}.png`, animations: "disabled" });
+      }
+    }
+    await page.getByRole("button", { name: "Review and apply", exact: true }).click();
+    await expect(dialog.getByRole("heading", { name: "Apply configuration", exact: true })).toBeVisible();
+    await dialog.getByRole("checkbox").check();
+    ownerAvailable = false;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Apply configuration", exact: true })).toBeDisabled();
+    ownerAvailable = true;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Apply configuration", exact: true })).toBeEnabled();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Review and apply", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true }).click();
+    await dialog.getByRole("checkbox", { name: "Replace the existing value", exact: true }).check();
+    await dialog.getByRole("textbox", { name: "Replacement value", exact: true }).fill("recovered-after-discard");
+    let loseDiscardResponse = true;
+    await page.route("**/api", async route => {
+      if (loseDiscardResponse && route.request().postDataJSON().action === "configurationDiscard") {
+        loseDiscardResponse = false;
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        expect((await response.json()).error).toBeUndefined();
+        await route.abort("failed");
+      } else await route.continue();
+    });
+    try {
+      await dialog.getByRole("button", { name: "Keep change", exact: true }).click();
+      await expect(dialog.getByRole("alert")).toBeVisible();
+      await expect(dialog.getByRole("textbox", { name: "Replacement value", exact: true })).toHaveValue("recovered-after-discard");
+      await dialog.getByRole("button", { name: "Keep change", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+    } finally {
+      await page.unroute("**/api");
+    }
+    await page.getByRole("button", { name: "Review and apply", exact: true }).click();
+    await expect(dialog.getByRole("heading", { name: "Apply configuration", exact: true })).toBeVisible();
+    await dialog.getByRole("checkbox").check();
+    await dialog.getByRole("button", { name: "Apply configuration", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => (await fetch(ready.url!)).text()).toBe("recovered-after-discard");
+    expect(errors).toEqual([]);
+  } finally {
+    await dashboard.close();
+    await daemon.close();
+    await runtime.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("React dashboard preserves attempt isolation, logs, configuration and safe controls", async ({
   page,
   context,
 }) => {
+  async function recheck() {
+    await page.getByRole("button", { name: "Actions for app", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Recheck status", exact: true }).click();
+  }
   const directory = await mkdtemp(join(tmpdir(), "previewhost-react-"));
   const runtimes: Awaited<ReturnType<typeof createPreviewRuntime>>[] = [];
   const daemons: Awaited<ReturnType<typeof startDaemon>>[] = [];
@@ -185,6 +398,9 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
         },
       });
       if (folder === "first") {
+        if (spec.services.web.type === "command") {
+          spec.services.web.env = { ...spec.services.web.env, FAILED_UPDATE_ONLY: "disposable" };
+        }
         spec.services.migrate = {
           type: "job",
           cwd: project,
@@ -239,9 +455,8 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.locator('.overview-table .preview-name[title$="/first"]').click();
     await expect(page).toHaveTitle(/first.* · Previewhost$/);
     await expect(page.locator(".preview-title")).toContainText("Update failed");
-    await expect(page.locator(".attempt-split")).toContainText("Serving");
     await expect(page.getByRole("heading", { name: "Services · serving", exact: true })).toBeVisible();
-    await expect(page.locator(".attempt-split .attempt-failure")).toContainText("migrate");
+    await expect(page.locator(".jobs-table tr").filter({ hasText: "migrate" })).toContainText("Failed");
     await page.screenshot({ path: "/tmp/previewhost-attempts-light.png", animations: "disabled" });
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await expect(page.locator("body")).toHaveClass(/ph-dark/);
@@ -269,8 +484,8 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.locator(".preview-address a").first().focus();
     expect(await page.locator(".preview-address a").first().evaluate(element => {
       const css = getComputedStyle(element);
-      return { outline: css.outlineWidth, border: css.borderWidth, shadow: css.boxShadow };
-    })).toEqual({ outline: "2px", border: "0px", shadow: "none" });
+      return { outline: css.outlineStyle, border: css.borderWidth, shadow: css.boxShadow };
+    })).toEqual({ outline: "none", border: "0px", shadow: "none" });
     const folders = page.getByRole("button", { name: "Source folders", exact: true });
     await folders.focus();
     await page.keyboard.press("Enter");
@@ -300,7 +515,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     expect(hostnameApp.url()).toBe(hostnames[0] + "/");
     await hostnameApp.close();
     await page
-      .locator(".attempt-split .attempt-failure")
+      .locator(".jobs-table tr").filter({ hasText: "migrate" })
       .getByRole("button", { name: "Logs", exact: true })
       .click();
     await expect(page.getByRole("combobox", { name: "Log source" })).toHaveText(
@@ -316,7 +531,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.getByRole("searchbox", { name: "Search logs" }).press("Escape");
     failLogs = true;
     await page
-      .getByRole("button", { name: "Refresh", exact: true })
+      .getByRole("button", { name: "Refresh logs", exact: true })
       .last()
       .click();
     await expect(
@@ -328,14 +543,14 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(page.locator(".logs")).toHaveCount(0);
     failLogs = false;
     await page
-      .getByRole("button", { name: "Refresh", exact: true })
+      .getByRole("button", { name: "Refresh logs", exact: true })
       .last()
       .click();
     await expect(page.locator(".logs")).toContainText("missing table");
     const top = (await page.locator(".diagnostic-toolbar").boundingBox())!.y;
     slowLogs = true;
     await page
-      .getByRole("button", { name: "Refresh", exact: true })
+      .getByRole("button", { name: "Refresh logs", exact: true })
       .last()
       .click();
     await page.getByRole("tab", { name: "Configuration", exact: true }).click();
@@ -350,6 +565,18 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       page.getByRole("tab", { name: "Configuration", exact: true }),
     ).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".logs")).toHaveCount(0);
+    await page.getByRole("combobox", { name: "Configuration source" }).click();
+    await page.getByRole("option", { name: "Failed update configuration", exact: true }).click();
+    await page.getByRole("combobox", { name: "Service or job" }).click();
+    await page.getByRole("option", { name: "web · command", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit FAILED_UPDATE_ONLY", exact: true })).toBeVisible();
+    await page.getByRole("combobox", { name: "Configuration source" }).click();
+    await page.getByRole("option", { name: "Current configuration", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit FAILED_UPDATE_ONLY", exact: true })).toHaveCount(0);
+    await page.getByRole("combobox", { name: "Configuration source" }).click();
+    await page.getByRole("option", { name: "Recorded attempt", exact: true }).click();
+    await expect(page.getByRole("button", { name: /^Edit APPLICATION/ })).toHaveCount(0);
     const configuration = page.getByRole("button", { name: "Requested configuration", exact: true });
     await configuration.focus();
     await page.keyboard.press("Enter");
@@ -392,12 +619,12 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     );
     const yml = join(directory, "first/preview.yml");
     await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await expect(page.locator(".save-row")).toContainText("preview.yml");
     await expect(page.getByRole("button", { name: "Save as preview.yaml" })).toHaveCount(0);
     await expect(readFile(join(directory, "first/preview.yaml"))).rejects.toMatchObject({ code: "ENOENT" });
     await rm(yml);
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await page.getByRole("button", { name: "Save as preview.yaml" }).click();
     await expect
       .poll(() =>
@@ -406,7 +633,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       .toContain("name: app");
     await expect(page.getByRole("button", { name: "Save as preview.yaml" })).toHaveCount(0);
     await writeFile(yml, "name: app\ntype: static\ndirectory: .\n");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
     await expect(page.getByText("Configuration needs attention", { exact: true })).toBeVisible();
     await expect(page.getByText(/Both preview.yaml and preview.yml exist/)).toBeVisible();
@@ -419,7 +646,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
     await page.setViewportSize({ width: 1360, height: 900 });
     await rm(yml);
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await recheck();
     await expect(page.getByText("Configuration needs attention", { exact: true })).toHaveCount(0);
     await page.getByRole("tab", { name: "Configuration", exact: true }).click();
     await page.getByRole("button", { name: "Dark mode", exact: true }).click();
@@ -497,12 +724,12 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       await expect.poll(async () => (await runtimes[1].logs(current.name, currentId, { source: "web" })).text).toContain(text.slice(-30));
     };
     await emit(Array.from({ length: 100 }, (_, index) => `before clear ${index}`).join("\n"));
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("before clear 99");
     await logPanel.evaluate(el => el.scrollTop = 80);
     const scrollTop = await logPanel.evaluate(el => el.scrollTop);
     await emit("refresh marker");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("refresh marker");
     expect(await logPanel.evaluate(el => el.scrollTop)).toBe(scrollTop);
     await page.getByRole("searchbox", { name: "Search logs" }).fill("marker");
@@ -513,7 +740,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await logOption("Clear view");
     await expect(page.locator(".logs")).not.toContainText("refresh marker");
     await emit("after clear marker 🙂");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.locator(".logs")).toContainText("after clear marker 🙂");
     await expect(page.locator(".logs")).not.toContainText("refresh marker");
     await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");
@@ -534,7 +761,8 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await page.screenshot({ path: "/tmp/previewhost-clear-logs-narrow.png" });
     await page.setViewportSize({ width: 1360, height: 900 });
     // Compare another worktree, then restore this diagnostic view through Back and reload.
-    await page.getByRole("navigation", { name: "Projects", exact: true }).getByRole("button", { name: "first", exact: true }).click();
+    const firstProject = page.getByRole("navigation", { name: "Projects", exact: true }).getByRole("button", { name: "first", exact: true });
+    if (await firstProject.getAttribute("aria-expanded") !== "true") await firstProject.click();
     await page.locator('.preview-nav[title$="/first · app"]').click();
     await page.goBack();
     await expect(page.getByRole("searchbox", { name: "Search logs" })).toHaveValue("marker");
@@ -563,7 +791,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     await expect(page.locator(".logs")).toContainText("refresh marker");
     await logOption("Clear view");
     await emit("x".repeat(70000) + "retained marker 🙂");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Earlier output omitted" })).toBeVisible();
     await expect(page.locator(".logs")).toContainText("retained marker 🙂");
     await logOption("Show earlier logs");
@@ -578,7 +806,7 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
       },
     });
     expect((await runtimes[1].wait(current.name, failedApi.candidate!.id)).state).toBe("failed");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh logs", exact: true }).click();
     await expect(page.getByRole("combobox", { name: "Diagnostic attempt" })).toContainText(currentId.slice(0, 8));
     await expect(page.locator(".logs")).not.toContainText("API startup failed");
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
@@ -618,7 +846,6 @@ test("React dashboard preserves attempt isolation, logs, configuration and safe 
     };
     const preparing = await runtimes[0].start(pipeline);
     await expect.poll(async () => (await runtimes[0].get(pipeline.name)).candidate?.services?.prepare.state).toBe("starting");
-    await page.getByRole("banner").getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("button", { name: "Overview", exact: true }).click();
     await page.locator('.overview-table .preview-name[aria-label$=" · onboarding"]').click();
     await expect(page.getByRole("row").filter({ hasText: "migrate" }).last()).toContainText("prepare");

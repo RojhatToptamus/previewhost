@@ -27,6 +27,11 @@ A shared MCP connection does not identify which chat made a call.
 
 Previewhost does not create worktrees or change Git state. Prepare the worktree with Git or your coding client before startup.
 
+In the dashboard, **New preview** lists known project folders and their registered Git worktrees, including worktrees without running previews.
+For another existing folder, choose **Enter a folder path** and supply its absolute path.
+Discovery does not scan your machine. Selecting a folder does not move an existing preview, copy configuration, or share managed data.
+Review that folder's file or pasted configuration before startup. See [dashboard startup](dashboard.md#start-a-preview).
+
 ## Prepare and start
 
 Read the application's instructions and install its dependencies in the selected worktree.
@@ -39,7 +44,8 @@ Alternatively, declare finite preparation as [setup jobs](jobs.md) so Previewhos
 Commands that run separately in a terminal or coding client remain under that tool's control.
 
 After startup, wait for the returned attempt ID and check the application at its returned URL.
-The [CLI tutorial](first-preview.md) shows these steps. The [dashboard](dashboard.md) groups previews by source path.
+The [CLI tutorial](first-preview.md) shows these steps. The [dashboard](dashboard.md) groups linked worktrees under their repository.
+Separate clones and non-Git folders stay separate, even when their names match.
 
 For services in separate repositories, use their existing directories in one environment.
 Their branch names do not need to match. MCP requires approval for each source directory.

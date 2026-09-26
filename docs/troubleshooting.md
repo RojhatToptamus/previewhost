@@ -200,6 +200,24 @@ If ownership is uncertain, leave the processes intact until you identify their o
 Stop can complete after the owned processes exit.
 A daemon restart loses the process records needed for cleanup. It cannot identify an unknown group's owner.
 
+## Dashboard setup finished but the preview did not start
+
+Saving secrets does not authorize startup. Return to the dashboard review, check its source and execution details,
+then confirm **Start preview** or **Apply configuration**.
+
+If you closed the review, choose **Continue setup** on the preview, or reopen it from **New preview**.
+Use **Check setup** to read the private form's result. If you closed the private form before saving, use **Open private form**.
+Canceled or expired requests require an explicit new setup request.
+
+Restore a closed dashboard tab to return to the same session. Reviewed configuration survives refresh while that dashboard process remains open.
+If the review expired or the dashboard process stopped, select the file or paste the configuration again. Stored secrets remain available.
+
+For **YAML or JSON without a file**, Previewhost does not require `preview.yaml`.
+Choose **Current configuration** for a retained direct preview. **Project configuration file** reads the root file explicitly.
+If file-based input is missing, invalid, or changed since review, correct it and reload; it is not replaced with a direct configuration automatically.
+
+See [dashboard startup](dashboard.md#start-a-preview) for review limits and [secret setup](secrets.md#approve-and-enter-values) for CLI and agent continuation.
+
 ## Stored secrets are missing or inaccessible
 
 For `SECRET_REQUIRED` or unselected references, follow [private secret setup](secrets.md#approve-and-enter-values).

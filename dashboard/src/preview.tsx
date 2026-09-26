@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { AttemptSummary } from "../../src/contracts";
 import type { Mutate } from "./lib/api";
 import { attempts, hint, shortProject, state, type Entry } from "./lib/model";
@@ -7,6 +8,8 @@ import { AppLink, CopyButton, Notice, Path, Status } from "./components/shared";
 import { previewActions, PreviewMenu } from "./preview-actions";
 import { Activity } from "./activity";
 import { Diagnostics } from "./diagnostics";
+import { ConfigurationPanel } from "./configuration";
+import type { LaunchResult } from "./preview-workflow";
 import { usePreviewView, type PreviewView } from "./lib/view-state";
 
 export function Preview({
@@ -14,17 +17,25 @@ export function Preview({
   mutate,
   acting,
   revision,
+  onRefresh,
+  onStarted,
+  onPrepare,
 }: {
   entry: Entry;
   mutate: Mutate;
   acting: boolean;
   revision: number;
+  onRefresh(): void;
+  onStarted(result: LaunchResult): void;
+  onPrepare(resumeId?: string): void;
 }) {
   const [view, updateView] = usePreviewView(entry.owner.id, entry.name);
+  const [configurationVisited, setConfigurationVisited] = useState(view.tab === "configuration");
   const { attemptId, clearAfter, source, query, wrapLogs, showContext } = view;
   const { owner, preview: p } = entry;
   const retained = attempts(p);
-  const tab = retained.length ? view.tab : "activity";
+  const reviews = owner.reviews?.filter(review => review.name === entry.name) ?? [];
+  const tab = !retained.length && view.tab === "logs" ? "activity" : view.tab;
   const selected = attemptId
     ? retained.find((attempt) => attempt.id === attemptId)
     : retained[0];
@@ -37,7 +48,7 @@ export function Preview({
     ...(hostnameUrl && hostnameUrl !== p!.url ? [{ label: "Hostname", url: hostnameUrl }] : []),
     { label: "Localhost", url: p!.url! },
   ] : [];
-  const primary = !canOpen
+  const primary = !canOpen && !(reviews.length && !retained.length)
     ? actions.find((action) => !action.danger)
     : undefined;
   const context = hint(entry);
@@ -60,6 +71,7 @@ export function Preview({
             </Status>
           </div>
           <div className="header-actions">
+            {!retained.length && <Button variant={primary ? "outline" : "default"} disabled={acting || Boolean(owner.error)} onClick={() => onPrepare(reviews.length === 1 ? reviews[0].id : undefined)}>{reviews.length ? "Continue setup" : "Prepare preview"}</Button>}
             {canOpen && <AppLink url={p!.url!} variant="default" />}
             {actions.map((action) => (
               <Button
@@ -116,17 +128,18 @@ export function Preview({
         )}
         {context && <p className="context-note">{context}</p>}
       </div>
-      {owner.error ? (
+      {owner.error && (
         <div className="page">
           <Notice title="Status unavailable" error>
             {owner.error.message}
           </Notice>
         </div>
-      ) : (
+      )}
         <Tabs
-          className="preview-tabs"
+          className={owner.error ? "preview-tabs hidden" : "preview-tabs"}
           value={tab}
           onValueChange={(value) => {
+            if (value === "configuration") setConfigurationVisited(true);
             updateView({
               tab: value as PreviewView["tab"],
               ...(value !== "activity" && selected ? { attemptId: selected.id } : {}),
@@ -146,13 +159,11 @@ export function Preview({
                 Logs
               </TabsTrigger>
             )}
-            {!!retained.length && (
-              <TabsTrigger value="configuration" id="tab-configuration">
-                Configuration
-              </TabsTrigger>
-            )}
+            <TabsTrigger value="configuration" id="tab-configuration">
+              Configuration
+            </TabsTrigger>
           </TabsList>
-          <TabsContent value="activity" className="activity-panel scroll-panel">
+          <TabsContent value="activity" className="preview-panel activity-panel scroll-panel">
             <Activity
               entry={entry}
               mutate={mutate}
@@ -161,8 +172,22 @@ export function Preview({
             />
           </TabsContent>
           {(["logs", "configuration"] as const).map((view) => (
-            <TabsContent key={view} value={view} className="diagnostics-panel">
-              {tab === view && !selected && (
+            <TabsContent key={view} value={view} className="preview-panel diagnostics-panel" forceMount={view === "configuration" && configurationVisited ? true : undefined}>
+              {view === "configuration" && configurationVisited && !retained.length && !owner.error ? (
+                <div className="diagnostic-body">
+                  <Notice title={reviews.length ? "Configuration awaits review" : "No startup configuration retained"}>
+                    {reviews.length ? "Continue setup to review the configuration and start the preview." : "Choose a configuration file or paste YAML/JSON using Prepare preview. Saved secrets remain available."}
+                  </Notice>
+                </div>
+              ) : view === "configuration" && configurationVisited ? <ConfigurationPanel
+                entry={entry} attemptId={p?.active?.id ?? p?.latest?.id ?? p?.candidate?.id} revision={revision} onStarted={onStarted}
+                snapshot={selected && <Diagnostics entry={entry} revision={revision} onRefresh={onRefresh} clearAfter={clearAfter}
+                  setClearAfter={clearAfter => updateView({ clearAfter })} tab="configuration" selected={selected}
+                  retained={retained} selectAttempt={id => updateView({ attemptId: id, clearAfter: undefined, source: "" })}
+                  source={source} setSource={source => updateView({ source })} query={query} setQuery={query => updateView({ query })}
+                  wrapLogs={wrapLogs} setWrapLogs={wrapLogs => updateView({ wrapLogs })}
+                  showContext={showContext} setShowContext={showContext => updateView({ showContext })} mutate={mutate} acting={acting} />}
+              /> : tab === view && !selected && (
                 <div className="diagnostic-body">
                   <Notice title="Attempt no longer retained">
                     <Button
@@ -176,10 +201,11 @@ export function Preview({
                   </Notice>
                 </div>
               )}
-              {tab === view && selected && (
+              {tab === view && view === "logs" && selected && (
                 <Diagnostics
                   entry={entry}
                   revision={revision}
+                  onRefresh={onRefresh}
                   clearAfter={clearAfter}
                   setClearAfter={(clearAfter) => updateView({ clearAfter })}
                   tab={view}
@@ -203,7 +229,6 @@ export function Preview({
             </TabsContent>
           ))}
         </Tabs>
-      )}
     </article>
   );
 }

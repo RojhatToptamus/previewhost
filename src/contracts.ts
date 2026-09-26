@@ -58,6 +58,8 @@ export const environmentValueSchema = z.union([
   z.strictObject({ publicUrl: nameSchema.describe('Primary HTTP service only: numeric public origin. Adds no readiness dependency and can still reach the active application during replacement.') }),
   z.strictObject({ browserUrl: nameSchema.describe('Any HTTP service: public .localhost alias for browser requests. Adds no readiness dependency; native DNS resolution and candidate readiness are not guaranteed. During replacement it can still reach the active application.') }),
 ]);
+export const configurationBindingChangeSchema = z.strictObject({ service: nameSchema.optional(), key: envKey, value: environmentValueSchema.nullable() });
+export type ConfigurationBindingChange = z.output<typeof configurationBindingChangeSchema>;
 const serviceEnvironment = z.record(envKey, environmentValueSchema)
   .refine((env) => Object.keys(env).length <= 128 && JSON.stringify(env).length <= 65_536, 'Environment is too large.')
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'Remove PORT, HOST and PREVIEW_URL from env; Previewhost injects them at runtime.')
@@ -104,6 +106,12 @@ export type EnvironmentSpec = Extract<EffectiveSpec, { type: 'environment' }>;
 export type EnvironmentService = z.output<typeof environmentServiceSchema>;
 export type OwnedDatabaseSpec = Extract<EnvironmentService, { type: 'postgres' | 'redis' }>;
 export type EnvironmentValue = z.output<typeof environmentValueSchema>;
+export interface ConfigurationBindingRow {
+  service?: string;
+  key: string;
+  /** null keeps an existing literal undisclosed; symbolic references are safe to display. */
+  value: Exclude<EnvironmentValue, string> | null;
+}
 
 export type ErrorCode =
   | 'INVALID_INPUT' | 'SOURCE_DENIED' | 'EXECUTION_DENIED' | 'ALREADY_EXISTS'
@@ -186,6 +194,8 @@ export interface PrerequisiteFinding {
   message: string;
 }
 export interface PreviewDescription {
+  /** File supplied with this attempt. Metadata only; it grants no filesystem access. */
+  sourceFile?: string;
   /** Read-only observations, not startup validation or permission grants. */
   prerequisites?: PrerequisiteFinding[];
   spec: Omit<CommandSpec, 'env'> | Exclude<EffectiveSpec, CommandSpec | EnvironmentSpec> | {
@@ -211,19 +221,40 @@ export interface StopOptions {
   /** Reject a stale management action before touching a different attempt. */
   expected?: { active: string | null; candidate: string | null; latest: string | null };
 }
+export interface StartOptions {
+  expected?: StopOptions['expected'];
+  /** Absolute input file path, when this declaration came from a configuration file. */
+  sourceFile?: string;
+}
+export type ConfigureBindingsOptions =
+  | { operation: 'inspect' }
+  | { operation: 'save' }
+  | { operation: 'apply'; expected: NonNullable<StopOptions['expected']> }
+  | { operation: 'secrets'; reopen?: boolean };
+export interface ConfigurationBindingsInspection {
+  description: PreviewDescription;
+  bindings: ConfigurationBindingRow[];
+  inspection?: { prerequisites?: PrerequisiteFinding[]; error?: Failure };
+}
+export type ConfigureBindingsResult<T extends ConfigureBindingsOptions = ConfigureBindingsOptions> =
+  T extends { operation: 'inspect' } ? ConfigurationBindingsInspection :
+  T extends { operation: 'apply' } ? PreviewStatus :
+  T extends { operation: 'secrets' } ? SecretSetupStatus : { file: string; externalSources: string[] };
 export type SecretSetupSummary = Pick<SecretSetupStatus, 'id' | 'name' | 'mode' | 'state' | 'browser' | 'expiresAt'>;
 export interface PreviewManagementApi {
   remove(name?: string, attemptId?: string | null): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
   startAgain(name: string, attemptId: string): Promise<PreviewStatus>;
   saveConfiguration(name: string, attemptId: string): Promise<{ file: string; externalSources: string[] }>;
+  configureBindings<T extends ConfigureBindingsOptions>(name: string, attemptId: string, changes: ConfigurationBindingChange[], options: T,
+    request?: { signal?: AbortSignal }): Promise<ConfigureBindingsResult<T>>;
   secretsList(): Promise<SecretSetupSummary[]>;
   secretsOpen(id: string, options?: { signal?: AbortSignal }): Promise<SecretSetupStatus>;
 }
 export interface PreviewApi {
   inspect(spec: PreviewSpec): Promise<PreviewDescription>;
-  start(spec: PreviewSpec): Promise<PreviewStatus>;
-  replace(name: string, spec: PreviewSpec): Promise<PreviewStatus>;
+  start(spec: PreviewSpec, options?: StartOptions): Promise<PreviewStatus>;
+  replace(name: string, spec: PreviewSpec, options?: StartOptions): Promise<PreviewStatus>;
   list(): Promise<PreviewStatus[]>;
   get(name: string): Promise<PreviewStatus>;
   wait(name: string, attemptId: string, options?: WaitOptions): Promise<AttemptResult>;
@@ -251,23 +282,38 @@ export interface RuntimeOptions {
 }
 
 const attemptIdSchema = z.string().min(1).max(128).describe('Exact candidate attempt ID returned by start/replace or current status.');
+const expectedSlotSchema = z.strictObject({
+  active: attemptIdSchema.nullable(), candidate: attemptIdSchema.nullable(), latest: attemptIdSchema.nullable(),
+});
+const startOptionsShape = {
+  expected: expectedSlotSchema.optional(),
+  sourceFile: z.string().min(1).max(4096).refine(value => !value.includes('\0'), 'File paths cannot contain NUL.').optional(),
+};
 /** Argument containers shared by the HTTP and MCP adapters. */
 export const requestSchemas = {
   inspect: z.strictObject({ spec: previewSpecSchema }),
-  start: z.strictObject({ spec: previewSpecSchema }),
-  replace: z.strictObject({ name: nameSchema, spec: previewSpecSchema }),
+  start: z.strictObject({ spec: previewSpecSchema, ...startOptionsShape }),
+  replace: z.strictObject({ name: nameSchema, spec: previewSpecSchema, ...startOptionsShape }),
   list: z.strictObject({}),
   get: z.strictObject({ name: nameSchema }),
   wait: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, timeoutMs: z.number().int().min(1).max(limits.waitMs).optional()
     .describe('Wait limit in milliseconds, default and maximum 30000. Timeout or canceling this wait leaves startup running; wait again or cancel the exact candidate.') }),
   logs: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema.optional(), maxBytes: z.number().int().min(4).max(limits.logBytes).optional(), source: nameSchema.optional(), after: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional() }),
   cancel: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
-  stop: z.strictObject({ name: nameSchema, afterEngineRestart: z.boolean().optional(), expected: z.strictObject({
-    active: attemptIdSchema.nullable(), candidate: attemptIdSchema.nullable(), latest: attemptIdSchema.nullable(),
-  }).optional() }),
+  stop: z.strictObject({ name: nameSchema, afterEngineRestart: z.boolean().optional(), expected: expectedSlotSchema.optional() }),
   describe: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   startAgain: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
   saveConfiguration: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema }),
+  configureBindings: z.strictObject({
+    name: nameSchema, attemptId: attemptIdSchema,
+    changes: z.array(configurationBindingChangeSchema).max(128 * limits.environmentServices),
+    options: z.discriminatedUnion('operation', [
+      z.strictObject({ operation: z.literal('inspect') }),
+      z.strictObject({ operation: z.literal('save') }),
+      z.strictObject({ operation: z.literal('apply'), expected: expectedSlotSchema }),
+      z.strictObject({ operation: z.literal('secrets'), reopen: z.boolean().optional() }),
+    ]),
+  }),
   rerunJob: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, job: nameSchema }),
   remove: z.strictObject({ name: nameSchema.optional(), attemptId: attemptIdSchema.nullable() }),
   deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema.nullable(), resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis']) })).min(1).max(limits.environmentDatabases) }).optional() }),

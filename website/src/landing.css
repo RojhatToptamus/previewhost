@@ -66,7 +66,7 @@
 .landing-hero-note a:hover { text-decoration: underline; }
 .landing-tabs { display: flex; gap: 8px; width: fit-content; }
 .landing-tabs button { min-height: 44px; padding: 10px 15px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--lp-muted); font-size: 13px; line-height: 1.5; transition: color 150ms ease, background 150ms ease; }
-.landing-tabs button[aria-selected="true"] { border-bottom-color: var(--lp-accent); color: var(--lp-ink); font-weight: 550; }
+.landing-tabs button[aria-selected="true"] { border-bottom-color: var(--lp-accent); color: var(--lp-ink); }
 .landing-tabs button:hover { color: var(--lp-ink); background: var(--lp-hover); }
 .landing-section { padding-block: 104px; }
 .landing-section-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--lp-muted); margin-bottom: 22px !important; }

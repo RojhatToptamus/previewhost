@@ -23,9 +23,7 @@ export async function call<T>(body: object, signal?: AbortSignal): Promise<T> {
   const data = await response.json();
   if (data.error)
     throw new Error(
-      data.error.code === "STALE_ATTEMPT"
-        ? "This preview changed. Review its current state and try again."
-        : data.error.message,
+      data.error.message,
       { cause: data.error },
     );
   return data.result;

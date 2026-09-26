@@ -296,6 +296,29 @@ test('guarded Stop and Start again retain the serving declaration after a failed
   assert.equal((await runtime.wait('page', retry.candidate!.id)).state, 'failed');
 });
 
+test('guarded starts and replacements reject changed slots before admitting an attempt', async t => {
+  const { runtime, spec, directory } = await fixture(t);
+  const absent = { active: null, candidate: null, latest: null };
+  const starting = await runtime.start(spec(), { expected: absent });
+  await assert.rejects(runtime.start(spec(), { expected: absent }), code('STALE_ATTEMPT'));
+  const first = await ready(runtime, starting);
+  const reviewed = { active: first.id, candidate: null, latest: first.id };
+  const failed = await runtime.replace('page', { ...spec(), directory: path.join(directory, 'missing') } as PreviewSpec, { expected: reviewed });
+  await runtime.wait('page', failed.candidate!.id);
+  await assert.rejects(runtime.replace('page', spec('page', 'two'), { expected: reviewed }), code('STALE_ATTEMPT'));
+  assert.equal((await runtime.get('page')).latest?.id, failed.candidate!.id);
+  assert.equal(await (await fetch(first.url!)).text(), '<h1>one</h1>');
+  const second = await ready(runtime, await runtime.replace('page', spec('page', 'two'), {
+    expected: { ...reviewed, latest: failed.candidate!.id },
+  }));
+  assert.equal(second.url, first.url);
+  assert.equal(await (await fetch(first.url!)).text(), '<h1>two</h1>');
+  const stopped = await runtime.stop('page');
+  await assert.rejects(runtime.start(spec(), { expected: { ...reviewed, active: null } }), code('STALE_ATTEMPT'));
+  assert.equal((await runtime.get('page')).latest?.id, stopped.latest!.id);
+  await ready(runtime, await runtime.start(spec(), { expected: { active: null, candidate: null, latest: stopped.latest!.id } }));
+});
+
 test('retained descriptions cannot mutate commands or expose literal environment bindings', async t => {
   const { runtime, directory } = await fixture(t, () => true);
   const status = await runtime.start({ name: 'script', type: 'command', cwd: directory,
