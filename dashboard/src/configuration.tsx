@@ -88,6 +88,8 @@ export function ConfigurationPanel({
   const [changes, setChanges] = useState<ConfigurationBindingChange[]>([]);
   const [editing, setEditing] = useState<{ row?: Binding; service?: string }>();
   const [review, setReview] = useState<PreviewReview>();
+  // A closed review can still be resumed; retire it once before changing its local edits.
+  const retainedReview = useRef<string | undefined>(undefined);
   const reviewTrigger = useRef<HTMLButtonElement>(null);
   const dirty = changes.length > 0;
   const failedAttempt =
@@ -98,7 +100,7 @@ export function ConfigurationPanel({
   const recipeFile =
     mode === "recipe" ? entry.owner.configuration?.file : undefined;
   useEffect(() => {
-    if (dirty || busy || mode === "snapshot") return;
+    if (dirty || busy || editing || review || mode === "snapshot" || entry.owner.error) return;
     const controller = new AbortController();
     setLoading(true);
     setError("");
@@ -132,6 +134,7 @@ export function ConfigurationPanel({
     refresh,
     mode,
     recipeFile,
+    entry.owner.error,
   ]);
   const spec = configuration?.description.spec;
   const services =
@@ -160,17 +163,37 @@ export function ConfigurationPanel({
   const visible = [...rows.values()]
     .filter((row) => (row.service ?? "") === selectedService)
     .sort((a, b) => a.key.localeCompare(b.key));
-  function stage(change: ConfigurationBindingChange) {
+  async function revise(update: () => void, reload = false) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      if (retainedReview.current) {
+        await call({ action: "configurationDiscard", id: retainedReview.current });
+        retainedReview.current = undefined;
+      }
+      update();
+      if (reload) setRefresh(value => value + 1);
+    } catch (problem) {
+      const message = mutationError(problem);
+      setError(message);
+      return message;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function stage(change: ConfigurationBindingChange) {
     const isNew = !configuration?.bindings.some(
       (row) => bindingId(row) === bindingId(change),
     );
-    setChanges((previous) => [
-      ...previous.filter((item) => bindingId(item) !== bindingId(change)),
-      ...(isNew && change.value === null ? [] : [change]),
-    ]);
-    setMessage("");
-    setError("");
-    setEditing(undefined);
+    return revise(() => {
+      setChanges((previous) => [
+        ...previous.filter((item) => bindingId(item) !== bindingId(change)),
+        ...(isNew && change.value === null ? [] : [change]),
+      ]);
+      setMessage("");
+      setEditing(undefined);
+    });
   }
   async function save() {
     if (!configuration || busy) return;
@@ -184,6 +207,7 @@ export function ConfigurationPanel({
         changes,
       });
       setConfiguration(result);
+      retainedReview.current = undefined;
       setChanges([]);
       setMessage(
         "File saved. Apply it when you are ready; the running preview is unchanged.",
@@ -199,13 +223,14 @@ export function ConfigurationPanel({
     setBusy(true);
     setError("");
     try {
-      setReview(
-        await call<PreviewReview>({
-          action: "configurationReview",
-          id: configuration.id,
-          changes,
-        }),
-      );
+      const result = await call<PreviewReview>({
+        action: "configurationReview",
+        id: configuration.id,
+        changes,
+      });
+      retainedReview.current = result.id;
+      setConfiguration(previous => previous && { ...previous, id: result.id });
+      setReview(result);
     } catch (problem) {
       setError(errorMessage(problem));
     } finally {
@@ -382,13 +407,13 @@ export function ConfigurationPanel({
                                         disabled={busy}
                                         aria-label={`Undo removal of ${row.key}`}
                                         onClick={() =>
-                                          setChanges((previous) =>
+                                          void revise(() => setChanges((previous) =>
                                             previous.filter(
                                               (item) =>
                                                 bindingId(item) !==
                                                 bindingId(row),
                                             ),
-                                          )
+                                          ))
                                         }
                                       >
                                         Undo
@@ -461,10 +486,7 @@ export function ConfigurationPanel({
                   variant="outline"
                   size="sm"
                   disabled={busy}
-                  onClick={() => {
-                    setChanges([]);
-                    setRefresh((value) => value + 1);
-                  }}
+                  onClick={() => void revise(() => setChanges([]), true)}
                 >
                   {dirty ? "Discard changes & reload" : "Reload configuration"}
                 </Button>
@@ -487,10 +509,7 @@ export function ConfigurationPanel({
                 <Button
                   variant="ghost"
                   disabled={busy}
-                  onClick={() => {
-                    setChanges([]);
-                    setError("");
-                  }}
+                  onClick={() => void revise(() => setChanges([]), true)}
                 >
                   Discard changes
                 </Button>
@@ -531,12 +550,15 @@ export function ConfigurationPanel({
           existingKeys={visible.map((row) => row.key)}
           onClose={() => setEditing(undefined)}
           onSave={stage}
+          busy={busy}
+          unavailable={entry.owner.error?.message}
         />
       )}
       {review && (
         <PreviewReviewDialog
           review={review}
           trigger={reviewTrigger.current}
+          unavailable={entry.owner.error?.message}
           onClose={(stale) => {
             setReview(undefined);
             if (stale)
@@ -545,6 +567,7 @@ export function ConfigurationPanel({
               );
           }}
           onStarted={(result) => {
+            retainedReview.current = undefined;
             setReview(undefined);
             setChanges([]);
             setRefresh((value) => value + 1);
@@ -566,13 +589,17 @@ function BindingEditor({
   existingKeys,
   onClose,
   onSave,
+  busy,
+  unavailable,
 }: {
   row?: Binding;
   service?: string;
   spec: PreviewDescription["spec"];
   existingKeys: string[];
   onClose(): void;
-  onSave(change: ConfigurationBindingChange): void;
+  onSave(change: ConfigurationBindingChange): Promise<string | undefined>;
+  busy: boolean;
+  unavailable?: string;
 }) {
   const [key, setKey] = useState(row?.key ?? "");
   const [type, setType] = useState(row ? bindingType(row.value) : "literal");
@@ -601,8 +628,9 @@ function BindingEditor({
       window.removeEventListener("pagehide", clear);
     };
   }, []);
-  function save(event: React.SubmitEvent<HTMLFormElement>) {
+  async function save(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || unavailable) return;
     if (
       !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) ||
       ["PORT", "HOST", "PREVIEW_URL"].includes(key)
@@ -626,17 +654,18 @@ function BindingEditor({
       setError("Enter a reference.");
       return;
     }
-    if (value.current) value.current.value = "";
-    onSave({ service, key, value: next });
+    const problem = await onSave({ service, key, value: next });
+    if (problem) setError(problem);
   }
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open && !busy) onClose();
       }}
     >
       <DialogContent
+        showCloseButton={!busy}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (opener.current?.isConnected) opener.current.focus();
@@ -763,15 +792,16 @@ function BindingEditor({
                 {(type === "service" || type === "browserUrl") && !services.length && <FieldDescription>No eligible services in this configuration.</FieldDescription>}
               </Field>
             )}
+            {unavailable && <Notice title="Status unavailable" error>{unavailable}</Notice>}
             {error && <FieldError>{error}</FieldError>}
           </FieldGroup>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
               Cancel
             </Button>
             <Button
               type="submit"
-              disabled={type === "literal" ? !replaceLiteral : !reference.trim()}
+              disabled={busy || Boolean(unavailable) || (type === "literal" ? !replaceLiteral : !reference.trim())}
             >
               Keep change
             </Button>

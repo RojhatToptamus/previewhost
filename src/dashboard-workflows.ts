@@ -28,6 +28,7 @@ const changes = requestSchemas.configureBindings.shape.changes;
 const workflowSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('previewProjects') }),
   z.strictObject({ action: z.literal('previewResume'), id: z.uuid() }),
+  z.strictObject({ action: z.literal('configurationDiscard'), id: z.uuid() }),
   z.strictObject({ action: z.literal('configurationOpen'), owner: z.string(), name: z.string().optional(), attemptId: z.string().optional(), file: path.optional() }),
   z.strictObject({ action: z.enum(['configurationSave', 'configurationReview']), id: z.uuid(), changes }),
   z.strictObject({ action: z.literal('previewPrepare'), project: path, file: path.optional(), text: z.string().max(limits.controlBytes).optional(), format: z.enum(['yaml', 'json']).optional() }),
@@ -202,6 +203,15 @@ export class DashboardWorkflows {
       return { result: this.view(this.put({ project, description: { ...direct.description, prerequisites: direct.inspection?.prerequisites }, inspectionError: direct.inspection?.error?.message, bindings: direct.bindings, existing, roots: [...new Set(roots)], expected: expected(existing), changes: [], attemptId: p.attemptId })) };
     }
     const draft = this.drafts.get(p.id);
+    if (p.action === 'configurationDiscard') {
+      if (!draft) return { result: null };
+      if (draft.busy) throw new PreviewError('BUSY', 'This configuration is being updated. Wait for it to finish.');
+      // Keep the editing ID for retries; a successful re-review issues a fresh reviewed ID.
+      draft.reviewed = false;
+      draft.changes = [];
+      draft.setupId = undefined;
+      return { result: null };
+    }
     if (!draft || Date.now() - draft.touched > 30 * 60_000) throw new PreviewError('NOT_FOUND', 'This review is no longer available. Choose a configuration file or paste it again in New preview. Saved secrets are unchanged.');
     if (draft.busy) throw new PreviewError('BUSY', 'This configuration is being updated. Wait for it to finish.');
     const savingFile = p.action === 'configurationSave' ? draft.document?.file : undefined;
@@ -212,7 +222,7 @@ export class DashboardWorkflows {
     try {
       await this.fresh(draft);
       if (p.action === 'previewResume') {
-        if (!draft.reviewed) throw new PreviewError('NOT_FOUND', 'This review has already been applied. Check the preview’s current status.');
+        if (!draft.reviewed) throw new PreviewError('NOT_FOUND', 'This review is no longer available. Review the current configuration again.');
         if (!isDeepStrictEqual(expected(await this.status(draft.project, draft.roots, draft.description.spec.name)), draft.expected)) {
           throw new PreviewError('STALE_ATTEMPT', 'This preview changed after review. Prepare its current configuration again before starting.');
         }
@@ -232,17 +242,23 @@ export class DashboardWorkflows {
       }
       if (p.action === 'configurationReview') {
         if (draft.document && p.changes.length) throw new PreviewError('INVALID_INPUT', 'Save your file changes before applying them.');
-        if (!isDeepStrictEqual(draft.changes, p.changes)) draft.setupId = undefined;
-        draft.changes = p.changes;
-        if (draft.attemptId && !draft.document) {
-          const inspected = await this.project(draft.project, false, draft.roots, client => client.configureBindings(draft.description.spec.name, draft.attemptId!, p.changes, { operation: 'inspect' }, { signal }));
+        const proposed = { ...draft, changes: p.changes };
+        if (!isDeepStrictEqual(draft.changes, p.changes)) proposed.setupId = undefined;
+        if (proposed.attemptId && !proposed.document) {
+          const inspected = await this.project(proposed.project, false, proposed.roots, client => client.configureBindings(proposed.description.spec.name, proposed.attemptId!, p.changes, { operation: 'inspect' }, { signal }));
           if (!('description' in inspected)) throw new PreviewError('INVALID_INPUT', 'The owner returned an invalid configuration.');
-          draft.description = { ...inspected.description, prerequisites: inspected.inspection?.prerequisites }; draft.inspectionError = inspected.inspection?.error?.message; draft.bindings = inspected.bindings;
-        } else if (draft.spec) {
-          draft.spec = changeConfigurationBindings(draft.spec, p.changes);
-          draft.description = describeSpec(draft.spec); draft.bindings = configurationBindings(draft.spec);
+          proposed.description = { ...inspected.description, prerequisites: inspected.inspection?.prerequisites }; proposed.inspectionError = inspected.inspection?.error?.message; proposed.bindings = inspected.bindings;
+        } else if (proposed.spec) {
+          proposed.spec = changeConfigurationBindings(proposed.spec, p.changes);
+          proposed.description = describeSpec(proposed.spec); proposed.bindings = configurationBindings(proposed.spec);
         }
-        return { result: await this.review(draft) };
+        const result = await this.review(proposed);
+        // Retire the old ID so other windows cannot launch edits they have not reviewed.
+        this.drafts.delete(draft.id);
+        proposed.id = randomUUID();
+        proposed.busy = false;
+        this.drafts.set(proposed.id, proposed);
+        return { result: { ...result, id: proposed.id } };
       }
       if (p.action === 'previewSetupStatus') {
         if (!draft.setupId) throw new PreviewError('NOT_FOUND', 'No private setup has been requested for this review.');

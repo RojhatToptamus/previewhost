@@ -93,8 +93,9 @@ test("New preview keeps configuration through review and preserves unsaved servi
     projectDirectory: project, pid: process.pid, allowedRoots: [project], allowExec: true, inputKeys: [], secretIds: [],
   } });
   let launch = "";
+  let ownerAvailable = true;
   const dashboard = await startDashboard({
-    discover: async () => [{ id: createHash("sha256").update(project).digest("hex"), tokenFile, connection: { endpoint: daemon.endpoint, pid: process.pid, projectDirectory: project } }],
+    discover: async () => [{ id: createHash("sha256").update(project).digest("hex"), tokenFile, connection: { endpoint: ownerAvailable ? daemon.endpoint : "http://127.0.0.1:1", pid: process.pid, projectDirectory: project } }],
     openBrowser: async url => { launch = url; },
   });
   const errors: string[] = [];
@@ -188,6 +189,12 @@ test("New preview keeps configuration through review and preserves unsaved servi
     await expect(dialog.getByRole("button", { name: "Keep change", exact: true })).toBeDisabled();
     await dialog.getByRole("checkbox", { name: "Replace the existing value", exact: true }).check();
     await dialog.getByRole("textbox", { name: "Replacement value", exact: true }).fill("edited");
+    ownerAvailable = false;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Keep change", exact: true })).toBeDisabled();
+    ownerAvailable = true;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole("textbox", { name: "Replacement value", exact: true })).toHaveValue("edited");
     await dialog.getByRole("button", { name: "Keep change", exact: true }).click();
     await expect(page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true })).toBeFocused();
     await page.getByRole("button", { name: "Remove OPTION_0", exact: true }).click();
@@ -196,6 +203,33 @@ test("New preview keeps configuration through review and preserves unsaved servi
     await page.getByRole("tab", { name: "Configuration", exact: true }).click();
     await expect(page.getByText("2 unsaved changes.", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Undo removal of OPTION_0", exact: true }).click();
+    await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+    let listingUnavailable = true;
+    await page.route("**/api", async route => {
+      if (listingUnavailable && route.request().postDataJSON().action === "list") {
+        await route.fulfill({ json: { error: { code: "BUSY", message: "Listing is temporarily unavailable." } } });
+      } else await route.continue();
+    });
+    try {
+      await expect(page.getByText("Dashboard disconnected", { exact: true })).toBeVisible();
+      await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+      listingUnavailable = false;
+      await page.getByRole("button", { name: "Retry connection", exact: true }).click();
+      await expect(page.getByText("Dashboard disconnected", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
+    } finally {
+      await page.unroute("**/api");
+    }
+    async function recheckOwner() {
+      await page.locator(".preview-detail").getByRole("button", { name: "Actions for from-dashboard", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Recheck status", exact: true }).click();
+    }
+    ownerAvailable = false;
+    await recheckOwner();
+    await expect(page.getByText("Status unavailable", { exact: true })).toBeVisible();
+    ownerAvailable = true;
+    await recheckOwner();
+    await expect(page.getByText("Status unavailable", { exact: true })).toHaveCount(0);
     await expect(page.getByText("1 unsaved change.", { exact: true })).toBeVisible();
     expect(await (await fetch(ready.url!)).text()).toBe("initial");
     for (const theme of ["dark", "light"]) {
@@ -210,14 +244,43 @@ test("New preview keeps configuration through review and preserves unsaved servi
     }
     await page.getByRole("button", { name: "Review and apply", exact: true }).click();
     await expect(dialog.getByRole("heading", { name: "Apply configuration", exact: true })).toBeVisible();
+    await dialog.getByRole("checkbox").check();
+    ownerAvailable = false;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Apply configuration", exact: true })).toBeDisabled();
+    ownerAvailable = true;
+    await expect(dialog.getByText("Status unavailable", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Apply configuration", exact: true })).toBeEnabled();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Review and apply", exact: true })).toBeFocused();
-    await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: "Edit APPLICATION_MODE", exact: true }).click();
+    await dialog.getByRole("checkbox", { name: "Replace the existing value", exact: true }).check();
+    await dialog.getByRole("textbox", { name: "Replacement value", exact: true }).fill("recovered-after-discard");
+    let loseDiscardResponse = true;
+    await page.route("**/api", async route => {
+      if (loseDiscardResponse && route.request().postDataJSON().action === "configurationDiscard") {
+        loseDiscardResponse = false;
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        expect((await response.json()).error).toBeUndefined();
+        await route.abort("failed");
+      } else await route.continue();
+    });
+    try {
+      await dialog.getByRole("button", { name: "Keep change", exact: true }).click();
+      await expect(dialog.getByRole("alert")).toBeVisible();
+      await expect(dialog.getByRole("textbox", { name: "Replacement value", exact: true })).toHaveValue("recovered-after-discard");
+      await dialog.getByRole("button", { name: "Keep change", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+    } finally {
+      await page.unroute("**/api");
+    }
+    await page.getByRole("button", { name: "Review and apply", exact: true }).click();
     await expect(dialog.getByRole("heading", { name: "Apply configuration", exact: true })).toBeVisible();
     await dialog.getByRole("checkbox").check();
     await dialog.getByRole("button", { name: "Apply configuration", exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    await expect.poll(async () => (await fetch(ready.url!)).text()).toBe("edited");
+    await expect.poll(async () => (await fetch(ready.url!)).text()).toBe("recovered-after-discard");
     expect(errors).toEqual([]);
   } finally {
     await dashboard.close();

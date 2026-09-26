@@ -31,11 +31,13 @@ export function PreviewReviewDialog({
   onClose,
   onStarted,
   trigger,
+  unavailable,
 }: {
   review: PreviewReview;
   onClose(stale?: boolean): void;
   onStarted(result: LaunchResult): void;
   trigger: HTMLButtonElement | null;
+  unavailable?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState(false);
@@ -62,6 +64,7 @@ export function PreviewReviewDialog({
           onClose={() => onClose(stale)}
           onStarted={onStarted}
           onStale={() => setStale(true)}
+          unavailable={unavailable}
         />
       </DialogContent>
     </Dialog>
@@ -76,6 +79,7 @@ export function PreviewReviewStep({
   onStarted,
   onStale,
   onClose,
+  unavailable,
 }: {
   review: PreviewReview;
   busy: boolean;
@@ -84,6 +88,7 @@ export function PreviewReviewStep({
   onStarted(result: LaunchResult): void;
   onStale?(): void;
   onClose(): void;
+  unavailable?: string;
 }) {
   const [approved, setApproved] = useState(false);
   const [error, setError] = useState("");
@@ -108,7 +113,7 @@ export function PreviewReviewStep({
     review.secretIds.length > 0 ||
     review.managedData.length > 0;
   async function run(action: "launch" | "secrets" | "status") {
-    if (busy || (action !== "status" && !approved)) return;
+    if (busy || unavailable || (action !== "status" && !approved)) return;
     setBusy(true);
     setError("");
     try {
@@ -165,7 +170,7 @@ export function PreviewReviewStep({
     }
   }
   useEffect(() => {
-    if (!setupPending || busy) return;
+    if (!setupPending || busy || unavailable) return;
     const controller = new AbortController();
     let checking = false;
     const check = () => {
@@ -183,7 +188,7 @@ export function PreviewReviewStep({
       window.removeEventListener("focus", check);
       document.removeEventListener("visibilitychange", check);
     };
-  }, [setupPending, busy, review.id]);
+  }, [setupPending, busy, review.id, unavailable]);
   return (
     <>
       <DialogHeader>
@@ -311,11 +316,12 @@ export function PreviewReviewStep({
             {review.executionBlocked}
           </Notice>
         )}
+        {unavailable && <Notice title="Status unavailable" error>{unavailable}</Notice>}
         <Field orientation="horizontal" className="workflow-consent">
           <Checkbox
             id="preview-approval"
             checked={approved}
-            disabled={busy || Boolean(review.executionBlocked)}
+            disabled={busy || Boolean(unavailable) || Boolean(review.executionBlocked)}
             onCheckedChange={(value) => setApproved(value === true)}
           />
           <FieldLabel htmlFor="preview-approval">
@@ -364,14 +370,14 @@ export function PreviewReviewStep({
         {setupPending && (
           <Button
             variant="outline"
-            disabled={busy || !approved || stale || Boolean(review.executionBlocked)}
+            disabled={busy || Boolean(unavailable) || !approved || stale || Boolean(review.executionBlocked)}
             onClick={() => void run("secrets")}
           >
             Open private form
           </Button>
         )}
         <Button
-          disabled={busy || (!setupPending && (!approved || stale || Boolean(review.executionBlocked)))}
+          disabled={busy || Boolean(unavailable) || (!setupPending && (!approved || stale || Boolean(review.executionBlocked)))}
           onClick={() =>
             void run(
               setupPending

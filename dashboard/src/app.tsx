@@ -224,6 +224,14 @@ export function App() {
           acting={acting}
         />
         <main className="main-workspace" ref={workspace}>
+          {authenticated && selection !== "secrets" && error && (
+            <div className="page">
+              <Notice title="Dashboard disconnected" error>
+                {error} Your previews may still be running.
+                <Button variant="outline" onClick={() => setRevision(value => value + 1)}>Retry connection</Button>
+              </Notice>
+            </div>
+          )}
           {!authenticated ? (
             <div className="page">
               <EmptyState title="Open from your terminal">
@@ -232,13 +240,6 @@ export function App() {
             </div>
           ) : selection === "secrets" ? (
             <SecretManager revision={revision} />
-          ) : error ? (
-            <div className="page">
-              <Notice title="Dashboard disconnected" error>
-                {error} Your previews may still be running.
-                <Button variant="outline" onClick={() => setRevision(value => value + 1)}>Retry connection</Button>
-              </Notice>
-            </div>
           ) : selection ? (
             selected &&
             (selected.error || entries(selected).some((entry) => entry.name === selection.name)) ? (

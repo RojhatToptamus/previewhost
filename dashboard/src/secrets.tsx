@@ -217,7 +217,7 @@ function SecretEditor({ id, onClose }: { id?: string; onClose(): void }) {
               {id && <code className="break-anywhere">{id}</code>}
               <DialogDescription>
                 {id ? "Replace this value for future starts in every project that uses this reference. Running apps stay unchanged."
-                  : "Save a value for private setup. Each preview still needs your permission to use it."}
+                  : "Save a value for private setup. Runtime access requires separate approval."}
               </DialogDescription>
             </DialogHeader>
             <FieldGroup>

@@ -69,7 +69,7 @@ test('canceling dashboard direct binding setup reaches owner authorization and l
   const review = await f.api<PreviewReview>({ action: 'configurationReview', id: view.id, changes: [{ key: 'TOKEN', value: { secret: 'test/direct' } }] });
   assert.deepEqual(review.result.secretIds, ['test/direct']);
   const controller = new AbortController();
-  const pending = f.api({ action: 'previewSecrets', id: view.id, approved: true }, controller.signal);
+  const pending = f.api({ action: 'previewSecrets', id: review.result.id, approved: true }, controller.signal);
   const rejected = assert.rejects(pending, { name: 'AbortError' });
   await preparing;
   controller.abort();

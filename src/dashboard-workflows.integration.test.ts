@@ -73,8 +73,24 @@ test('dashboard edits recipes and direct bindings without leaking literals, raci
   assert.equal((await runtime.wait('direct', directStart.candidate!.id)).state, 'ready');
   const directView = (await api<ConfigurationView>({ action: 'configurationOpen', owner: id, name: 'direct', attemptId: (await runtime.get('direct')).active!.id })).result;
   assert.equal(directView.file, undefined);
-  await api({ action: 'configurationReview', id: directView.id, changes: [{ key: 'LABEL', value: 'unsaved' }] });
-  const directApply = (await api<{ status: PreviewStatus }>({ action: 'previewLaunch', id: directView.id, approved: true })).result.status;
+  const discarded = (await api<PreviewReview>({ action: 'configurationReview', id: directView.id, changes: [{ key: 'LABEL', value: 'discarded' }] })).result;
+  const continuing = (await api<PreviewReview>({ action: 'previewPrepare', project, format: 'json', text: JSON.stringify({ name: 'independent', type: 'static', directory: backend }) })).result;
+  // Retrying after a lost response must still let the editor review fresh changes.
+  await api({ action: 'configurationDiscard', id: discarded.id });
+  assert.equal((await api({ action: 'configurationDiscard', id: discarded.id })).error, undefined);
+  const remaining = (await api<{ reviews: Array<{ id: string }> }>({ action: 'previewProjects' })).result.reviews;
+  assert.ok(!remaining.some(item => item.id === discarded.id));
+  assert.ok(remaining.some(item => item.id === continuing.id));
+  assert.equal((await api({ action: 'previewResume', id: discarded.id })).error?.code, 'NOT_FOUND');
+  assert.equal((await api({ action: 'previewLaunch', id: discarded.id, approved: true })).error?.code, 'INVALID_INPUT');
+  assert.equal(await (await fetch((await runtime.get('direct')).url!)).text(), 'direct:PRIVATE_fixture_literal');
+  const olderWindow = (await api<PreviewReview>({ action: 'configurationReview', id: discarded.id, changes: [{ key: 'LABEL', value: 'older-review' }] })).result;
+  const revised = (await api<PreviewReview>({ action: 'configurationReview', id: olderWindow.id, changes: [{ key: 'LABEL', value: 'unsaved' }] })).result;
+  assert.equal((await api({ action: 'previewLaunch', id: olderWindow.id, approved: true })).error?.code, 'NOT_FOUND');
+  assert.equal((await api({ action: 'previewLaunch', id: discarded.id, approved: true })).error?.code, 'NOT_FOUND');
+  // A failed edit must not change the inputs authorized by the still-open successful review.
+  assert.equal((await api({ action: 'configurationReview', id: revised.id, changes: [{ key: 'LABEL', value: 'unseen' }, { service: 'missing', key: 'TOKEN', value: 'invalid' }] })).error?.code, 'INVALID_INPUT');
+  const directApply = (await api<{ status: PreviewStatus }>({ action: 'previewLaunch', id: revised.id, approved: true })).result.status;
   assert.equal((await runtime.wait('direct', directApply.candidate!.id)).state, 'ready');
   assert.equal(await (await fetch((await runtime.get('direct')).url!)).text(), 'unsaved:PRIVATE_fixture_literal');
   assert.equal(await readFile(file, 'utf8'), 'broken: [');

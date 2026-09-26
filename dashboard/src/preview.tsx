@@ -128,15 +128,15 @@ export function Preview({
         )}
         {context && <p className="context-note">{context}</p>}
       </div>
-      {owner.error ? (
+      {owner.error && (
         <div className="page">
           <Notice title="Status unavailable" error>
             {owner.error.message}
           </Notice>
         </div>
-      ) : (
+      )}
         <Tabs
-          className="preview-tabs"
+          className={owner.error ? "preview-tabs hidden" : "preview-tabs"}
           value={tab}
           onValueChange={(value) => {
             if (value === "configuration") setConfigurationVisited(true);
@@ -173,7 +173,7 @@ export function Preview({
           </TabsContent>
           {(["logs", "configuration"] as const).map((view) => (
             <TabsContent key={view} value={view} className="preview-panel diagnostics-panel" forceMount={view === "configuration" && configurationVisited ? true : undefined}>
-              {view === "configuration" && configurationVisited && !retained.length ? (
+              {view === "configuration" && configurationVisited && !retained.length && !owner.error ? (
                 <div className="diagnostic-body">
                   <Notice title={reviews.length ? "Configuration awaits review" : "No startup configuration retained"}>
                     {reviews.length ? "Continue setup to review the configuration and start the preview." : "Choose a configuration file or paste YAML/JSON using Prepare preview. Saved secrets remain available."}
@@ -229,7 +229,6 @@ export function Preview({
             </TabsContent>
           ))}
         </Tabs>
-      )}
     </article>
   );
 }

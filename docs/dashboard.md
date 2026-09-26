@@ -32,6 +32,7 @@ and continue startup. Cancellation requires an explicit new request; it never st
 Closing a review does not cancel an open private form. Return to **Continue setup** on the preview,
 or the unfinished reviews in **New preview**, to check setup and explicitly start the application.
 Refresh does not discard a reviewed configuration. Multiple reviews stay separate.
+Changing or discarding reviewed edits invalidates the previous review, including copies open in another tab.
 
 Reviews remain available for 30 minutes after your last review or change, with at most 16 retained.
 Configuration stays in the dashboard process, not browser storage. When it exits or a review expires,
