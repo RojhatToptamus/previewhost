@@ -56,7 +56,9 @@ test('dashboard pin preferences persist across origins without touching projects
   const backup = preferencesDirectory + '-backup';
   await rename(preferencesDirectory, backup);
   await writeFile(preferencesDirectory, 'Blocked path');
-  assert.equal((await second.api(save([]))).body.error?.code, 'INVALID_INPUT');
+  const blocked = await second.api(save([]));
+  // Windows rejects the non-directory as unsafe private storage before the write.
+  assert.equal(blocked.body.error?.code, process.platform === 'win32' ? 'UNAUTHORIZED' : 'INVALID_INPUT');
   assert.deepEqual(JSON.parse(await readFile(join(backup, 'navigation.json'), 'utf8')), { pinnedProjects: reordered });
   await rm(preferencesDirectory); await rename(backup, preferencesDirectory);
   assert.deepEqual((await second.api({ action: 'navigationPreferences' })).body.result, { pinnedProjects: reordered });

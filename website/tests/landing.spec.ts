@@ -83,8 +83,16 @@ test('log playback pauses, filters each process during updates, and preserves sc
   await page.clock.runFor(2200 * 65);
   await expect(page.locator('.demo-log-line')).toHaveCount(60);
   await page.locator('.demo-log-output').evaluate(element => { element.scrollTop = 0; });
+  const lastTime = await page.locator('.demo-log-line time').last().textContent();
   await page.clock.runFor(2200);
+  await expect(page.locator('.demo-log-line time').last()).not.toHaveText(lastTime!);
   expect(await page.locator('.demo-log-output').evaluate(element => element.scrollTop)).toBe(0);
+  await page.locator('.demo-log-output').evaluate(element => { element.scrollTop = element.scrollHeight; });
+  const resumedTime = await page.locator('.demo-log-line time').last().textContent();
+  await page.clock.runFor(2200);
+  await expect(page.locator('.demo-log-line time').last()).not.toHaveText(resumedTime!);
+  await expect.poll(() => page.locator('.demo-log-output').evaluate(element =>
+    element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThanOrEqual(1);
 });
 
 test('navigation, source filters and search have clear keyboard focus and useful results', async ({ page }) => {

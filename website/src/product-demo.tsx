@@ -123,6 +123,8 @@ function PreviewDetail({ preview }: { preview: Preview }) {
     const timer = setInterval(() => {
       const bounds = panel.current?.getBoundingClientRect();
       if (document.hidden || !bounds || bounds.bottom <= 0 || bounds.top >= innerHeight) return;
+      const output = logBody.current;
+      if (output) followOutput.current = output.scrollHeight - output.scrollTop - output.clientHeight < 32;
       const requests = requestOutput(preview.project);
       // The first six lines are startup output; the remaining lines follow this request cycle.
       const incoming = requests[(sequence.current - 6) % requests.length];
@@ -167,10 +169,7 @@ function PreviewDetail({ preview }: { preview: Preview }) {
             <DemoSelect label="Log source" value={source} onChange={value => { followOutput.current = true; setSource(value); }} options={[{ id: "all", label: "All output" }, { id: "frontend", label: "frontend" }, { id: "api", label: "api" }, { id: "migrate", label: "migrate" }]} />
           </div>
           <div className="demo-log-heading"><span>stdout / stderr</span><button type="button" aria-label={paused ? "Resume demo log playback" : "Pause demo log playback"} onClick={() => setPaused(value => !value)}>{paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{paused ? "Resume playback" : "Pause playback"}</button></div>
-          <div ref={logBody} className="demo-log-output" tabIndex={0} aria-label="Example log output" onScroll={event => {
-            const element = event.currentTarget;
-            followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32;
-          }}>
+          <div ref={logBody} className="demo-log-output" tabIndex={0} aria-label="Example log output">
             {filtered.length ? filtered.map(line => <div key={line.id} className="demo-log-line"><time>{logTime(line.id)}</time><code>{line.source}</code><pre>{line.text}</pre></div>) : <p className="demo-empty">No matching output.</p>}
           </div>
         </div>}

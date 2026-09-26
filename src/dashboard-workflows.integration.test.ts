@@ -14,7 +14,12 @@ import type { ConfigurationView, PreviewReview } from './dashboard-workflows.js'
 
 test('dashboard edits recipes and direct bindings without leaking literals, racing saves or replacing newer work', async t => {
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-config-ui-')));
-  t.after(() => rm(project, { recursive: true, force: true }));
+  let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
+  let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
+  t.after(async () => {
+    try { await dashboard?.close(); }
+    finally { try { await daemon?.close(); } finally { await rm(project, { recursive: true, force: true }); } }
+  });
   const backend = join(project, 'backend'); await mkdir(backend);
   await writeFile(join(backend, 'app.mjs'), `import http from 'node:http'; http.createServer((q,r)=>r.end(process.env.LABEL+':'+process.env.HIDDEN)).listen(+process.env.PORT,process.env.HOST);`);
   const file = join(project, 'preview.yml');
@@ -23,14 +28,15 @@ test('dashboard edits recipes and direct bindings without leaking literals, raci
   const runtime = await createPreviewRuntime({ allowedRoots: [project], authorize: () => true });
   const owner = { projectDirectory: project, pid: process.pid, allowedRoots: [project], allowExec: true, inputKeys: [], secretIds: [] };
   const tokenFile = join(project, '.owner', 'token');
-  const daemon = await startDaemon({ runtime, owner, tokenFile, port: 0 });
-  t.after(() => daemon.close());
+  daemon = await startDaemon({ runtime, owner, tokenFile, port: 0 });
+  const endpoint = daemon.endpoint;
   const id = createHash('sha256').update(project).digest('hex');
   let launch = '';
-  const dashboard = await startDashboard({ discover: async () => [{ id, connection: { projectDirectory: project, pid: process.pid, endpoint: daemon.endpoint }, tokenFile }], openBrowser: async url => { launch = url; } });
-  t.after(() => dashboard.close()); await dashboard.open();
+  dashboard = await startDashboard({ discover: async () => [{ id, connection: { projectDirectory: project, pid: process.pid, endpoint }, tokenFile }], openBrowser: async url => { launch = url; } });
+  const dashboardEndpoint = dashboard.endpoint;
+  await dashboard.open();
   async function api<T>(input: object) {
-    const response = await fetch(dashboard.endpoint + '/api', { method: 'POST', headers: { 'content-type': 'application/json', origin: dashboard.endpoint, authorization: `Bearer ${new URL(launch).hash.slice(1)}` }, body: JSON.stringify(input) });
+    const response = await fetch(dashboardEndpoint + '/api', { method: 'POST', headers: { 'content-type': 'application/json', origin: dashboardEndpoint, authorization: `Bearer ${new URL(launch).hash.slice(1)}` }, body: JSON.stringify(input) });
     const value = await response.json() as { result: T; error?: { code: string } };
     assert.ok(!JSON.stringify(value).includes('PRIVATE_fixture_literal'));
     return value;

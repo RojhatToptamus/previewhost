@@ -19,22 +19,27 @@ import type { PreviewStatus, RuntimeOptions, SecretSetupStatus } from './contrac
 import type { ConfigurationView, PreviewReview, PreviewReviewSummary } from './dashboard-workflows.js';
 
 async function fixture(t: TestContext, authorize: RuntimeOptions['authorize'] = () => true) {
+  let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
+  let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
+  // after hooks run in registration order: stop owners before removing their cwd and vault.
+  t.after(async () => { try { await dashboard?.close(); } finally { await daemon?.close(); } });
   const isolated = await testKeystore(t);
   const project = await realpath(isolated.directory);
   const runtime = await createPreviewRuntime({ allowedRoots: [project], authorize });
   const tokenFile = join(project, 'control', 'token');
   const owner = { projectDirectory: project, pid: process.pid, allowedRoots: [project], allowExec: true, inputKeys: [], secretIds: [] };
-  const daemon = await startDaemon({ runtime, owner, tokenFile, port: 0 });
+  daemon = await startDaemon({ runtime, owner, tokenFile, port: 0 });
   const id = createHash('sha256').update(project).digest('hex');
   const privateUrls: string[] = [];
   t.mock.method(SecretSetup.prototype, 'openBrowser', async (url: string) => { privateUrls.push(url); });
   let launch = '';
-  const dashboard = await startDashboard({ discover: async () => [{ id, connection: { projectDirectory: project, pid: process.pid, endpoint: daemon.endpoint }, tokenFile }], openBrowser: async url => { launch = url; } });
+  const endpoint = daemon.endpoint;
+  dashboard = await startDashboard({ discover: async () => [{ id, connection: { projectDirectory: project, pid: process.pid, endpoint }, tokenFile }], openBrowser: async url => { launch = url; } });
   await dashboard.open();
-  t.after(async () => { await dashboard.close(); await daemon.close(); });
+  const dashboardEndpoint = dashboard.endpoint;
   async function api<T = unknown>(input: object, signal?: AbortSignal) {
-    const response = await fetch(`${dashboard.endpoint}/api`, { method: 'POST', signal,
-      headers: { 'content-type': 'application/json', origin: dashboard.endpoint, authorization: `Bearer ${new URL(launch).hash.slice(1)}` }, body: JSON.stringify(input) });
+    const response = await fetch(`${dashboardEndpoint}/api`, { method: 'POST', signal,
+      headers: { 'content-type': 'application/json', origin: dashboardEndpoint, authorization: `Bearer ${new URL(launch).hash.slice(1)}` }, body: JSON.stringify(input) });
     const text = await response.text();
     assert.ok(!text.includes('FAKE_private_value'));
     for (const url of privateUrls) assert.ok(!text.includes(new URL(url).hash.slice(1)));
@@ -42,8 +47,8 @@ async function fixture(t: TestContext, authorize: RuntimeOptions['authorize'] = 
   }
   async function privateCall(operation: string, body: object = {}) {
     const url = new URL(privateUrls.at(-1)!);
-    const response = await fetch(`${daemon.endpoint}/secrets/${operation}`, { method: 'POST',
-      headers: { 'content-type': 'application/json', origin: daemon.endpoint, authorization: `Bearer ${url.hash.slice(1)}` }, body: JSON.stringify(body) });
+    const response = await fetch(`${endpoint}/secrets/${operation}`, { method: 'POST',
+      headers: { 'content-type': 'application/json', origin: endpoint, authorization: `Bearer ${url.hash.slice(1)}` }, body: JSON.stringify(body) });
     return await response.json() as { result: SecretSetupStatus; error?: { code: string } };
   }
   return { ...isolated, project, runtime, daemon, tokenFile, id, privateUrls, api, privateCall };
@@ -138,6 +143,8 @@ test('dashboard restores exact direct reviews after canceled or delayed private 
 });
 
 test('CLI and MCP selected files reach dashboard configuration while direct replacements clear the origin', { timeout: 20_000 }, async t => {
+  const mcp = new Client({ name: 'previewhost-origin-contract', version: '1.0.0' });
+  t.after(() => mcp.close());
   const f = await fixture(t);
   await writeFile(join(f.project, 'index.html'), 'adapter preview');
   const cli = fileURLToPath(new URL('./cli.js', import.meta.url));
@@ -148,11 +155,9 @@ test('CLI and MCP selected files reach dashboard configuration while direct repl
     child.child.stdin!.end(input);
     return JSON.parse((await child).stdout);
   };
-  const mcp = new Client({ name: 'previewhost-origin-contract', version: '1.0.0' });
   const transport = new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', ...common], cwd: f.project, stderr: 'pipe' });
   transport.stderr?.on('data', () => {});
   await mcp.connect(transport);
-  t.after(() => mcp.close());
   for (const adapter of ['CLI', 'MCP']) {
     const name = adapter.toLowerCase();
     const rootFile = join(f.project, 'preview.yaml'), selected = join(f.project, 'selected.yml');
