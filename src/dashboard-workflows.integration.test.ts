@@ -150,11 +150,22 @@ test('dashboard creates an execution-authorized owner for a reviewed Compose app
     import assert from 'node:assert/strict';
     import {rm} from 'node:fs/promises';
     const {DashboardWorkflows} = await import(${JSON.stringify(new URL('./dashboard-workflows.js', import.meta.url).href)});
-    const {connectProject, projectOwnerDirectory} = await import(${JSON.stringify(new URL('./project.js', import.meta.url).href)});
+    const {connectProject, projectOwnerDirectory, lockProject, writeProjectRecord} = await import(${JSON.stringify(new URL('./project.js', import.meta.url).href)});
+    const {join} = await import('node:path');
+    const {createDataOwner} = await import(${JSON.stringify(new URL('./data.js', import.meta.url).href)});
     const project = ${JSON.stringify(project)};
     const workflows = new DashboardWorkflows(async () => [], async () => { throw Error('No existing owner'); });
-    const client = connectProject({projectDirectory:project});
+    const client = connectProject({projectDirectory:project,dockerSocket:process.env.PREVIEWHOST_TEST_DOCKER_SOCKET});
     try {
+      // Retain the explicit test engine without pre-launching an execution-authorized owner.
+      const directory = projectOwnerDirectory(project);
+      const lock = await lockProject(directory);
+      try {
+        const dataDirectory = join(directory,'data');
+        await (await createDataOwner({directory:dataDirectory})).close();
+        await writeProjectRecord(directory,{projectDirectory:project,dataDirectory,dockerSocket:process.env.PREVIEWHOST_TEST_DOCKER_SOCKET});
+      } finally {await lock.close();}
+      await assert.rejects(client.info(),{code:'DAEMON_UNAVAILABLE'});
       const spec = {name:'dashboard',type:'compose',cwd:project,files:['compose.json'],rootServices:['web'],
         services:[{id:'web',ports:{http:{target:8080}},ready:{type:'http',port:'http',path:'/',timeoutMs:5000}}],primary:{service:'web',port:'http'}};
       const signal = new AbortController().signal;

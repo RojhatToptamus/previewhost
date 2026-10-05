@@ -9,9 +9,10 @@ import type { PreviewSpec, PreviewStatus, RuntimeOptions } from './contracts.js'
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 async function settle(runtime: PreviewRuntime, status: PreviewStatus) {
-  let result = await runtime.wait(status.name, status.candidate!.id);
-  while (result.state === 'starting') result = await runtime.wait(status.name, result.id);
-  return result;
+  try { return await runtime.wait(status.name, status.candidate!.id); }
+  catch (error) {
+    throw new Error(JSON.stringify({ status: await runtime.get(status.name), logs: await runtime.logs(status.name, status.candidate!.id) }), { cause: error });
+  }
 }
 
 test('Compose replacements, failures, cancellation and restart keep exact volume ownership and isolate another environment', {
