@@ -143,7 +143,7 @@ test('dashboard creates an execution-authorized owner for a reviewed Compose app
   const hook = join(keystore.directory, 'preload.mjs');
   await writeFile(hook, keystore.installSource);
   await writeFile(join(project, 'compose.json'), JSON.stringify({ services: { web: {
-    image: 'alpine:3.21', command: ['sh', '-c', "while true; do printf 'HTTP/1.1 200 OK\\r\\nConnection: close\\r\\nContent-Length: 9\\r\\n\\r\\ndashboard' | nc -l -p 8080; done"], expose: [8080],
+    image: 'busybox:1.37', command: ['sh', '-c', 'mkdir /www; printf dashboard > /www/index.html; exec httpd -f -p 8080 -h /www'], expose: [8080],
   } } }));
   t.after(() => rm(project, { recursive: true, force: true }));
   const script = `

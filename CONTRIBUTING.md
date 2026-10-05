@@ -34,7 +34,7 @@ If images are absent, pull them before the checks:
 ```sh
 docker pull postgres:17-alpine
 docker pull redis:7-alpine
-docker pull alpine:3.21
+docker pull busybox:1.37
 ```
 
 Select your local Docker Unix socket (`/var/run/docker.sock` on standard Linux installations). The command below uses the Docker Desktop default:

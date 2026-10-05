@@ -49,7 +49,7 @@ jobs:
           docker compose version
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
-          docker pull alpine:3.21
+          docker pull busybox:1.37
           echo 'PREVIEWHOST_TEST_DOCKER_SOCKET=/var/run/docker.sock' >> "$GITHUB_ENV"
       - name: Shared suite
         if: runner.os == 'Linux'
@@ -112,7 +112,7 @@ jobs:
           docker compose version
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
-          docker pull alpine:3.21
+          docker pull busybox:1.37
       - run: npm run verify:release
       - name: Pack pull request
         if: github.event_name == 'pull_request'

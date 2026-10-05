@@ -21,7 +21,7 @@ try {
     wsl.exe -d PreviewhostBackend --exec sh -c 'mkdir -p /sys/fs/cgroup; mountpoint -q /sys/fs/cgroup || mount -t cgroup2 none /sys/fs/cgroup'
     $daemon = Start-Process wsl.exe -ArgumentList '-d PreviewhostBackend --exec /usr/bin/dockerd' -PassThru -RedirectStandardOutput "$directory\docker.log" -RedirectStandardError "$directory\docker-error.log"
     # Bounded initial readiness, without restarting the daemon or repeating tests.
-    wsl.exe -d PreviewhostBackend --exec sh -c 'set -e; remaining=30; while [ ! -S /var/run/docker.sock ]; do remaining=$((remaining-1)); [ "$remaining" -gt 0 ] || exit 1; sleep 1; done; docker version; docker pull postgres:17-alpine; docker pull redis:7-alpine; docker pull alpine:3.21'
+    wsl.exe -d PreviewhostBackend --exec sh -c 'set -e; remaining=30; while [ ! -S /var/run/docker.sock ]; do remaining=$((remaining-1)); [ "$remaining" -gt 0 ] || exit 1; sleep 1; done; docker version; docker pull postgres:17-alpine; docker pull redis:7-alpine; docker pull busybox:1.37'
 
     New-Item -ItemType Directory "$directory\bridge" | Out-Null
     Copy-Item $source "$directory\bridge\main.go"

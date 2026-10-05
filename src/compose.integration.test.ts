@@ -16,7 +16,7 @@ async function settle(runtime: PreviewRuntime, status: PreviewStatus) {
 }
 
 test('Compose replacements, failures, cancellation and restart keep exact volume ownership and isolate another environment', {
-  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and local alpine:3.21', timeout: 180000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and local busybox:1.37', timeout: 180000,
 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-'));
   const source = join(directory, 'source');
@@ -33,7 +33,7 @@ test('Compose replacements, failures, cancellation and restart keep exact volume
     await rm(directory, { recursive: true, force: true });
   });
   const write = async (value: string, fail = false, wait = false) => writeFile(join(source, 'compose.json'), JSON.stringify({
-    services: { web: { image: 'alpine:3.21', command: ['sh', '-c', 'if [ "$$FAIL" = yes ]; then exit 9; fi; if [ "$$WAIT" = yes ]; then sleep 120; fi; if [ ! -f /data/index.html ]; then echo "$$VALUE" > /data/index.html; fi; echo "app-log:$$TOKEN"; while true; do { printf \'HTTP/1.1 200 OK\\r\\nConnection: close\\r\\nContent-Length: %s\\r\\n\\r\\n\' \"$$(wc -c < /data/index.html)\"; cat /data/index.html; } | nc -l -p 8080; done'],
+    services: { web: { image: 'busybox:1.37', command: ['sh', '-c', 'if [ "$$FAIL" = yes ]; then exit 9; fi; if [ "$$WAIT" = yes ]; then sleep 120; fi; if [ ! -f /data/index.html ]; then echo "$$VALUE" > /data/index.html; fi; echo "app-log:$$TOKEN"; exec httpd -f -p 8080 -h /data'],
       expose: [8080], environment: { VALUE: value, FAIL: fail ? 'yes' : 'no', WAIT: wait ? 'yes' : 'no', TOKEN: 'SYNTHETIC_COMPOSE_PRIVATE_VALUE_2026' }, volumes: ['notes:/data'] } },
     volumes: { notes: {} },
   }));
