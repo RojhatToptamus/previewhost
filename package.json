@@ -17,6 +17,8 @@
   ],
   "homepage": "https://www.previewhost.app/",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "license": "MIT",
   "engines": {
     "node": ">=22.23.0"
@@ -24,7 +26,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
     }
   },
   "bin": {

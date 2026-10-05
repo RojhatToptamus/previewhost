@@ -1,6 +1,7 @@
 import { limits, secretIdSchema, type EffectiveSpec, type SecretRequirement } from './contracts.js';
 import { PreviewError, throwIfAborted } from './errors.js';
 import { Keystore } from './keystore.js';
+import { probeEnvironments } from './spec.js';
 
 export function validateSecretId(id: unknown): asserts id is string {
   if (!secretIdSchema.safeParse(id).success) throw new PreviewError('INVALID_INPUT', 'Use a secret name of 1–128 letters, numbers, dots, dashes, underscores or slashes.');
@@ -16,8 +17,9 @@ export function secretRequirements(spec: EffectiveSpec, selected: ReadonlySet<st
   }
   if (spec.type === 'command') for (const [key, value] of Object.entries(spec.env)) add(value, key);
   if (spec.type === 'environment') for (const [id, service] of Object.entries(spec.services)) {
-    if (service.type === 'command' || service.type === 'job') for (const [key, value] of Object.entries(service.env)) add(value, key, id);
-    else if (service.type === 'external-postgres' || service.type === 'external-redis') add(service.url, 'url', id);
+    if (service.type === 'command' || service.type === 'worker' || service.type === 'job') for (const [key, value] of Object.entries(service.env)) add(value, key, id);
+    for (const probe of probeEnvironments(service)) for (const [key, value] of Object.entries(probe.env ?? {})) add(value, `probe.${key}`, id);
+    if (service.type === 'external-postgres' || service.type === 'external-redis') add(service.url, 'url', id);
   }
   if (required.size > limits.secrets) throw new PreviewError('INVALID_INPUT', `An attempt can use at most ${limits.secrets} distinct secrets.`);
   return [...required.values()].sort((a, b) => a.id.localeCompare(b.id));

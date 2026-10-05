@@ -206,7 +206,7 @@ export async function startDashboard(options: {
         case 'deleteData': return client.deleteData(p.name, { expected: p.expected });
         case 'stop': return client.stop(p.name, { expected: p.expected });
         case 'resetData': {
-          const attemptId = p.expected.active ?? p.expected.latest;
+          const attemptId = p.expected.latest;
           if (!attemptId) throw new PreviewError('INVALID_INPUT', 'Reset needs a retained configuration. Start through your agent first.');
           if (p.expected.candidate) throw new PreviewError('BUSY', 'Finish or cancel startup before resetting data.');
           // Stop and delete keep their own authorization and concurrency guards.

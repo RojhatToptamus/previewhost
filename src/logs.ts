@@ -1,17 +1,23 @@
 import { limits, type LogOptions } from './contracts.js';
 import { PreviewError } from './errors.js';
 
-interface Entry { start: number; source: string; bytes: Buffer }
+interface Entry { start: number; source: string; bytes: Buffer; prefix: string }
 
 /** One owner per attempt. Offsets count captured UTF-8 bytes, before display labels. */
 export class AttemptLog {
   private entries: Entry[] = [];
   private end = 0;
+  private lastSource?: string;
+  private lineEnded = true;
 
   append(text: string, source: string): void {
     if (!text) return;
     const bytes = Buffer.from(text);
-    this.entries.push({ start: this.end, source, bytes });
+    const changed = this.lastSource !== source;
+    const prefix = this.lineEnded || changed ? `${changed && !this.lineEnded ? '\n' : ''}[${source}] ` : '';
+    this.entries.push({ start: this.end, source, bytes, prefix });
+    this.lastSource = source;
+    this.lineEnded = bytes.at(-1) === 10;
     this.end += bytes.length;
     // Bound both output and metadata, including many tiny interleaved writes.
     const floor = Math.max(0, this.end - limits.logBytes);
@@ -21,6 +27,7 @@ export class AttemptLog {
       let cut = floor - first.start;
       while (cut < first.bytes.length && continuation(first.bytes[cut])) cut++;
       first.bytes = Buffer.from(first.bytes.subarray(cut)); first.start += cut;
+      first.prefix = `[${first.source}] `;
       if (!first.bytes.length) this.entries.shift();
     }
   }
@@ -50,7 +57,11 @@ export class AttemptLog {
       let end = Math.min(entry.bytes.length, start + remaining);
       while (end > start && end < entry.bytes.length && continuation(entry.bytes[end])) end--;
       if (end === start && start < entry.bytes.length) return { text: output.join(''), cursor, truncated };
-      if (end > start) output.push((source === undefined ? `[${entry.source}] ` : '') + entry.bytes.subarray(start, end).toString('utf8'));
+      if (end > start) {
+        const text = entry.bytes.subarray(start, end).toString('utf8');
+        const prefix = start === 0 ? entry.prefix : entry.bytes[start - 1] === 10 || after === undefined && !output.length ? `[${entry.source}] ` : '';
+        output.push(source === undefined ? prefix + text.replace(/\n(?=.)/g, `\n[${entry.source}] `) : text);
+      }
       remaining -= end - start; cursor = entry.start + end;
       if (end < entry.bytes.length) return { text: output.join(''), cursor, truncated };
     }

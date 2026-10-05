@@ -82,6 +82,31 @@ Call `runtime.keystore.unlock({ password })` before startup.
 Use [keystore setup](secrets.md) to create storage before this workflow. Unlocking the CLI or dashboard does not unlock this runtime.
 `runtime.close()` also closes its keystore session.
 
+## Embed in a desktop host
+
+The host creates one runtime per profile. `stateDirectory`, `dataDirectory`, and `keystoreDirectory` must use private directories outside application sources.
+`stateDirectory` retains definitions and native ownership records. Startup reconciles those records without executing application commands again.
+Recovery signals a process group only after its recorded process identity matches. Unresolved ownership remains visible as cleanup debt.
+The host must keep source folders until cleanup succeeds.
+
+Packaged Electron hosts supply `supervisor: { executable, module, env }`.
+The executable uses Electron's Node mode, and the module points to the packaged `supervisor.js` outside ASAR.
+The host supplies `ELECTRON_RUN_AS_NODE: "1"` in that supervisor environment.
+Application environment variables still pass through Previewhost's restricted environment construction.
+
+`resolvePreviewFile(project)` selects `preview.yaml` or `preview.yml` and rejects ambiguous defaults.
+`configureBindings` edits the retained definition without exposing concealed values.
+`describe` and log reads expose redacted results. The host never needs a plaintext secret-read endpoint.
+
+For exact-source Design verification, `prepareCandidate` holds a candidate before public promotion.
+`candidateUrl` returns its verification endpoint. `promote` accepts the exact attempt and an optional settlement callback.
+A rejected callback restores the old route, or clears it if no application was serving.
+A successful callback commits promotion before retiring the old process.
+The host owns source capture, verification, and its transaction. Previewhost owns serving and process cleanup.
+
+The runtime retains up to eight attempts in memory. Logs expire after eviction or owner restart.
+A normal shutdown joins resource cleanup. A client window closing does not independently stop an environment.
+
 ## Connect to an existing daemon
 
 Use `connectPreviewDaemon` to control a daemon that already runs. It implements the same `PreviewApi` interface as the runtime.

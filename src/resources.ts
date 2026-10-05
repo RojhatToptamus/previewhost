@@ -7,6 +7,8 @@ export interface Resource {
   target: HttpTarget;
   routes?: Readonly<Record<string, HttpTarget>>;
   stop(): Promise<void>;
+  stopExclusive?(): Promise<void>;
+  restoreExclusive?(): Promise<void>;
   assertRunning?(): void;
   /** Resolves only for unexpected resource loss, not a requested stop. */
   exited?: Promise<Error>;

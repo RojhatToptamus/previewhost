@@ -1,10 +1,11 @@
+import { needsExecution } from './contracts.js';
 import { unlink, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { startDaemon } from './daemon.js';
 import { failure, PreviewError } from './errors.js';
 import { lockProject, readProjectRecord, writeProjectRecord, ownerInfoSchema, projectOwnerDirectory, type ProjectLaunch } from './project.js';
-import { createPreviewRuntime, needsExecution } from './runtime.js';
+import { createPreviewRuntime } from './runtime.js';
 
 // One detached owner owns this permanent kernel lock until all runtime cleanup finishes.
 async function run(launch: ProjectLaunch): Promise<void> {

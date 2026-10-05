@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PreviewStatus, SecretSetupStatus } from "../../src/contracts";
+import { needsExecution, type PreviewStatus, type SecretSetupStatus } from "../../src/contracts";
 import type { PreviewReview } from "../../src/dashboard-workflows";
 import { call, errorMessage } from "./lib/api";
 import { Button } from "./components/ui/button";
@@ -97,10 +97,6 @@ export function PreviewReviewStep({
   const [setup, setSetup] = useState<SecretSetupStatus | undefined>(review.setup);
   const replacement = Boolean(review.existing?.active);
   const spec = review.description.spec;
-  const services = spec.type === "environment" ? Object.values(spec.services) : [spec];
-  const needsExecution = services.some((service) =>
-    ["command", "job", "postgres", "redis", "external-postgres", "external-redis"].includes(service.type),
-  );
   const jobs =
     spec.type === "environment"
       ? Object.entries(spec.services).filter(
@@ -325,7 +321,7 @@ export function PreviewReviewStep({
             onCheckedChange={(value) => setApproved(value === true)}
           />
           <FieldLabel htmlFor="preview-approval">
-            {needsExecution
+            {needsExecution(spec)
               ? "Allow commands and database access for this project, including future previews, and access to the listed source folders. Secret access is approved separately."
               : "Allow this preview to use the listed source folders."}
           </FieldLabel>

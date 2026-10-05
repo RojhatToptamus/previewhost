@@ -108,7 +108,7 @@ test('explicit failed-start retry recovers an unlocked keystore and repeats ordi
     assert.equal(ready.state, 'ready');
     assert.equal(authorizations, 2);
     assert.equal((await body(ready.url!)).value, 'FAKE_retry');
-    await assert.rejects(runtime.startAgain('retry', failed.id), { code: 'ATTEMPT_EXPIRED' });
+    await assert.rejects(runtime.startAgain('retry', failed.id), { code: 'STALE_ATTEMPT' });
   } finally { await runtime.close(); }
 });
 
@@ -149,7 +149,7 @@ test('unselected and canceled secret resolution create no listener or command', 
     assert.equal(ready.state, 'ready');
     assert.equal(authorizations, 4);
     assert.equal((await body(ready.url!)).value, 'FAKE_value');
-    await assert.rejects(runtime.startAgain('canceled', pending.candidate!.id), { code: 'ATTEMPT_EXPIRED' });
+    await assert.rejects(runtime.startAgain('canceled', pending.candidate!.id), { code: 'STALE_ATTEMPT' });
   } finally { await runtime.close(); }
 });
 

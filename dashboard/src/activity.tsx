@@ -37,6 +37,7 @@ const setupLabels = {
 const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1);
 const types: Record<string, string> = {
   command: "HTTP",
+  worker: "Worker",
   static: "Static",
   attach: "Attached HTTP",
   postgres: "PostgreSQL",
@@ -45,7 +46,7 @@ const types: Record<string, string> = {
   "external-redis": "Redis",
 };
 const serviceIcons = {
-  command: TerminalIcon, static: FileCode2Icon, attach: LinkIcon,
+  command: TerminalIcon, worker: TerminalIcon, static: FileCode2Icon, attach: LinkIcon,
   postgres: DatabaseIcon, "external-postgres": DatabaseIcon,
   redis: LayersIcon, "external-redis": LayersIcon, job: TerminalIcon,
 };
@@ -304,7 +305,7 @@ function Services({ entry, openLogs }: Pick<Props, "entry" | "openLogs">) {
                   </TableCell>
                   <TableCell>
                     <div className="row-actions">
-                      {(service.type === "command" || service.state === "failed") && (
+                      {(service.type === "command" || service.type === "worker" || service.state === "failed") && (
                         <Button
                           variant="ghost"
                           size="sm"

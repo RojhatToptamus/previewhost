@@ -169,9 +169,9 @@ test('SDK cancellation aborts only a wait and EOF releases pending requests with
 test('MCP observation preserves the original startup deadline and returns its failure', { timeout: 10_000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost mcp deadline '));
   let starts = 0;
-  const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: ({ signal }) => {
+  const runtime = await createPreviewRuntime({ allowedRoots: [directory], authorize: () => {
     starts++;
-    return new Promise<boolean>(resolve => signal.addEventListener('abort', () => resolve(false), { once: true }));
+    return true;
   } });
   const tokenFile = join(directory, 'private', 'token');
   const daemon = await startDaemon({ runtime, tokenFile, port: 0 });
@@ -180,7 +180,10 @@ test('MCP observation preserves the original startup deadline and returns its fa
   await mcp.connect(new StdioClientTransport({ command: process.execPath,
     args: [cli, 'mcp', '--endpoint', daemon.endpoint, '--token-file', tokenFile], stderr: 'pipe' }));
   const started = await mcp.callTool({ name: 'preview_start', arguments: { spec: {
-    name: 'deadline', type: 'environment', timeoutMs: 1000, primary: 'web', services: { web: { type: 'static', directory } },
+    name: 'deadline', type: 'environment', timeoutMs: 1000, primary: 'web', services: {
+      setup: { type: 'job', cwd: directory, command: [process.execPath, '-e', 'setInterval(() => {}, 1000)'] },
+      web: { type: 'static', directory, dependsOn: ['setup'] },
+    },
   } } });
   assert.equal(started.isError, undefined);
   const attempt = (started.structuredContent as { result: PreviewStatus }).result.candidate!;

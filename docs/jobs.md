@@ -6,7 +6,7 @@ Run migrations and seed scripts before your app starts. Set the order in which s
 
 Use `type: command` for an HTTP server that stays running. Use `static` for files or `attach` for a server managed elsewhere.
 Managed and external databases can also be environment services. See [Databases](databases.md).
-Each environment needs a primary HTTP service. Background workers without HTTP readiness are not a supported service type.
+Each environment needs a primary HTTP service. A `worker` runs a background command without a public HTTP route.
 
 Use a finite `type: job` node for migrations, dependency installation, or seeding.
 Keep the application start command focused on running its server.
@@ -64,6 +64,50 @@ A `{service: db}` binding also adds a dependency and supplies its connection URL
 Jobs have no connection URL and receive no `PORT` or `HOST`.
 Use `dependsOn`, not an environment binding, to wait for a job.
 Public URL bindings add no dependency and can reach the old application during replacement.
+
+## Workers, probes, and restarts
+
+A worker requires an explicit `ready` probe. A probe can use HTTP, TCP, or a finite command.
+Command probes run in the service directory with its resolved environment. They receive the same secret redaction and process cleanup as jobs.
+
+```yaml
+queue:
+  type: worker
+  cwd: ./api
+  command: [node, worker.js]
+  ready:
+    type: command
+    command: [node, check-worker.js]
+    timeoutMs: 5000
+  overlap: exclusive
+  restart: {mode: on-failure, maxRestarts: 2, backoffMs: 500}
+  liveness:
+    intervalMs: 2000
+    failureThreshold: 3
+    probe: {type: command, command: [node, check-worker.js], timeoutMs: 1000}
+```
+
+`overlap: exclusive` stops serving exclusive workers before replacement workers start.
+After a failed or canceled replacement, Previewhost restores those workers only after candidate cleanup succeeds.
+A cleanup failure blocks restoration, so two workers cannot consume the same queue accidentally.
+`overlap: safe` permits both attempts to run concurrently.
+
+HTTP services default to `readyPath` on their `http` port. An explicit `ready` probe replaces that check.
+TCP probes use `{type: tcp, port: NAME, timeoutMs: 5000}`.
+HTTP probes use `{type: http, port: NAME, path: /health, timeoutMs: 5000}`.
+Previewhost verifies that native listeners belong to the owned process group.
+
+The `ports` map declares named ports and their environment keys.
+HTTP commands default to `{http: PORT}`. Workers default to no ports.
+For example, `{http: PORT, metrics: METRICS_PORT}` allocates two distinct private ports.
+Command arguments can use `{port}` for `http` or `{port:metrics}` for a named port.
+A binding `{service: api, port: metrics}` supplies that private HTTP origin and waits for service readiness.
+
+Restarts retain the same private ports and stop the previous process group first.
+`restart.mode` accepts `never`, `on-failure`, or `always`. Restart attempts stop at `maxRestarts` (at most 10).
+Jobs never use this restart policy.
+A liveness failure counts as a process failure. `critical: false` keeps other services active after terminal failure.
+The default is `critical: true`, which stops the environment after terminal failure.
 
 ## When jobs run
 
@@ -137,6 +181,8 @@ To discard disposable data instead, Stop, explicitly call `delete-data`, then st
 A job succeeds only on exit code zero, after its process group is cleaned up.
 Its default deadline is 60 seconds. `timeoutMs` accepts 100–600000 milliseconds.
 The overall environment deadline also applies and defaults to 60 seconds, with the same range.
+It begins after host authorization; time spent reviewing permission does not consume startup time.
+The owner can still cancel or stop an attempt while authorization is pending.
 No later dependent starts after failure. The runtime cleans up any independent nodes that already started.
 
 Previewhost cannot detect an internal failure that a script catches and reports as success.

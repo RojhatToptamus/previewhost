@@ -3,7 +3,7 @@ import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
-import type { CommandSpec } from './contracts.js';
+import type { CommandSpec, RuntimeOptions } from './contracts.js';
 import type { Resource } from './resources.js';
 import { PreviewError, throwIfAborted } from './errors.js';
 import { validateEnvironmentSize } from './spec.js';
@@ -12,20 +12,34 @@ import { createWindowsJob, assertWindowsListener } from './windows.js';
 
 // Process-group and owner-IPC behavior derives from Task Monki (MIT); see NOTICE.
 
-interface ProcessIdentity {
+export interface ProcessIdentity {
   pid: number;
   group: number;
   started: string;
   command: string;
 }
+export interface NativeReceipt { source: string; supervisor: ProcessIdentity; command?: ProcessIdentity }
+export interface NativeOwnership {
+  save(receipt: NativeReceipt): Promise<void>;
+  clear(): Promise<void>;
+}
 
 export interface NativeResource extends Resource {
-  verifyListener(): Promise<void>;
+  verifyListener(port?: number): Promise<void>;
+  completion: Promise<{ code: number | null; signal: string | null }>;
 }
 export type NativeCommandSpec = Omit<CommandSpec, 'env'> & { env: Record<string, string> };
 
 /** The caller receives cleanup ownership before the supervisor can execute. */
-interface NativeInput {
+export interface NativeInput {
+  /** Allocated once by the environment and reused by restarts. Zero means no HTTP port. */
+  port?: number;
+  /** Runtime-assigned ports are public metadata, not private bindings to redact. */
+  portEnvironment?: Record<string, string>;
+  /** Owner-selected tool environment, separate from application bindings and secret values. */
+  hostEnvironment?: Record<string, string>;
+  ownership?: NativeOwnership;
+  supervisor?: RuntimeOptions['supervisor'];
   spec: Pick<NativeCommandSpec, 'cwd' | 'command' | 'env'>;
   url: string;
   signal: AbortSignal;
@@ -79,7 +93,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   }
   if (process.platform !== 'win32') await Promise.all(nativeTools().map((name) => access(name, constants.X_OK)));
   throwIfAborted(input.signal);
-  const port = job ? 0 : await availablePort();
+  const port = job ? 0 : input.port ?? await availablePort();
   throwIfAborted(input.signal);
 
   let supervisor: ChildProcess | undefined;
@@ -102,13 +116,13 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     exited,
     stop,
     assertRunning: ensureStarting,
-    async verifyListener() {
+    async verifyListener(listenPort = port) {
       ensureStarting();
       if (!group) throw new PreviewError('START_FAILED', 'The native supervisor is no longer running.');
       if (process.platform === 'win32') {
         if (!windowsJob) throw new PreviewError('START_FAILED', 'Windows process ownership is unavailable.');
-        assertWindowsListener(port, windowsJob);
-      } else await assertOwnedListener(port, group);
+        assertWindowsListener(listenPort, windowsJob);
+      } else await assertOwnedListener(listenPort, group);
       ensureStarting();
     },
   };
@@ -133,7 +147,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     if (stopWork) return stopWork;
     stopping = true;
     input.signal.removeEventListener('abort', onAbort);
-    stopWork = stopOnce().then(() => { stopped = true; }).catch((error: unknown) => {
+    stopWork = stopOnce().then(async () => { await input.ownership?.clear(); stopped = true; }).catch((error: unknown) => {
       if (error instanceof PreviewError && error.code === 'CLEANUP_INCOMPLETE') throw error;
       throw new PreviewError('CLEANUP_INCOMPLETE', `Native cleanup failed${group ? ` for process group ${group}` : ''}.`);
     }).finally(() => { stopWork = undefined; });
@@ -195,11 +209,12 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
 
   try {
     ensureStarting();
-    supervisor = fork(fileURLToPath(new URL('./supervisor.js', import.meta.url)), [], {
+    supervisor = fork(input.supervisor?.module ?? fileURLToPath(new URL('./supervisor.js', import.meta.url)), [], {
       detached: process.platform !== 'win32',
       silent: true,
       execArgv: [],
-      env: process.platform === 'win32' ? commandEnvironment({}, undefined, '') : {},
+      execPath: input.supervisor?.executable ?? process.execPath,
+      env: { ...(process.platform === 'win32' ? commandEnvironment({}, undefined, '') : {}), ...input.supervisor?.env },
     });
     group = supervisor.pid;
     supervisor.stdout?.resume();
@@ -208,10 +223,9 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
       if (message?.type === 'log' && typeof message.text === 'string') {
         input.appendLog(message.text);
       } else if (message?.type === 'target-exit' && !stopping) {
-        if (job) {
-          finished = true;
-          complete({ code: typeof message.code === 'number' ? message.code : null, signal: typeof message.signal === 'string' ? message.signal : null });
-        } else recordUnexpected(new PreviewError('START_FAILED', `Native command exited (${message.code ?? message.signal ?? 'unknown'}).`));
+        finished = job;
+        complete({ code: typeof message.code === 'number' ? message.code : null, signal: typeof message.signal === 'string' ? message.signal : null });
+        if (!job) recordUnexpected(new PreviewError('START_FAILED', `Native command exited (${message.code ?? message.signal ?? 'unknown'}).`));
       } else if (message?.type === 'failure' && !stopping) {
         recordUnexpected(new PreviewError('START_FAILED', typeof message.message === 'string' ? message.message : 'Native command failed.'));
       }
@@ -241,10 +255,13 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
       send(supervisor, {
         type: 'configure', command: argv,
         cwd: input.spec.cwd,
-        env: commandEnvironment(input.spec.env, job ? undefined : port, input.url),
+        env: { ...commandEnvironment(input.spec.env, job || !port ? undefined : port, input.url), ...input.portEnvironment, ...input.hostEnvironment },
         redactions: [...Object.values(input.spec.env), ...(input.redactions ?? [])],
       }),
     ]);
+    ensureStarting();
+    // Persist authority before commit permits the supervisor to spawn application code.
+    if (supervisorIdentity) await input.ownership?.save({ source: input.spec.cwd, supervisor: supervisorIdentity });
     ensureStarting();
     const [started] = await Promise.all([
       waitMessage(supervisor, 'started', input.signal),
@@ -252,18 +269,42 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     ]);
     ensureStarting();
     if (typeof started.pid !== 'number') throw new PreviewError('START_FAILED', 'Native command identity is missing.');
-    // The supervisor's verified process group owns even jobs that exit before ps can observe them.
-    if (job || windowsJob) return resource;
+    if (windowsJob) return resource;
     commandIdentity = await inspectProcess(started.pid);
+    // Fast jobs may exit before ps observes them. Persist live job children for stop-only recovery.
+    if (job && !commandIdentity) return resource;
     if (!commandIdentity || commandIdentity.group !== group) {
       throw new PreviewError('START_FAILED', 'Native command exited before its process identity could be verified.');
     }
+    ensureStarting();
+    await input.ownership?.save({ source: input.spec.cwd, supervisor: supervisorIdentity!, command: commandIdentity });
     ensureStarting();
     return resource;
   } catch (error) {
     await stop();
     throw error;
   }
+
+}
+
+/** Stop-only recovery: a PID or group number by itself never grants authority to signal. */
+export async function recoverNative(receipt: NativeReceipt): Promise<void> {
+  if (process.platform === 'win32') throw new PreviewError('CLEANUP_INCOMPLETE', 'A POSIX native receipt cannot be recovered on Windows.');
+  const group = receipt.supervisor.group;
+  for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+    if (!groupExists(group)) return;
+    let verified = false;
+    for (const identity of [receipt.supervisor, receipt.command]) {
+      if (!identity) continue;
+      const actual = await inspectProcess(identity.pid);
+      if (actual && sameIdentity(actual, identity) && actual.group === group) { verified = true; break; }
+    }
+    if (!verified) throw cleanupError(group);
+    try { process.kill(-group, signal); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    if (await waitForGroupAbsence(group, signal === 'SIGTERM' ? 750 : 1500)) return;
+  }
+  throw cleanupError(group);
 }
 
 function cleanupError(group: number) {
@@ -283,7 +324,7 @@ export function commandEnvironment(values: Record<string, string>, port: number 
   return { ...env, ...values, ...(port === undefined ? {} : { PORT: String(port), HOST: '127.0.0.1' }), PREVIEW_URL: url };
 }
 
-async function availablePort(): Promise<number> {
+export async function availablePort(): Promise<number> {
   const server = net.createServer();
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

@@ -30,7 +30,7 @@ interface TargetWork {
 }
 
 /** An IPv4 loopback HTTP gateway. Target object identity owns its in-flight work. */
-export async function createGateway(options: { onError?: (error: Error) => void } = {}): Promise<Gateway> {
+export async function createGateway(options: { onError?: (error: Error) => void; resolveTarget?: () => HttpTarget | undefined; publicPort?: number } = {}): Promise<Gateway> {
   let active: ReadonlyMap<string, HttpTarget> | undefined;
   let knownAuthorities = new Set<string>();
   let authority = '';
@@ -181,6 +181,10 @@ export async function createGateway(options: { onError?: (error: Error) => void 
   }
 
   function admission(request: IncomingMessage): { status: number; message: string } | undefined {
+    if (options.resolveTarget && !closing) {
+      const target = options.resolveTarget();
+      setRoutes(target ? { '127.0.0.1': target } : undefined);
+    }
     const requestedAuthority = singleHeader(request, 'host');
     if (!requestedAuthority || !knownAuthorities.has(requestedAuthority)) return { status: 421, message: 'Unknown preview Host.' };
     if (!request.url?.startsWith('/') || request.url.startsWith('//') || /[\x00-\x20\x7f#]/.test(request.url)) {
@@ -208,7 +212,7 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       ...result,
       host: target.hostHeader,
       'x-forwarded-host': publicAuthority,
-      'x-forwarded-port': String(port),
+      'x-forwarded-port': String(options.publicPort ?? port),
       'x-forwarded-proto': 'http',
       'x-forwarded-for': request.socket.remoteAddress ?? '127.0.0.1',
       [hopHeader]: String(Number(singleHeader(request, hopHeader) ?? 0) + 1),
@@ -236,8 +240,9 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       sendError(response, rejected.status, rejected.message);
       return;
     }
-    const publicAuthority = singleHeader(request, 'host')!;
-    const target = active!.get(publicAuthority)!;
+    const requestedAuthority = singleHeader(request, 'host')!;
+    const target = active!.get(requestedAuthority)!;
+    const publicAuthority = options.publicPort ? `${requestedAuthority.split(':')[0]}:${options.publicPort}` : requestedAuthority;
     const upstream = http.request({
       host: '127.0.0.1', port: target.port, method: request.method,
       path: request.url, headers: headers(request, target, publicAuthority), agent: false,
@@ -293,8 +298,9 @@ export async function createGateway(options: { onError?: (error: Error) => void 
       socket.end(serializeHeaders(rejected?.status ?? 400, { connection: 'close', 'content-length': 0 }), () => socket.destroy());
       return;
     }
-    const publicAuthority = singleHeader(request, 'host')!;
-    const target = active!.get(publicAuthority)!;
+    const requestedAuthority = singleHeader(request, 'host')!;
+    const target = active!.get(requestedAuthority)!;
+    const publicAuthority = options.publicPort ? `${requestedAuthority.split(':')[0]}:${options.publicPort}` : requestedAuthority;
     const outgoingHeaders = headers(request, target, publicAuthority);
     outgoingHeaders.connection = 'Upgrade';
     outgoingHeaders.upgrade = 'websocket';

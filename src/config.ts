@@ -5,15 +5,15 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
-import { configurationBindingChangeSchema, limits, previewSpecSchema, type ConfigurationBindingChange, type ConfigurationBindingRow, type EffectiveSpec, type PreviewSpec } from './contracts.js';
+import { configurationBindingChangeSchema, dependencyBindingSchema, type DependencyBinding, limits, previewSpecSchema, type ConfigurationBindingChange, type ConfigurationBindingRow, type EffectiveSpec, type PreviewSpec } from './contracts.js';
 import { PreviewError } from './errors.js';
-import { canonicalDirectory, isWithin, normalizeSources, parseSpec } from './spec.js';
+import { canonicalDirectory, isWithin, normalizeSources, parseSpec, probeEnvironments } from './spec.js';
 
 /** Redacted declarations only: literal values never leave the configuration owner. */
 export function configurationBindings(input: PreviewSpec): ConfigurationBindingRow[] {
   const spec = parseSpec(input);
   const services = spec.type === 'environment' ? Object.entries(spec.services) : [[undefined, spec] as const];
-  return services.flatMap(([service, value]) => value.type === 'command' || value.type === 'job'
+  return services.flatMap(([service, value]) => value.type === 'command' || value.type === 'worker' || value.type === 'job'
     ? Object.entries(value.env).sort(([a], [b]) => a.localeCompare(b)).map(([key, binding]) => ({
       ...(service === undefined ? {} : { service }), key, value: typeof binding === 'string' ? null : { ...binding },
     })) : []);
@@ -27,12 +27,33 @@ export function changeConfigurationBindings(input: PreviewSpec, changes: Configu
   for (const change of parsed.data) {
     const service = spec.type === 'environment' && change.service !== undefined
       ? spec.services[change.service] : change.service === undefined && spec.type === 'command' ? spec : undefined;
-    if (!service || (service.type !== 'command' && service.type !== 'job')) {
+    if (!service || (service.type !== 'command' && service.type !== 'worker' && service.type !== 'job')) {
       throw new PreviewError('INVALID_INPUT', 'Select an existing command or job for each binding change.');
     }
     if (change.value === null) delete service.env[change.key];
     else Object.defineProperty(service.env, change.key, { value: change.value, enumerable: true, configurable: true, writable: true });
   }
+  return parseSpec(spec);
+}
+
+/** Change one external connection while retaining its readiness and dependency policy. */
+export function changeDependencyBinding(input: PreviewSpec, serviceId: string, value: DependencyBinding): EffectiveSpec {
+  const spec = parseSpec(input);
+  const parsed = dependencyBindingSchema.safeParse(value);
+  if (!parsed.success || spec.type !== 'environment') throw new PreviewError('INVALID_INPUT', 'Select a valid environment dependency.');
+  const previous = spec.services[serviceId];
+  const target = parsed.data;
+  if (!previous || !['attach', 'preview', 'external-tcp', 'external-postgres', 'external-redis'].includes(previous.type) ||
+    (previous.type !== target.type && !(['attach', 'preview'].includes(previous.type) && ['attach', 'preview'].includes(target.type)))) {
+    throw new PreviewError('INVALID_INPUT', 'The selected dependency has a different connection type.');
+  }
+  spec.services[serviceId] = {
+    ...target,
+    ...('check' in previous ? { check: previous.check } : {}),
+    ...('timeoutMs' in previous ? { timeoutMs: previous.timeoutMs } : {}),
+    ...('dependsOn' in previous ? { dependsOn: previous.dependsOn } : {}),
+    ...('readyPath' in previous ? { readyPath: previous.readyPath } : {}),
+  } as typeof previous;
   return parseSpec(spec);
 }
 
@@ -226,9 +247,9 @@ export async function readPreviewSpec(input: Readable, options: {
   const spec = parsed.data;
   const source = (service: { type: string; directory?: string; cwd?: string }) => {
     if (service.type === 'static' && service.directory !== undefined) service.directory = resolve(options.baseDirectory, service.directory);
-    if ((service.type === 'command' || service.type === 'job') && service.cwd !== undefined) service.cwd = resolve(options.baseDirectory, service.cwd);
+    if ((service.type === 'command' || service.type === 'worker' || service.type === 'job' || service.type === 'compose') && service.cwd !== undefined) service.cwd = resolve(options.baseDirectory, service.cwd);
   };
-  if (spec.type === 'environment') Object.values(spec.services).forEach(source);
+  if (spec.type === 'environment') Object.values(spec.services).forEach(service => { source(service); for (const probe of probeEnvironments(service)) if (probe.cwd) probe.cwd = resolve(options.baseDirectory, probe.cwd); });
   else source(spec);
   return spec;
 }
@@ -269,11 +290,16 @@ export async function savePreviewSpec(input: PreviewSpec, options: {
     const portable = structuredClone(spec);
     const externalSources = new Set<string>();
     for (const service of portable.type === 'environment' ? Object.values(portable.services) : [portable]) {
-      if (service.type !== 'command' && service.type !== 'job' && service.type !== 'static') continue;
-      const source = (service.type === 'command' || service.type === 'job') ? service.cwd : service.directory;
+      for (const probe of probeEnvironments(service)) {
+        if (!probe.cwd) continue;
+        if (isWithin(project, probe.cwd)) probe.cwd = relative(project, probe.cwd) || '.';
+        else externalSources.add(probe.cwd);
+      }
+      if (service.type !== 'command' && service.type !== 'worker' && service.type !== 'job' && service.type !== 'static' && service.type !== 'compose') continue;
+      const source = (service.type === 'command' || service.type === 'worker' || service.type === 'job' || service.type === 'compose') ? service.cwd : service.directory;
       if (!isWithin(project, source)) { externalSources.add(source); continue; }
       const local = relative(project, source) || '.';
-      if (service.type === 'command' || service.type === 'job') service.cwd = local; else service.directory = local;
+      if (service.type === 'command' || service.type === 'worker' || service.type === 'job' || service.type === 'compose') service.cwd = local; else service.directory = local;
     }
     const { stringify } = await import('yaml');
     const text = stringify(portable, { aliasDuplicateObjects: false });

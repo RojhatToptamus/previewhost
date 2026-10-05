@@ -6,6 +6,8 @@ import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { testKeystore } from './testSupport/keystore.js';
 import { startDashboard } from './dashboard.js';
 import { createPreviewRuntime } from './runtime.js';
 import { startDaemon } from './daemon.js';
@@ -130,4 +132,60 @@ test('project discovery merges directory aliases while retaining branches and mi
   assert.deepEqual(result.projects, [
     { directory: linked, branch: 'feature' }, { directory: missing }, { directory: project, branch: 'main' },
   ]);
+});
+
+
+test('dashboard creates an execution-authorized owner for a reviewed Compose application', {
+  skip: !process.env.PREVIEWHOST_TEST_DOCKER_SOCKET, timeout: 45000,
+}, async t => {
+  const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-dashboard-compose-')));
+  const keystore = await testKeystore(t);
+  const hook = join(keystore.directory, 'preload.mjs');
+  await writeFile(hook, keystore.installSource);
+  await writeFile(join(project, 'compose.json'), JSON.stringify({ services: { web: {
+    image: 'busybox:1.37', command: ['sh', '-c', 'mkdir /www; printf dashboard > /www/index.html; exec httpd -f -p 8080 -h /www'], expose: [8080],
+  } } }));
+  t.after(() => rm(project, { recursive: true, force: true }));
+  const script = `
+    import assert from 'node:assert/strict';
+    import {rm} from 'node:fs/promises';
+    const {DashboardWorkflows} = await import(${JSON.stringify(new URL('./dashboard-workflows.js', import.meta.url).href)});
+    const {connectProject, projectOwnerDirectory, lockProject, writeProjectRecord} = await import(${JSON.stringify(new URL('./project.js', import.meta.url).href)});
+    const {join} = await import('node:path');
+    const {createDataOwner} = await import(${JSON.stringify(new URL('./data.js', import.meta.url).href)});
+    const project = ${JSON.stringify(project)};
+    const workflows = new DashboardWorkflows(async () => [], async () => { throw Error('No existing owner'); });
+    const client = connectProject({projectDirectory:project,dockerSocket:process.env.PREVIEWHOST_TEST_DOCKER_SOCKET});
+    try {
+      // Retain the explicit test engine without pre-launching an execution-authorized owner.
+      const directory = projectOwnerDirectory(project);
+      const lock = await lockProject(directory);
+      try {
+        const dataDirectory = join(directory,'data');
+        await (await createDataOwner({directory:dataDirectory})).close();
+        await writeProjectRecord(directory,{projectDirectory:project,dataDirectory,dockerSocket:process.env.PREVIEWHOST_TEST_DOCKER_SOCKET});
+      } finally {await lock.close();}
+      await assert.rejects(client.info(),{code:'DAEMON_UNAVAILABLE'});
+      const spec = {name:'dashboard',type:'compose',cwd:project,files:['compose.json'],rootServices:['web'],
+        services:[{id:'web',ports:{http:{target:8080}},ready:{type:'http',port:'http',path:'/',timeoutMs:5000}}],primary:{service:'web',port:'http'}};
+      const signal = new AbortController().signal;
+      const prepared = await workflows.dispatch({action:'previewPrepare',project,format:'json',text:JSON.stringify(spec)},signal);
+      const launched = await workflows.dispatch({action:'previewLaunch',id:prepared.result.id,approved:true},signal);
+      assert.equal((await client.info()).allowExec,true);
+      const ready = await client.wait('dashboard',launched.result.status.candidate.id);
+      assert.equal(ready.state,'ready',JSON.stringify({ready,logs:await client.logs('dashboard',ready.id)}));
+      assert.equal((await (await fetch(ready.url)).text()).trim(),'dashboard');
+    } finally {
+      workflows.close();
+      try {
+        for(const item of await client.list()) {await client.stop(item.name);if(item.data?.resources.length)await client.deleteData(item.name);}
+        await client.shutdown();
+      } catch(error) {if(error.code!=='DAEMON_UNAVAILABLE')throw error;}
+      await client.close();
+      await rm(projectOwnerDirectory(project),{recursive:true,force:true});
+    }
+  `;
+  await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], {
+    env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, timeout: 40000,
+  });
 });
