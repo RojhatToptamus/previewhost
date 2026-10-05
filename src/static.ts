@@ -20,6 +20,8 @@ export async function startStatic(directory: string, spa: boolean, privateDirect
   const sockets = new Set<Socket>();
   let stopping: Promise<void> | undefined;
   let lost!: (error: Error) => void;
+  let failure: Error | undefined;
+  const fail = (error: Error) => { if (!stopping) { failure = error; lost(error); } };
   const exited = new Promise<Error>((resolve) => { lost = resolve; });
   const server = http.createServer((request, response) => {
     void serve(directory, spa, privateDirectories, request, response).catch(() => {
@@ -28,7 +30,8 @@ export async function startStatic(directory: string, spa: boolean, privateDirect
     });
   });
   server.on('connection', (socket) => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
-  server.on('error', (error) => { if (!stopping) lost(error); });
+  server.on('error', fail);
+  server.on('close', () => fail(new Error('The static listener closed unexpectedly.')));
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); });
@@ -37,6 +40,7 @@ export async function startStatic(directory: string, spa: boolean, privateDirect
   if (!address || typeof address === 'string') throw new Error('Static listener address is unavailable.');
   return {
     target: { port: address.port, hostHeader: `127.0.0.1:${address.port}` }, exited,
+    assertRunning() { if (failure) throw failure; if (stopping) throw new Error('The static listener is stopping.'); },
     stop() {
       stopping ??= new Promise<void>((resolve, reject) => {
         for (const socket of sockets) socket.destroy();

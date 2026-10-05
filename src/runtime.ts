@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { AttemptLog } from './logs.js';
 import {
-  limits, nameSchema, requestSchemas, type AttemptResult, type AttemptSummary, type EffectiveSpec, type Failure,
+  limits, needsExecution, nameSchema, requestSchemas, type AttemptResult, type AttemptSummary, type EffectiveSpec, type Failure,
   type LogResult, type LogOptions, type DeleteDataOptions, type PreviewDescription, type PreviewApi, type PreviewSpec, type PreviewStatus, type RuntimeOptions, type WaitOptions, type StartOptions, type StopOptions, type SecretSetupContext,
-  type ConfigurationBindingChange, type ConfigurationBindingsInspection, type ConfigureBindingsOptions, type ConfigureBindingsResult, type SecretSetupApi,
+  type ConfigurationBindingChange, type DependencyBinding, type ConfigurationBindingsInspection, type ConfigureBindingsOptions, type ConfigureBindingsResult, type SecretSetupApi,
 } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
-import { attachmentTarget, canonicalDirectory, describeSpec, environmentDependencies, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
+import { attachmentTarget, isWithin, browserHostname, canonicalDirectory, describeSpec, environmentDependencies, normalizeSpec, parseSpec, resolveInput, sameSources, sourceDirectories, validateResolvedInputs } from './spec.js';
 import { createGateway, type Gateway } from './gateway.js';
 import { startStatic } from './static.js';
 import { startNative } from './native.js';
@@ -18,8 +18,11 @@ import { startEnvironment } from './environment.js';
 import { createDataOwner, type DataOwner } from './data.js';
 import { requireSelected, resolveSecrets, secretRequirements, validateSecretId } from './secrets.js';
 import { Keystore } from './keystore.js';
-import { changeConfigurationBindings, configurationBindings, savePreviewSpec } from './config.js';
+import { changeConfigurationBindings, changeDependencyBinding, configurationBindings, savePreviewSpec } from './config.js';
 import { inspectPreviewSpec, runtimeContext } from './inspection.js';
+import { openRuntimeRecords, type RuntimeRecords } from './runtime-records.js';
+import { makePrivateDirectory } from './private-files.js';
+import { ComposeOwner } from './compose.js';
 
 interface Attempt {
   summary: AttemptSummary;
@@ -31,8 +34,14 @@ interface Attempt {
   resource?: Resource;
   log: AttemptLog;
   cleanupTask?: Promise<void>;
+  recover?: () => Promise<void>;
   nodes: number;
   failure?: Failure;
+  held?: boolean;
+  candidateGateway?: Gateway;
+  restored?: boolean;
+  retained?: boolean;
+  compose?: PreviewDescription['compose'];
 }
 interface Slot {
   name: string;
@@ -40,6 +49,7 @@ interface Slot {
   active?: Attempt;
   candidate?: Attempt;
   latest?: Attempt;
+  history?: Attempt[];
   operation?: Promise<void>;
   stopping?: Promise<void>;
   cleanup: Set<Attempt>;
@@ -53,9 +63,15 @@ interface ConfigureBindingsContext {
 
 export interface PreviewRuntime extends PreviewApi {
   readonly keystore: Keystore;
+  /** Owner-only candidate for a verifier. It cannot replace the serving application until promoted. */
+  prepareCandidate(spec: PreviewSpec, options?: StartOptions): Promise<PreviewStatus>;
+  candidateUrl(name: string, attemptId: string): string;
+  /** Keeps the prior resource alive until owner settlement succeeds; rejection restores its route. */
+  promote(name: string, attemptId: string, settle?: () => Promise<void>): Promise<PreviewStatus>;
   sourceRoots(): string[];
+  releaseSources(directories: string[]): void;
   /** Forget stopped history only; resource deletion is a separate authorized operation. */
-  remove(name: string | undefined, attemptId: string | null): boolean;
+  remove(name: string | undefined, attemptId: string | null): Promise<boolean>;
   isEmpty(): boolean;
   allowSources(directories: string[], signal: AbortSignal): Promise<void>;
   describe(name: string, attemptId: string): Promise<PreviewDescription>;
@@ -64,6 +80,9 @@ export interface PreviewRuntime extends PreviewApi {
   saveConfiguration(name: string, attemptId: string, projectDirectory: string, signal?: AbortSignal): Promise<{ file: string; externalSources: string[] }>;
   configureBindings<T extends ConfigureBindingsOptions>(name: string, attemptId: string, changes: ConfigurationBindingChange[], options: T,
     context?: ConfigureBindingsContext): Promise<ConfigureBindingsResult<T>>;
+  configureDependency<T extends ConfigureBindingsOptions>(name: string, attemptId: string, service: string, binding: DependencyBinding, options: T,
+    context?: ConfigureBindingsContext): Promise<ConfigureBindingsResult<T>>;
+  configureSource(name: string, attemptId: string, service: string | undefined, directory: string, expected: NonNullable<StopOptions['expected']>): Promise<PreviewStatus>;
   /** Excludes an owner's private directory from current and future static previews. */
   protectDirectory(directory: string): Promise<void>;
   /** Validates and authorizes a private form without reading values or starting code. */
@@ -79,9 +98,29 @@ export interface PreparedSecretSetup {
 
 export async function createPreviewRuntime(options: RuntimeOptions): Promise<PreviewRuntime> {
   const { roots, inputs, secretIds } = await runtimeContext(options);
-  const keystore = new Keystore();
-  const data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket, keystore }) : undefined;
-  return new Runtime(roots, options.authorize, inputs, secretIds, data, keystore, { dataDirectory: options.dataDirectory, dockerSocket: options.dockerSocket });
+  let keystoreDirectory = options.keystoreDirectory;
+  if (keystoreDirectory) {
+    if (!isAbsolute(keystoreDirectory)) throw new PreviewError('INVALID_INPUT', 'The keystore directory must be absolute.');
+    makePrivateDirectory(keystoreDirectory);
+    keystoreDirectory = await canonicalDirectory(keystoreDirectory);
+  }
+  const keystore = new Keystore(keystoreDirectory);
+  const records = options.stateDirectory ? await openRuntimeRecords(options.stateDirectory) : undefined;
+  let data: DataOwner | undefined;
+  let compose: ComposeOwner | undefined;
+  try {
+    data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket, keystore }) : undefined;
+    compose = options.dataDirectory ? await ComposeOwner.open(`${data!.directory}-compose`, options.dockerSocket) : undefined;
+    const runtime = new Runtime(roots, options.authorize, inputs, secretIds, data, keystore, { dataDirectory: options.dataDirectory, dockerSocket: options.dockerSocket }, options.supervisor, records, compose);
+    await runtime.recover();
+    return runtime;
+  } catch (error) {
+    await compose?.close();
+    await data?.close();
+    await records?.close();
+    keystore.close();
+    throw error;
+  }
 }
 
 class Runtime implements PreviewRuntime {
@@ -93,10 +132,45 @@ class Runtime implements PreviewRuntime {
     private readonly roots: string[], private readonly authorize: RuntimeOptions['authorize'],
     private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data: DataOwner | undefined, readonly keystore: Keystore,
     private readonly storage: Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket'>,
+    private readonly supervisor: RuntimeOptions['supervisor'],
+    private readonly records?: RuntimeRecords,
+    private readonly compose?: ComposeOwner,
   ) {
     this.privateDirectories.add(keystore.directory);
     if (data) this.privateDirectories.add(data.directory);
-    for (const name of data?.names() ?? []) this.slots.set(name, { name, cleanup: new Set() });
+    if (records) this.privateDirectories.add(records.directory);
+    if (compose) this.privateDirectories.add(compose.directory);
+    for (const name of [...(data?.names() ?? []), ...(compose?.names() ?? [])]) this.slots.set(name, { name, cleanup: new Set() });
+  }
+
+  async recover(): Promise<void> {
+    for (const record of this.records?.entries() ?? []) {
+      const attempt: Attempt = {
+        summary: { id: record.attemptId, type: record.spec.type, state: 'stopped', startedAt: record.startedAt,
+          sources: [...new Set([...sourceDirectories(record.spec), ...Object.values(record.processes).map(process => process.source)])] },
+        declaration: record.spec, sourceFile: record.sourceFile, controller: new AbortController(), completed: true,
+        waiters: new Set(), log: new AttemptLog(), nodes: nodeCost(record.spec), restored: true, retained: true,
+      };
+      const slot: Slot = { name: record.spec.name, latest: attempt, cleanup: new Set() };
+      this.slots.set(slot.name, slot);
+      try { await this.records!.recover(slot.name); }
+      catch (error) {
+        attempt.summary.state = 'cleanup-incomplete';
+        attempt.summary.error = failure(error, 'CLEANUP_INCOMPLETE');
+        attempt.recover = () => this.records!.recover(slot.name);
+        slot.cleanup.add(attempt);
+      }
+    }
+    let recovered = ![...this.slots.values()].some(slot => slot.cleanup.size);
+    for (const name of this.compose?.names() ?? []) {
+      try { await this.compose!.stop(name); }
+      catch (error) {
+        recovered = false;
+        const attempt = this.slots.get(name)?.latest;
+        if (attempt) { attempt.summary.state = 'cleanup-incomplete'; attempt.summary.error = failure(error, 'CLEANUP_INCOMPLETE'); }
+      }
+    }
+    if (recovered) await this.compose?.clearStoppedCommands();
   }
 
   async protectDirectory(directory: string): Promise<void> {
@@ -110,6 +184,22 @@ class Runtime implements PreviewRuntime {
   }
 
   sourceRoots(): string[] { return [...this.roots]; }
+
+  releaseSources(directories: string[]): void {
+    this.assertOpen();
+    if (directories.some(directory => !isAbsolute(directory))) throw new PreviewError('INVALID_INPUT', 'Release canonical absolute source paths.');
+    const selected = directories.map(directory => resolve(directory));
+    for (const slot of this.slots.values()) {
+      const live = [...slot.cleanup, ...[slot.active, slot.candidate].filter((attempt): attempt is Attempt => !!attempt)];
+      if (live.some(attempt => attempt.summary.sources.some(source => selected.some(directory => isWithin(directory, source) || isWithin(source, directory))))) {
+        throw new PreviewError('BUSY', `Source is in use by preview ${slot.name}. Stop it before removing this folder.`);
+      }
+    }
+    // Removal and the live-consumer check are synchronous. New candidates must
+    // pass source authorization again before they can execute.
+    const remaining = this.roots.filter(root => !selected.some(directory => isWithin(directory, root)));
+    this.roots.splice(0, this.roots.length, ...remaining);
+  }
 
   async allowSources(directories: string[], signal: AbortSignal): Promise<void> {
     this.assertOpen();
@@ -173,6 +263,10 @@ class Runtime implements PreviewRuntime {
   }
 
   async start(input: PreviewSpec, options: StartOptions = {}): Promise<PreviewStatus> {
+    return this.startWithMode(input, options, false);
+  }
+
+  private startWithMode(input: PreviewSpec, options: StartOptions, held: boolean): PreviewStatus {
     this.assertOpen();
     const spec = parseSpec(input);
     if (!requestSchemas.start.safeParse({ ...options, spec }).success || options.sourceFile !== undefined && !isAbsolute(options.sourceFile)) {
@@ -180,21 +274,25 @@ class Runtime implements PreviewRuntime {
     }
     const previous = this.slots.get(spec.name);
     checkExpectedSlot(previous, options.expected);
-    if (previous?.operation || previous?.stopping) throw new PreviewError('BUSY', 'This preview already has an operation in progress.');
+    if (previous?.candidate || previous?.operation || previous?.stopping) throw new PreviewError('BUSY', 'This preview already has an operation in progress.');
     if (previous?.cleanup.size || previous?.gateway && !previous.active) throw new PreviewError('CLEANUP_INCOMPLETE', 'Retry stop to resolve the remaining cleanup before starting this name.');
     if (previous?.active) throw new PreviewError('ALREADY_EXISTS', 'This name is active. Use replace to start a candidate.');
-    if (this.data?.status(spec.name)?.cleanup) throw new PreviewError('CLEANUP_INCOMPLETE', 'Resolve retained database cleanup with stop before starting this name.');
+    if (this.dataStatus(spec.name)?.cleanup) throw new PreviewError('CLEANUP_INCOMPLETE', 'Resolve retained database cleanup with stop before starting this name.');
     if ([...this.slots.values()].filter(isLive).length >= limits.livePreviews) {
       throw new PreviewError('BUSY', `At most ${limits.livePreviews} previews can be active or awaiting cleanup.`);
     }
     this.checkNodeCapacity(spec);
-    const slot: Slot = { name: spec.name, cleanup: new Set() };
+    const slot: Slot = { name: spec.name, cleanup: new Set(), history: previous?.history };
     this.slots.delete(spec.name);
     this.slots.set(spec.name, slot);
-    return this.begin(slot, spec, 'start', options.sourceFile);
+    return this.begin(slot, spec, 'start', options.sourceFile, undefined, held);
   }
 
   async replace(name: string, input: PreviewSpec, options: StartOptions = {}): Promise<PreviewStatus> {
+    return this.replaceWithMode(name, input, options, false);
+  }
+
+  private replaceWithMode(name: string, input: PreviewSpec, options: StartOptions, held: boolean): PreviewStatus {
     this.assertOpen();
     const spec = parseSpec(input);
     if (!requestSchemas.replace.safeParse({ ...options, name, spec }).success || options.sourceFile !== undefined && !isAbsolute(options.sourceFile)) {
@@ -203,19 +301,71 @@ class Runtime implements PreviewRuntime {
     checkExpectedSlot(this.slots.get(name), options.expected);
     const slot = this.slot(name);
     if (spec.name !== name) throw new PreviewError('INVALID_INPUT', 'The replacement spec must use the same preview name.');
-    if (slot.operation || slot.stopping) throw new PreviewError('BUSY', 'This preview already has an operation in progress.');
+    if (slot.candidate || slot.operation || slot.stopping) throw new PreviewError('BUSY', 'This preview already has an operation in progress.');
     if (slot.cleanup.size) throw new PreviewError('CLEANUP_INCOMPLETE', 'Resolve remaining cleanup with stop before replacing this preview.');
     if (!slot.active) throw new PreviewError('NOT_FOUND', 'This preview has no active target. Use start.');
     if ((slot.active.summary.type === 'environment') !== (spec.type === 'environment')) {
       throw new PreviewError('INVALID_INPUT', 'Stop before changing between an environment and a single preview.');
     }
     this.checkNodeCapacity(spec);
-    return this.begin(slot, spec, 'replace', options.sourceFile);
+    return this.begin(slot, spec, 'replace', options.sourceFile, undefined, held);
+  }
+
+  async prepareCandidate(input: PreviewSpec, options: StartOptions = {}): Promise<PreviewStatus> {
+    return this.slots.get(input.name)?.active ? this.replaceWithMode(input.name, input, options, true) : this.startWithMode(input, options, true);
+  }
+
+  candidateUrl(name: string, attemptId: string): string {
+    const slot = this.slot(name);
+    const candidate = slot.candidate;
+    if (candidate?.summary.id !== attemptId || candidate.summary.state !== 'ready' || candidate.controller.signal.aborted || !candidate.candidateGateway || slot.stopping) {
+      throw new PreviewError('STALE_ATTEMPT', 'The verified candidate is no longer available.');
+    }
+    return candidate.candidateGateway.url;
+  }
+
+  async promote(name: string, attemptId: string, settle?: () => Promise<void>): Promise<PreviewStatus> {
+    this.assertOpen();
+    this.candidateUrl(name, attemptId);
+    const slot = this.slot(name);
+    if (slot.operation) throw new PreviewError('BUSY', 'Wait for candidate preparation to complete.');
+    const attempt = slot.candidate!;
+    const resource = attempt.resource!;
+    resource.assertRunning?.();
+    const old = slot.active;
+    slot.gateway!.setRoutes(resource.routes ?? { '127.0.0.1': resource.target });
+    // Reserve the slot before calling the owner. Stop joins settlement; cancel
+    // cannot interrupt a transaction whose durable outcome is not yet known.
+    slot.operation = Promise.resolve().then(async () => {
+      try {
+        await settle?.();
+      } catch (error) {
+        slot.gateway!.setRoutes(old?.resource?.routes ?? (old?.resource ? { '127.0.0.1': old.resource.target } : undefined));
+        throw error;
+      }
+      slot.active = attempt; slot.candidate = undefined; slot.latest = attempt;
+      attempt.held = false;
+      try {
+        await attempt.candidateGateway!.close();
+        attempt.candidateGateway = undefined;
+        if (old?.resource) {
+          slot.cleanup.add(old);
+          await Promise.all([...new Set(Object.values(old.resource.routes ?? { primary: old.resource.target }))].map(target => slot.gateway!.drain(target)));
+          await this.cleanupAttempt(slot, old);
+        }
+      } catch (error) {
+        attempt.summary.state = 'cleanup-incomplete';
+        attempt.summary.error = failure(error, 'CLEANUP_INCOMPLETE');
+        slot.cleanup.add(attempt);
+      }
+    });
+    try { await slot.operation; } finally { slot.operation = undefined; }
+    return this.status(slot);
   }
 
   isEmpty(): boolean { return this.slots.size === 0; }
 
-  remove(name: string | undefined, attemptId: string | null): boolean {
+  async remove(name: string | undefined, attemptId: string | null): Promise<boolean> {
     this.assertOpen();
     if (!requestSchemas.remove.safeParse({ name, attemptId }).success) throw new PreviewError('INVALID_INPUT', 'Invalid entry removal request.');
     if (name === undefined) {
@@ -225,8 +375,11 @@ class Runtime implements PreviewRuntime {
     const slot = this.slots.get(name);
     if ((slot?.latest?.summary.id ?? null) !== attemptId) throw new PreviewError('STALE_ATTEMPT', 'This preview changed. Review it before removing its entry.');
     if (slot && isLive(slot)) throw new PreviewError('BUSY', 'Stop the preview and resolve cleanup before removing its entry.');
-    if (this.data?.status(name)) throw new PreviewError('BUSY', 'Delete the retained managed data before removing its entry.');
-    return this.slots.delete(name);
+    if (this.dataStatus(name)) throw new PreviewError('BUSY', 'Delete the retained managed data before removing its entry.');
+    if (!slot) return false;
+    slot.operation = this.records?.remove(name) ?? Promise.resolve();
+    try { await slot.operation; return this.slots.delete(name); }
+    finally { slot.operation = undefined; }
   }
 
   async list(): Promise<PreviewStatus[]> { return [...this.slots.values()].map((slot) => this.status(slot)); }
@@ -236,7 +389,7 @@ class Runtime implements PreviewRuntime {
     const attempt = this.attempt(this.slot(name), attemptId);
     const spec = attempt.declaration;
     const secrets = secretRequirements(spec, this.secretIds);
-    return structuredClone({ ...describeSpec(spec), ...(secrets.length ? { secrets } : {}), ...(attempt.sourceFile ? { sourceFile: attempt.sourceFile } : {}) });
+    return structuredClone({ ...describeSpec(spec), ...(secrets.length ? { secrets } : {}), ...(attempt.sourceFile ? { sourceFile: attempt.sourceFile } : {}), ...(attempt.compose ? { compose: attempt.compose } : {}) });
   }
 
   async startAgain(name: string, attemptId: string): Promise<PreviewStatus> {
@@ -254,7 +407,7 @@ class Runtime implements PreviewRuntime {
     const slot = this.slot(name);
     const attempt = this.attempt(slot, attemptId);
     if (slot.latest !== attempt) throw new PreviewError('STALE_ATTEMPT', 'Select the latest attempt before rerunning a job.');
-    if (slot.active || slot.gateway || slot.operation || slot.stopping || slot.cleanup.size || this.data?.status(name)?.cleanup) {
+    if (slot.active || slot.gateway || slot.operation || slot.stopping || slot.cleanup.size || this.dataStatus(name)?.cleanup) {
       throw new PreviewError('BUSY', 'Stop this preview and complete cleanup before rerunning a job. Database writes are not rolled back.');
     }
     const spec = attempt.declaration;
@@ -271,6 +424,32 @@ class Runtime implements PreviewRuntime {
     return savePreviewSpec(spec, { projectDirectory, allowedRoots: this.roots, signal });
   }
 
+  async configureSource(name: string, attemptId: string, service: string | undefined, directory: string, expected: NonNullable<StopOptions['expected']>): Promise<PreviewStatus> {
+    this.assertOpen();
+    if (!isAbsolute(directory)) throw new PreviewError('INVALID_INPUT', 'Select an absolute source folder.');
+    const slot = this.slot(name);
+    const attempt = this.attempt(slot, attemptId);
+    const spec = parseSpec(attempt.declaration);
+    const target = spec.type === 'environment' && service !== undefined ? spec.services[service] : service === undefined ? spec : undefined;
+    if (!target) throw new PreviewError('INVALID_INPUT', 'Select an existing service or job.');
+    if ('cwd' in target) target.cwd = directory;
+    else if (target.type === 'static') target.directory = directory;
+    else throw new PreviewError('INVALID_INPUT', 'This service does not use a source folder.');
+    return this.configureDeclaration(slot, attempt, parseSpec(spec), { operation: 'apply', expected }, {}) as Promise<PreviewStatus>;
+  }
+
+  configureDependency<T extends ConfigureBindingsOptions>(name: string, attemptId: string, service: string, binding: DependencyBinding, options: T,
+    context?: ConfigureBindingsContext): Promise<ConfigureBindingsResult<T>>;
+  async configureDependency(name: string, attemptId: string, service: string, binding: DependencyBinding, options: ConfigureBindingsOptions,
+    context: ConfigureBindingsContext = {}): Promise<ConfigureBindingsResult> {
+    this.assertOpen();
+    if (!requestSchemas.configureBindings.shape.options.safeParse(options).success) throw new PreviewError('INVALID_INPUT', 'Invalid configuration action.');
+    if (context.signal) throwIfAborted(context.signal);
+    const slot = this.slot(name);
+    const attempt = this.attempt(slot, attemptId);
+    return this.configureDeclaration(slot, attempt, changeDependencyBinding(attempt.declaration, service, binding), options, context);
+  }
+
   configureBindings<T extends ConfigureBindingsOptions>(name: string, attemptId: string, changes: ConfigurationBindingChange[], options: T,
     context?: ConfigureBindingsContext): Promise<ConfigureBindingsResult<T>>;
   async configureBindings(name: string, attemptId: string, changes: ConfigurationBindingChange[], options: ConfigureBindingsOptions,
@@ -281,9 +460,14 @@ class Runtime implements PreviewRuntime {
     }
     if (context.signal) throwIfAborted(context.signal);
     const slot = this.slot(name);
-    if (options.operation === 'apply') checkExpectedSlot(slot, options.expected);
     const attempt = this.attempt(slot, attemptId);
     const spec = changeConfigurationBindings(attempt.declaration, changes);
+    return this.configureDeclaration(slot, attempt, spec, options, context);
+  }
+
+  private async configureDeclaration(slot: Slot, attempt: Attempt, spec: EffectiveSpec, options: ConfigureBindingsOptions, context: ConfigureBindingsContext): Promise<ConfigureBindingsResult> {
+    const name = slot.name;
+    if (options.operation === 'apply') checkExpectedSlot(slot, options.expected);
     if (options.operation === 'inspect') {
       const secrets = secretRequirements(spec, this.secretIds);
       const result: ConfigurationBindingsInspection = {
@@ -327,8 +511,8 @@ class Runtime implements PreviewRuntime {
     const slot = this.slot(name, 'ATTEMPT_EXPIRED');
     if (options.after !== undefined && !attemptId) throw new PreviewError('INVALID_INPUT', 'Incremental logs require an attemptId.');
     const attempt = attemptId ? this.attempt(slot, attemptId) : slot.candidate ?? slot.active ?? slot.latest;
-    if (!attempt) throw new PreviewError('ATTEMPT_EXPIRED', 'The attempt logs are no longer available.');
-    if (options.source !== undefined && !(attempt.declaration.type === 'environment' ? Object.hasOwn(attempt.declaration.services, options.source) : options.source === name)) {
+    if (!attempt || attempt.restored) throw new PreviewError('ATTEMPT_EXPIRED', 'The attempt logs are no longer available. Logs are not retained across runtime restarts.');
+    if (options.source !== undefined && !(attempt.declaration.type === 'environment' ? Object.hasOwn(attempt.declaration.services, options.source) : attempt.declaration.type === 'compose' ? options.source === name || !!attempt.compose?.services.some(service => service.id === options.source) : options.source === name)) {
       throw new PreviewError('INVALID_INPUT', 'Select a service or job in this attempt.');
     }
     return { name, attemptId: attempt.summary.id, ...attempt.log.read(options) };
@@ -336,11 +520,21 @@ class Runtime implements PreviewRuntime {
 
   async cancel(name: string, attemptId: string): Promise<PreviewStatus> {
     const slot = this.slot(name);
+    if (slot.operation && slot.candidate?.held && slot.candidate.summary.state === 'ready') {
+      throw new PreviewError('BUSY', 'Candidate settlement is in progress. Stop waits for its durable outcome.');
+    }
     if (!slot.candidate || slot.candidate.summary.id !== attemptId) {
       throw new PreviewError('STALE_ATTEMPT', 'This attempt is no longer the pending candidate.');
     }
     slot.candidate.controller.abort();
     await slot.operation;
+    if (slot.candidate?.summary.id === attemptId) {
+      const candidate = slot.candidate;
+      candidate.summary.state = 'canceled'; slot.latest = candidate;
+      await this.cleanupAttempt(slot, candidate);
+      slot.candidate = undefined;
+      if (!slot.active) await this.closeGateway(slot);
+    }
     return this.status(slot);
   }
 
@@ -353,12 +547,21 @@ class Runtime implements PreviewRuntime {
     }
     slot.control?.abort();
     if (slot.stopping) { await slot.stopping; return this.status(slot); }
-    slot.candidate?.controller.abort();
-    slot.active?.controller.abort();
-    slot.gateway?.setTarget(undefined);
+    const settling = slot.operation && slot.candidate?.held && slot.candidate.summary.state === 'ready';
+    if (!settling) {
+      slot.candidate?.controller.abort();
+      slot.active?.controller.abort();
+      slot.gateway?.setTarget(undefined);
+    }
     const controller = options.afterEngineRestart ? new AbortController() : undefined;
     if (controller) slot.control = controller;
     const stopping = Promise.resolve().then(async () => {
+      if (settling) {
+        await slot.operation?.catch(() => {});
+        slot.candidate?.controller.abort();
+        slot.active?.controller.abort();
+        slot.gateway?.setTarget(undefined);
+      }
       if (controller) {
         await this.authorizeData('recover-data', slot, controller.signal);
       }
@@ -374,7 +577,7 @@ class Runtime implements PreviewRuntime {
     this.assertOpen();
     const slot = this.slot(name);
     if (isLive(slot)) throw new PreviewError('BUSY', 'Stop the environment and resolve application cleanup before deleting data.');
-    const data = this.data?.status(name);
+    const data = this.dataStatus(name);
     if (!data) throw new PreviewError('NOT_FOUND', 'This name has no retained database data.');
     if (options.expected) {
       const expected = options.expected;
@@ -392,7 +595,8 @@ class Runtime implements PreviewRuntime {
       await this.authorizeData('delete-data', slot, controller.signal);
       throwIfAborted(controller.signal);
       this.assertOpen();
-      await this.data!.deleteData(name);
+      if (this.data?.status(name)) await this.data.deleteData(name);
+      await this.compose?.deleteData(name);
     });
     slot.operation = operation;
     try { await operation; }
@@ -408,19 +612,22 @@ class Runtime implements PreviewRuntime {
       if (results.some((result) => result.status === 'rejected')) {
         throw new PreviewError('CLEANUP_INCOMPLETE', 'Some preview resources could not be verified as stopped. Inspect status and retry stop.');
       }
+      await this.compose?.close();
       await this.data?.close();
+      await this.records?.close();
       this.keystore.close();
     })();
     try { await this.closing; }
     catch (error) { this.closing = undefined; throw error; }
   }
 
-  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace', sourceFile?: string, rerunJob?: string): PreviewStatus {
+  private begin(slot: Slot, spec: EffectiveSpec, operation: 'start' | 'replace', sourceFile?: string, rerunJob?: string, held = false): PreviewStatus {
     const attempt: Attempt = {
       summary: { id: randomUUID(), type: spec.type, state: 'starting', startedAt: new Date().toISOString(), sources: sourceDirectories(spec) },
       declaration: structuredClone(spec), ...(sourceFile ? { sourceFile } : {}), controller: new AbortController(), completed: false, waiters: new Set(),
-      log: new AttemptLog(), nodes: nodeCost(spec),
+      log: new AttemptLog(), nodes: nodeCost(spec), held,
     };
+    slot.history = [attempt, ...(slot.history ?? [])].slice(0, limits.attemptsPerPreview);
     slot.candidate = attempt;
     slot.operation = this.runCandidate(slot, attempt, spec, operation, rerunJob).finally(() => {
       slot.operation = undefined;
@@ -435,21 +642,31 @@ class Runtime implements PreviewRuntime {
   private async runCandidate(slot: Slot, attempt: Attempt, input: EffectiveSpec, operation: 'start' | 'replace', rerunJob?: string): Promise<void> {
     const signal = attempt.controller.signal;
     let committed = false;
+    let exclusiveStopped = false;
     let timedOut = false;
     let secrets: Record<string, string> = {};
-    const deadline = input.type === 'environment' ? setTimeout(() => {
-      timedOut = true; attempt.controller.abort();
-    }, input.timeoutMs) : undefined;
+    let preparedCompose: Awaited<ReturnType<ComposeOwner['prepare']>> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       const spec = await abortable(normalizeSpec(input, this.roots, this.inputs, this.privateDirectories), signal);
       attempt.declaration = structuredClone(spec);
       attempt.summary.sources = sourceDirectories(spec);
+      if (spec.type === 'compose') {
+        if (!this.compose) throw new PreviewError('INVALID_INPUT', 'Compose requires a private dataDirectory.');
+        preparedCompose = await this.compose.prepare(spec, signal);
+        attempt.compose = preparedCompose.prepared.description;
+      }
       this.admitted(slot, attempt);
       if (this.authorize) {
         const approved = await abortable(Promise.resolve(this.authorize({ operation, spec: structuredClone(spec), ...(rerunJob ? { rerunJob } : {}), signal })), signal);
         if (!approved) throw new PreviewError('EXECUTION_DENIED', 'The host denied this preview operation.');
       } else if (needsExecution(spec)) {
         throw new PreviewError('EXECUTION_DENIED', 'Commands and managed databases require host authorization. Start the daemon with --allow-exec only for trusted code.');
+      }
+      if (spec.type === 'environment' || spec.type === 'compose') {
+        deadline = setTimeout(() => {
+          timedOut = true; attempt.controller.abort();
+        }, spec.timeoutMs);
       }
       this.admitted(slot, attempt);
       // Recheck the selected directory after approval; never silently switch to a new symlink target.
@@ -460,6 +677,9 @@ class Runtime implements PreviewRuntime {
       this.admitted(slot, attempt);
       secrets = await resolveSecrets(secretRequirements(spec, this.secretIds), signal, this.keystore);
       validateResolvedInputs(spec, this.inputs, secrets);
+      this.admitted(slot, attempt);
+      await this.records?.save(spec, attempt.summary.id, attempt.summary.startedAt, attempt.sourceFile);
+      attempt.retained = !!this.records;
       this.admitted(slot, attempt);
       if (!slot.gateway) {
         slot.gateway = await createGateway({ onError: (error) => this.gatewayFailed(slot, error) });
@@ -474,6 +694,8 @@ class Runtime implements PreviewRuntime {
         attempt.resource = { target, stop: async () => {} };
       } else if (spec.type === 'command') {
         const resource = await startNative({
+          supervisor: this.supervisor,
+          ownership: this.records?.ownership(slot.name),
           spec: { ...spec, env: Object.fromEntries(Object.entries(spec.env).map(([key, value]) => [key, resolveInput(value, this.inputs, secrets)])) },
           url: slot.gateway.url, signal,
           appendLog: (text) => attempt.log.append(text, spec.name),
@@ -481,6 +703,24 @@ class Runtime implements PreviewRuntime {
         });
         attempt.resource = resource;
         verifyListener = () => resource.verifyListener();
+      } else if (spec.type === 'compose') {
+        attempt.summary.services = {};
+        attempt.resource = await this.compose!.start(spec, {
+          ...preparedCompose!, signal, supervisor: this.supervisor, url: slot.gateway.url,
+          ownership: this.records ? () => this.records!.ownership(slot.name) : undefined,
+          appendLog: (text, source) => attempt.log.append(text, source),
+          serviceStatus: (id, status) => { attempt.summary.services![id] = status; },
+          onResource: resource => { attempt.resource = resource; },
+          beforeActivation: async () => {
+            const old = slot.active;
+            if (!old) return;
+            slot.gateway?.setTarget(undefined);
+            slot.active = undefined;
+            old.summary.state = 'stopped';
+            await this.cleanupAttempt(slot, old);
+            await this.data?.stop(slot.name);
+          },
+        });
       } else {
         const databases = Object.fromEntries(Object.entries(spec.services).filter((entry) => entry[1].type === 'postgres' || entry[1].type === 'redis')) as
           Record<string, Extract<(typeof spec.services)[string], { type: 'postgres' | 'redis' }>>;
@@ -492,6 +732,17 @@ class Runtime implements PreviewRuntime {
           ? await this.data.open(slot.name, databases, { signal, onFailure: (error) => this.environmentFailed(slot, error) }) : {};
         this.admitted(slot, attempt);
         attempt.resource = await startEnvironment({
+          supervisor: this.supervisor,
+          ownership: this.records ? () => this.records!.ownership(slot.name) : undefined,
+          beforeExclusiveStart: async () => {
+            exclusiveStopped = true;
+            await slot.active?.resource?.stopExclusive?.();
+          },
+          resolvePreview: (name, service) => {
+            if (name === slot.name) return;
+            const resource = this.slots.get(name)?.active?.resource;
+            return service ? resource?.routes?.[browserHostname(name, service)] : resource?.target;
+          },
           spec, url: slot.gateway.url, inputs: this.inputs, secrets, databases: bindings, signal, privateDirectories: this.privateDirectories, data: this.data, rerunJob,
           appendLog: (text, source) => attempt.log.append(text, source),
           serviceStatus: (id, status) => { attempt.summary.services![id] = status; },
@@ -509,6 +760,16 @@ class Runtime implements PreviewRuntime {
       }
       this.admitted(slot, attempt);
       resource.assertRunning?.();
+      if (resource.exited) void resource.exited.then((error) => this.resourceFailed(slot, attempt, error));
+      if (attempt.held) {
+        attempt.candidateGateway = await createGateway({ publicPort: Number(new URL(slot.gateway.url).port), onError: error => { void this.resourceFailed(slot, attempt, error); } });
+        this.admitted(slot, attempt);
+        attempt.candidateGateway.setRoutes(resource.routes ?? { '127.0.0.1': resource.target });
+        attempt.summary.state = 'ready';
+        attempt.summary.readyAt = new Date().toISOString();
+        slot.latest = attempt;
+        return;
+      }
       const old = slot.active;
       slot.gateway.setRoutes(resource.routes ?? { '127.0.0.1': resource.target });
       slot.active = attempt;
@@ -518,7 +779,7 @@ class Runtime implements PreviewRuntime {
       attempt.summary.readyAt = new Date().toISOString();
       committed = true;
       clearTimeout(deadline);
-      if (resource.exited) void resource.exited.then((error) => this.resourceFailed(slot, attempt, error));
+
       if (old?.resource) {
         slot.cleanup.add(old);
         await Promise.all([...new Set(Object.values(old.resource.routes ?? { primary: old.resource.target }))].map((target) => slot.gateway!.drain(target)));
@@ -533,6 +794,12 @@ class Runtime implements PreviewRuntime {
           ? { code: 'TIMEOUT', message: 'The environment startup deadline expired.' } : redactedFailure(error, input, this.inputs, secrets));
         slot.latest = attempt;
         await this.cleanupAttempt(slot, attempt).catch(() => {});
+        if (exclusiveStopped && !slot.cleanup.has(attempt)) {
+          try { await slot.active?.resource?.restoreExclusive?.(); }
+          catch (restoreError) {
+            if (slot.active) await this.resourceFailed(slot, slot.active, restoreError instanceof Error ? restoreError : new Error('Exclusive worker restoration failed.'));
+          }
+        }
       } else {
         // The new route remains active when retiring the old resource fails.
         attempt.summary.state = 'cleanup-incomplete';
@@ -540,14 +807,15 @@ class Runtime implements PreviewRuntime {
       }
     } finally {
       clearTimeout(deadline);
-      if (slot.candidate === attempt) slot.candidate = undefined;
-      if (!slot.active && slot.gateway) {
+      if (preparedCompose && !attempt.resource) await preparedCompose.cli.close();
+      if (slot.candidate === attempt && !(attempt.held && attempt.summary.state === 'ready')) slot.candidate = undefined;
+      if (!slot.active && !slot.candidate && slot.gateway) {
         await this.closeGateway(slot).catch((error) => {
           attempt.summary.error = failure(error, 'CLEANUP_INCOMPLETE');
           attempt.summary.state = 'cleanup-incomplete';
         });
       }
-      if (!slot.active && !slot.cleanup.size && this.data?.status(slot.name)) {
+      if (!slot.active && !slot.cleanup.size && this.dataStatus(slot.name)) {
         await this.stopData(slot, [attempt]).catch((error) => {
           attempt.summary.error = failure(error, 'CLEANUP_INCOMPLETE');
           attempt.summary.state = 'cleanup-incomplete';
@@ -562,11 +830,15 @@ class Runtime implements PreviewRuntime {
 
   private async cleanupAttempt(slot: Slot, attempt: Attempt): Promise<void> {
     if (attempt.cleanupTask) return attempt.cleanupTask;
-    if (!attempt.resource) return;
+    if (!attempt.resource && !attempt.recover && !attempt.candidateGateway) return;
     slot.cleanup.add(attempt);
     attempt.cleanupTask = (async () => {
       try {
-        await attempt.resource!.stop();
+        await attempt.resource?.stop();
+        await attempt.candidateGateway?.close();
+        attempt.candidateGateway = undefined;
+        await attempt.recover?.();
+        attempt.recover = undefined;
         attempt.resource = undefined;
         slot.cleanup.delete(attempt);
         if (attempt.summary.state === 'ready' || attempt.summary.state === 'cleanup-incomplete') {
@@ -586,13 +858,13 @@ class Runtime implements PreviewRuntime {
     await slot.operation?.catch(() => {});
     const attempts = new Set([...slot.cleanup, ...[slot.active, slot.candidate, slot.latest].filter((value): value is Attempt => !!value)]);
     await Promise.allSettled([...attempts].map((attempt) => this.cleanupAttempt(slot, attempt)));
-    // Remember the application actually stopped, rather than a failed replacement of it.
-    if (slot.active) slot.latest = slot.active;
     slot.active = undefined;
     slot.candidate = undefined;
     await this.closeGateway(slot);
     if (slot.cleanup.size) throw new PreviewError('CLEANUP_INCOMPLETE', 'Some owned resources could not be verified as stopped. The cleanup handles remain available for retry.');
     await this.stopData(slot, attempts, options);
+    if (slot.latest?.retained) await this.records!.save(slot.latest.declaration, slot.latest.summary.id, slot.latest.summary.startedAt, slot.latest.sourceFile);
+
     // Listener/data cleanup can fail after the application resource is already gone.
     if (slot.latest?.summary.state === 'cleanup-incomplete') {
       slot.latest.summary.state = 'stopped';
@@ -602,14 +874,30 @@ class Runtime implements PreviewRuntime {
 
   private async stopData(slot: Slot, attempts: Iterable<Attempt>, options?: StopOptions): Promise<void> {
     await this.data?.stop(slot.name, options);
+    await this.compose?.stop(slot.name);
     for (const attempt of attempts) {
       for (const service of Object.values(attempt.summary.services ?? {})) {
-        if ((service.type === 'postgres' || service.type === 'redis') && service.state !== 'failed') service.state = 'stopped';
+        if ((service.type === 'postgres' || service.type === 'redis' || service.type === 'compose') && service.state !== 'failed') service.state = 'stopped';
       }
     }
   }
 
   private async resourceFailed(slot: Slot, attempt: Attempt, error: Error): Promise<void> {
+    if (slot.operation && slot.candidate === attempt && attempt.held && attempt.summary.state === 'ready') {
+      await slot.operation.catch(() => {});
+    }
+    if (slot.candidate === attempt && attempt.held && !slot.stopping) {
+      attempt.failure = failure(error);
+      attempt.controller.abort();
+      try {
+        await this.cancel(slot.name, attempt.summary.id);
+        attempt.summary.state = 'failed'; attempt.summary.error = failure(error);
+      } catch (cleanup) {
+        attempt.summary.state = 'cleanup-incomplete'; attempt.summary.error = failure(cleanup, 'CLEANUP_INCOMPLETE');
+        slot.cleanup.add(attempt);
+      }
+      return;
+    }
     if (slot.active !== attempt || slot.stopping) return;
     if (attempt.summary.type === 'environment') { this.environmentFailed(slot, error); return; }
     slot.gateway?.setTarget(undefined);
@@ -639,7 +927,7 @@ class Runtime implements PreviewRuntime {
   private async authorizeData(operation: 'delete-data' | 'recover-data', slot: Slot, signal: AbortSignal): Promise<void> {
     // Cleanup remains available after a failed close, while this owner retains its lock.
     if (operation === 'delete-data') this.assertOpen();
-    const data = this.data?.status(slot.name);
+    const data = this.dataStatus(slot.name);
     if (!data) throw new PreviewError('NOT_FOUND', 'This name has no retained database data.');
     if (!this.authorize || !await abortable(Promise.resolve(this.authorize({ operation, name: slot.name, resources: data.resources, signal })), signal)) {
       throw new PreviewError('EXECUTION_DENIED', 'The host did not authorize this persistent data operation.');
@@ -653,7 +941,7 @@ class Runtime implements PreviewRuntime {
     for (const slot of this.slots.values()) {
       const attempts = new Set([slot.active, slot.candidate, ...slot.cleanup]);
       for (const attempt of attempts) if (attempt && (attempt.resource || attempt.summary.state === 'starting')) reserved += attempt.nodes;
-      const data = this.data?.status(slot.name);
+      const data = this.dataStatus(slot.name);
       if (!slot.active && !slot.candidate && (data?.running || data?.cleanup && data.cleanup.operation !== 'remove-credential')) reserved += data.resources.length;
     }
     if (reserved + nodeCost(spec) > limits.liveNodes) throw new PreviewError('BUSY', `At most ${limits.liveNodes} service slots can be active, starting, or awaiting cleanup.`);
@@ -681,13 +969,22 @@ class Runtime implements PreviewRuntime {
     throwIfAborted(attempt.controller.signal);
     if (this.closed || slot.stopping || slot.candidate !== attempt) throw new PreviewError('CLOSED', 'This preview operation is no longer active.');
   }
+  private dataStatus(name: string) {
+    const database = this.data?.status(name);
+    const compose = this.compose?.status(name);
+    if (!database) return compose;
+    if (!compose) return database;
+    return { resources: [...database.resources, ...compose.resources], running: database.running || compose.running, cleanup: database.cleanup ?? compose.cleanup };
+  }
+
   private status(slot: Slot): PreviewStatus {
-    const data = this.data?.status(slot.name);
+    const data = this.dataStatus(slot.name);
     return {
       name: slot.name, ...(slot.gateway ? { url: slot.gateway.url } : {}),
       ...(slot.active ? { active: copySummary(slot.active) } : {}),
       ...(slot.candidate ? { candidate: copySummary(slot.candidate) } : {}),
       ...(slot.latest ? { latest: copySummary(slot.latest) } : {}),
+      ...(slot.history?.length ? { history: slot.history.map(copySummary) } : {}),
       busy: !!slot.operation || !!slot.stopping,
       ...(slot.cleanup.size ? { cleanup: [...slot.cleanup].filter((attempt) => attempt.summary.state === 'cleanup-incomplete').map((attempt) => ({
         attemptId: attempt.summary.id, error: attempt.summary.error!, sources: [...attempt.summary.sources],
@@ -699,19 +996,19 @@ class Runtime implements PreviewRuntime {
   private slot(name: string, missingCode: 'NOT_FOUND' | 'ATTEMPT_EXPIRED' = 'NOT_FOUND'): Slot {
     if (!nameSchema.safeParse(name).success) throw new PreviewError('INVALID_INPUT', 'Invalid preview name.');
     let slot = this.slots.get(name);
-    if (!slot && this.data?.status(name)) {
+    if (!slot && this.dataStatus(name)) {
       slot = { name, cleanup: new Set() }; this.slots.set(name, slot);
     }
     if (!slot) throw new PreviewError(missingCode, 'This preview or attempt is not available in the bounded runtime history.');
     return slot;
   }
   private attempt(slot: Slot, id: string): Attempt {
-    const attempt = [slot.active, slot.candidate, slot.latest, ...slot.cleanup].find((value) => value?.summary.id === id);
+    const attempt = [slot.active, slot.candidate, slot.latest, ...slot.cleanup, ...(slot.history ?? [])].find((value) => value?.summary.id === id);
     if (!attempt) throw new PreviewError('ATTEMPT_EXPIRED', 'The attempt is unknown or its bounded history expired.');
     return attempt;
   }
   private prune(): void {
-    const terminal = [...this.slots.values()].filter((slot) => !isLive(slot) && !this.data?.status(slot.name));
+    const terminal = [...this.slots.values()].filter((slot) => !isLive(slot) && !this.dataStatus(slot.name) && !this.records?.has(slot.name));
     for (const slot of terminal.slice(0, Math.max(0, terminal.length - limits.terminalRecords))) this.slots.delete(slot.name);
   }
 }
@@ -735,15 +1032,11 @@ function copySummary(attempt: Attempt): AttemptSummary {
   }
   return summary;
 }
-function nodeCost(spec: EffectiveSpec): number { return spec.type === 'environment' ? Object.keys(spec.services).length : 1; }
-export function needsExecution(spec: EffectiveSpec): boolean {
-  return spec.type === 'command' || spec.type === 'environment' && Object.values(spec.services).some((service) =>
-    (service.type === 'command' || service.type === 'job') || service.type === 'postgres' || service.type === 'redis');
-}
+function nodeCost(spec: EffectiveSpec): number { return spec.type === 'environment' ? Object.keys(spec.services).length : spec.type === 'compose' ? spec.services.length : 1; }
 function redactedFailure(error: unknown, spec: EffectiveSpec, inputs: Readonly<Record<string, string>> = {}, secrets: Readonly<Record<string, string>> = {}) {
   const result = failure(error);
   const values = spec.type === 'command' ? Object.values(spec.env).filter((value): value is string => typeof value === 'string') : spec.type === 'environment'
-    ? Object.values(spec.services).flatMap((service) => (service.type === 'command' || service.type === 'job') ? Object.values(service.env).filter((value): value is string => typeof value === 'string') :
+    ? Object.values(spec.services).flatMap((service) => (service.type === 'command' || service.type === 'worker' || service.type === 'job') ? Object.values(service.env).filter((value): value is string => typeof value === 'string') :
       (service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'string' ? [service.url] : []) : [];
     for (const value of [...values, ...Object.values(inputs), ...Object.values(secrets)].filter(Boolean).sort((a, b) => b.length - a.length)) {
       const utf8 = Buffer.from(value).toString('utf8');

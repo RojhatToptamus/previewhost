@@ -4,6 +4,7 @@ export const limits = {
   livePreviews: 32,
   terminalRecords: 128,
   logBytes: 65_536,
+  attemptsPerPreview: 8,
   gatewayConnections: 256,
   controlBytes: 1_048_576,
   controlRequests: 32,
@@ -54,7 +55,7 @@ const envSchema = z.record(envKey, scalarValueSchema)
 
 export const environmentValueSchema = z.union([
   scalarValueSchema,
-  z.strictObject({ service: nameSchema.describe('Wait for this service and use its candidate internal numeric HTTP URL or selected database connection URL. Adds a readiness dependency; cycles are invalid.') }),
+  z.strictObject({ field: z.enum(['host', 'port']).optional(), port: nameSchema.optional(), service: nameSchema.describe('Wait for this service and use its candidate internal numeric HTTP URL or selected database connection URL. Adds a readiness dependency; cycles are invalid.') }),
   z.strictObject({ publicUrl: nameSchema.describe('Primary HTTP service only: numeric public origin. Adds no readiness dependency and can still reach the active application during replacement.') }),
   z.strictObject({ browserUrl: nameSchema.describe('Any HTTP service: public .localhost alias for browser requests. Adds no readiness dependency; native DNS resolution and candidate readiness are not guaranteed. During replacement it can still reach the active application.') }),
 ]);
@@ -65,21 +66,49 @@ const serviceEnvironment = z.record(envKey, environmentValueSchema)
   .refine((env) => !['PORT', 'HOST', 'PREVIEW_URL'].some((key) => Object.hasOwn(env, key)), 'Remove PORT, HOST and PREVIEW_URL from env; Previewhost injects them at runtime.')
   .default({}).describe('Application bindings only. Use {secret: ID} for credentials, including dummy local API keys; never invent credential literals in tool arguments. Do not set PORT, HOST or PREVIEW_URL here. Previewhost injects the private port, HOST=127.0.0.1, and this service’s public browser alias. PREVIEW_URL is not the listen address. Only basic runtime variables such as PATH and HOME are inherited. previewhost does not load .env files; the application can.');
 const jobArgv = argv.describe('Finite executable and argv, without shell expansion. Exit zero means success; nonzero exit, signal or timeout fails startup. No port is allocated. Report internal errors with a nonzero exit; Previewhost cannot detect swallowed errors.');
+const probeSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('http'), port: nameSchema.default('http'), path: readyPath, timeoutMs }),
+  z.strictObject({ type: z.literal('tcp'), port: nameSchema, timeoutMs }),
+  z.strictObject({ type: z.literal('command'), command: jobArgv, cwd: directory.optional(), env: serviceEnvironment.removeDefault().optional(), timeoutMs }),
+]);
+export type ReadinessProbe = z.output<typeof probeSchema>;
+export type ProbeDescription = Exclude<ReadinessProbe, { type: 'command' }> | (Omit<Extract<ReadinessProbe, { type: 'command' }>, 'env'> & { envKeys?: string[]; bindings?: Record<string, Exclude<EnvironmentValue, string>> });
+const nativeLifecycle = {
+  ports: z.record(nameSchema, envKey).refine(value => Object.keys(value).length <= 8, 'At most eight ports per process.').optional()
+    .describe('Named private ports and their injected environment keys. Commands default to {http: PORT}; workers default to no ports. Arguments may use {port:NAME}.'),
+  ready: probeSchema.optional().describe('Explicit readiness probe. Commands otherwise use readyPath on the http port. Workers require a probe.'),
+  critical: z.boolean().default(true).describe('After startup, a terminal failure of a critical process stops the environment.'),
+  restart: z.strictObject({ mode: z.enum(['never', 'on-failure', 'always']), maxRestarts: z.number().int().min(0).max(10), backoffMs: z.number().int().min(0).max(30000) }).optional(),
+  liveness: z.strictObject({ probe: probeSchema, intervalMs: z.number().int().min(100).max(60000), failureThreshold: z.number().int().min(1).max(10) }).optional(),
+};
 export const environmentServiceSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('static'), directory, spa: z.boolean().default(false), dependsOn }),
-  z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs, dependsOn }),
+  z.strictObject({ type: z.literal('command'), cwd: directory, command: argv, env: serviceEnvironment, readyPath, timeoutMs, dependsOn, ...nativeLifecycle }),
+  z.strictObject({ type: z.literal('worker'), cwd: directory, command: argv, env: serviceEnvironment, dependsOn, ...nativeLifecycle, ready: probeSchema, overlap: z.enum(['exclusive', 'safe']).default('exclusive') }),
   z.strictObject({ type: z.literal('job'), cwd: directory, command: jobArgv, env: serviceEnvironment.describe('Job bindings use the same secret, input, service and public URL references as command services. PORT and HOST are reserved but are not injected into jobs. PREVIEW_URL is the environment numeric public origin; it may still serve the old application during replacement.'), dependsOn,
     timeoutMs: z.number().int().min(100).max(600_000).default(60_000),
     run: z.enum(['always', 'once']).default('always').describe('always: run on each start/replacement; use repeatable migrations. once: run once per retained environment, requiring a managed database dependency. Success is retained by job name. Failed or interrupted runs require an explicit rerun or data deletion; writes are never rolled back by Previewhost.'),
   }),
-  z.strictObject({ type: z.literal('attach'), url: z.string().max(4096), readyPath, timeoutMs, dependsOn }),
+  z.strictObject({ type: z.literal('attach'), url: z.string().max(4096).optional(), check: z.boolean().default(true), readyPath, timeoutMs, dependsOn }),
+  z.strictObject({ type: z.literal('preview'), name: nameSchema, service: nameSchema.optional(), check: z.boolean().default(true), readyPath, timeoutMs, dependsOn }),
+  z.strictObject({ type: z.literal('external-tcp'), host: z.enum(['127.0.0.1', 'localhost']).default('127.0.0.1'), port: z.number().int().min(1).max(65535).optional(), check: z.boolean().default(true), timeoutMs, dependsOn }),
   z.strictObject({ type: z.literal('postgres') }),
   z.strictObject({ type: z.literal('redis') }),
-  z.strictObject({ type: z.literal('external-postgres'), url: scalarValueSchema, timeoutMs }),
-  z.strictObject({ type: z.literal('external-redis'), url: scalarValueSchema, timeoutMs }),
+  z.strictObject({ type: z.literal('external-postgres'), url: scalarValueSchema.optional(), check: z.boolean().default(true), timeoutMs }),
+  z.strictObject({ type: z.literal('external-redis'), url: scalarValueSchema.optional(), check: z.boolean().default(true), timeoutMs }),
 ]);
+export const dependencyBindingSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('attach'), url: z.string().max(4096) }),
+  z.strictObject({ type: z.literal('preview'), name: nameSchema, service: nameSchema.optional() }),
+  z.strictObject({ type: z.literal('external-tcp'), host: z.enum(['127.0.0.1', 'localhost']), port: z.number().int().min(1).max(65535) }),
+  z.strictObject({ type: z.literal('external-postgres'), url: z.strictObject({ secret: secretIdSchema }) }),
+  z.strictObject({ type: z.literal('external-redis'), url: z.strictObject({ secret: secretIdSchema }) }),
+]);
+export type DependencyBinding = z.output<typeof dependencyBindingSchema>;
+
 const environmentSpecSchema = z.strictObject({
   name: nameSchema, type: z.literal('environment'), primary: nameSchema.describe('HTTP service reached through the environment’s numeric public URL.'),
+  routes: z.record(nameSchema, z.strictObject({ service: nameSchema, port: nameSchema })).refine(value => Object.keys(value).length <= 16).optional().describe('Additional HTTP browser routes for named command ports.'),
   services: z.record(nameSchema, environmentServiceSchema)
     .refine((services) => Object.keys(services).length >= 1 && Object.keys(services).length <= limits.environmentServices,
       `An environment needs between 1 and ${limits.environmentServices} services.`)
@@ -88,6 +117,26 @@ const environmentSpecSchema = z.strictObject({
   timeoutMs: z.number().int().min(100).max(600_000).default(60_000)
     .describe('Overall environment startup deadline in milliseconds, across dependencies and service startup. Default 60000; maximum 600000. Individual service deadlines also apply.'),
 });
+
+const composePort = z.number().int().min(1).max(65535);
+const composeSpecSchema = z.strictObject({
+  name: nameSchema, type: z.literal('compose'), cwd: directory,
+  files: z.array(z.string().min(1).max(4096)).min(1).max(8),
+  profiles: z.array(nameSchema).max(16).default([]),
+  rootServices: z.array(nameSchema).min(1).max(16),
+  services: z.array(z.strictObject({
+    id: nameSchema,
+    ports: z.record(nameSchema, z.strictObject({ target: composePort })).refine(value => Object.keys(value).length <= 8),
+    ready: z.discriminatedUnion('type', [
+      z.strictObject({ type: z.literal('http'), port: nameSchema, path: readyPath, timeoutMs }),
+      z.strictObject({ type: z.literal('tcp'), port: nameSchema, timeoutMs }),
+    ]).optional(),
+  })).min(1).max(16),
+  primary: z.strictObject({ service: nameSchema, port: nameSchema }),
+  routes: z.record(nameSchema, z.strictObject({ service: nameSchema, port: nameSchema })).refine(value => Object.keys(value).length <= 16).default({}).describe('Additional browser HTTP routes. Private TCP ports are not exposed through the HTTP gateway.'),
+  timeoutMs: z.number().int().min(100).max(600000).default(120000),
+});
+export type ComposeSpec = z.output<typeof composeSpecSchema>;
 
 export const previewSpecSchema = z.discriminatedUnion('type', [
   z.strictObject({ name: nameSchema, type: z.literal('static'), directory, spa: z.boolean().default(false) }),
@@ -98,12 +147,14 @@ export const previewSpecSchema = z.discriminatedUnion('type', [
   }),
   z.strictObject({ name: nameSchema, type: z.literal('attach'), url: z.string().max(4096), readyPath, timeoutMs }),
   environmentSpecSchema,
+  composeSpecSchema,
 ]);
 export type PreviewSpec = z.input<typeof previewSpecSchema>;
 export type EffectiveSpec = z.output<typeof previewSpecSchema>;
 export type CommandSpec = Extract<EffectiveSpec, { type: 'command' }>;
 export type EnvironmentSpec = Extract<EffectiveSpec, { type: 'environment' }>;
 export type EnvironmentService = z.output<typeof environmentServiceSchema>;
+export type NativeServiceSpec = Extract<EnvironmentService, { type: 'command' | 'worker' }>;
 export type OwnedDatabaseSpec = Extract<EnvironmentService, { type: 'postgres' | 'redis' }>;
 export type EnvironmentValue = z.output<typeof environmentValueSchema>;
 export interface ConfigurationBindingRow {
@@ -153,7 +204,7 @@ export const secretRequestSchemas = {
   edit: z.strictObject({ id: secretIdSchema }),
 };
 export interface ServiceStatus {
-  type: EnvironmentService['type'];
+  type: EnvironmentService['type'] | 'compose';
   state: 'waiting' | 'starting' | 'ready' | 'succeeded' | 'skipped' | 'failed' | 'canceled' | 'stopped';
   url?: string;
   browserUrl?: string;
@@ -162,7 +213,7 @@ export interface ServiceStatus {
   error?: Failure;
 }
 export interface DataStatus {
-  resources: Array<{ name: string; type: OwnedDatabaseSpec['type'] }>;
+  resources: Array<{ name: string; type: OwnedDatabaseSpec['type'] | 'compose-volume' }>;
   running: boolean;
   cleanup?: Failure & { operation?: 'remove-credential' };
 }
@@ -183,6 +234,8 @@ export interface PreviewStatus {
   active?: AttemptSummary;
   candidate?: AttemptSummary;
   latest?: AttemptSummary;
+  /** Recent attempts retained in this process, newest first. Logs expire after eviction or restart. */
+  history?: AttemptSummary[];
   busy: boolean;
   cleanup?: Array<{ attemptId: string; error: Failure; sources: string[] }>;
   data?: DataStatus;
@@ -194,17 +247,20 @@ export interface PrerequisiteFinding {
   message: string;
 }
 export interface PreviewDescription {
+  compose?: import('./compose-inspection.js').ComposeInspection;
   /** File supplied with this attempt. Metadata only; it grants no filesystem access. */
   sourceFile?: string;
   /** Read-only observations, not startup validation or permission grants. */
   prerequisites?: PrerequisiteFinding[];
   spec: Omit<CommandSpec, 'env'> | Exclude<EffectiveSpec, CommandSpec | EnvironmentSpec> | {
-    name: string; type: 'environment'; primary: string; timeoutMs: number;
+    name: string; type: 'environment'; primary: string; timeoutMs: number; routes?: Record<string, { service: string; port: string }>;
     services: Record<string, {
       type: EnvironmentService['type']; cwd?: string; directory?: string; command?: string[];
       envKeys?: string[]; bindings?: Record<string, Exclude<EnvironmentValue, string>>;
+      ports?: Record<string, string>; ready?: ProbeDescription; critical?: boolean; restart?: NativeServiceSpec['restart']; liveness?: Omit<NonNullable<NativeServiceSpec['liveness']>, 'probe'> & { probe: ProbeDescription }; overlap?: 'exclusive' | 'safe';
       readyPath?: string; timeoutMs?: number; spa?: boolean; dependsOn?: string[]; run?: 'always' | 'once';
       url?: ScalarValue; // External database literals are omitted.
+      name?: string; service?: string; host?: string; port?: number; check?: boolean;
     }>;
   };
   envKeys: string[];
@@ -277,6 +333,12 @@ export interface RuntimeOptions {
   inputs?: Record<string, string>;
   secretIds?: string[];
   dataDirectory?: string;
+  /** Private profile directory. Omit to use the standalone Previewhost keystore. */
+  keystoreDirectory?: string;
+  /** Locked private directory for retained declarations and native cleanup receipts. Startup never replays commands. */
+  stateDirectory?: string;
+  /** Host-only launch settings for packaged embedders such as Electron. Never sent to application commands. */
+  supervisor?: { executable?: string; module?: string; env?: Record<string, string> };
   dockerSocket?: string;
   authorize?: (request: AuthorizationRequest) => boolean | Promise<boolean>;
 }
@@ -316,5 +378,10 @@ export const requestSchemas = {
   }),
   rerunJob: z.strictObject({ name: nameSchema, attemptId: attemptIdSchema, job: nameSchema }),
   remove: z.strictObject({ name: nameSchema.optional(), attemptId: attemptIdSchema.nullable() }),
-  deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema.nullable(), resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis']) })).min(1).max(limits.environmentDatabases) }).optional() }),
+  deleteData: z.strictObject({ name: nameSchema, expected: z.strictObject({ attemptId: attemptIdSchema.nullable(), resources: z.array(z.strictObject({ name: nameSchema, type: z.enum(['postgres', 'redis', 'compose-volume']) })).min(1).max(64 + limits.environmentDatabases) }).optional() }),
 };
+
+export function needsExecution(spec: EffectiveSpec | PreviewDescription['spec']): boolean {
+  return spec.type === 'compose' || spec.type === 'command' || spec.type === 'environment' && Object.values(spec.services).some((service) =>
+    (service.type === 'command' || service.type === 'worker' || service.type === 'job') || service.type === 'postgres' || service.type === 'redis');
+}

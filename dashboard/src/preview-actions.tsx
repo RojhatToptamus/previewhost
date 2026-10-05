@@ -109,7 +109,7 @@ function resetRequest(entry: Entry): Confirmation | undefined {
     return;
   return {
     title: `Reset data for ${p.name}?`,
-    description: `Stops this preview, deletes the managed data below, then starts the ${p.active ? "serving" : "latest"} configuration and runs setup again. Deletion and job writes cannot be rolled back.`,
+    description: `Stops this preview, deletes the managed data below, then starts the latest configuration and runs setup again. Deletion and job writes cannot be rolled back.`,
     details: <DataScope entry={entry} />,
     body: {
       action: "resetData",

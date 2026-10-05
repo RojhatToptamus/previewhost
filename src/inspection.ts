@@ -55,12 +55,12 @@ async function inspectPrerequisites(spec: EffectiveSpec, roots: string[], option
     visit(id);
     return spec.type === 'environment' ? [...visited].filter(name => spec.services[name].type === 'job') : [];
   }
-  const commands = services.filter(([, service]) => service.type === 'command' || service.type === 'job');
+  const commands = services.filter(([, service]) => service.type === 'command' || service.type === 'worker' || service.type === 'job');
   for (const helper of commands.length ? nativeTools() : []) {
     if (!await executableFile(helper)) findings.push({ requirement: 'native-helper', status: 'missing', message: `Install the system helper ${helper} before starting native commands.` });
   }
   for (const [service, command] of commands) {
-    if (command.type !== 'command' && command.type !== 'job') continue;
+    if (command.type !== 'command' && command.type !== 'worker' && command.type !== 'job') continue;
     const scope = service ? { service } : {};
     const executable = command.command[0];
     const direct = isAbsolute(executable) || executable.includes('/') || process.platform === 'win32' && executable.includes('\\');

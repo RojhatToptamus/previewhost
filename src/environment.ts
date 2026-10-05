@@ -1,10 +1,11 @@
-import type { EnvironmentSpec, EnvironmentValue, ServiceStatus } from './contracts.js';
+import type { EnvironmentSpec, EnvironmentValue, ServiceStatus, RuntimeOptions } from './contracts.js';
 import { limits } from './contracts.js';
 import { PreviewError, failure, throwIfAborted } from './errors.js';
-import { runNativeJob, startNative, type NativeResource } from './native.js';
+import { runNativeJob, type NativeOwnership } from './native.js';
+import { startNativeService, type NativeService } from './native-service.js';
 import { startStatic } from './static.js';
 import { createGateway } from './gateway.js';
-import { waitForHttp } from './readiness.js';
+import { waitForHttp, waitForTcp } from './readiness.js';
 import { attachmentTarget, browserHostname, environmentDependencies, isHttpService, resolveInput } from './spec.js';
 import { databaseRedactions, probeDatabase } from './database-connections.js';
 import type { DatabaseBinding, DataOwner } from './data.js';
@@ -12,7 +13,11 @@ import type { HttpTarget, Resource } from './resources.js';
 
 /** One attempt owns this application graph. Database handles belong to its slot. */
 export async function startEnvironment(input: {
+  supervisor?: RuntimeOptions['supervisor'];
+  ownership?: () => NativeOwnership;
   spec: EnvironmentSpec;
+  beforeExclusiveStart?(): Promise<void>;
+  resolvePreview(name: string, service?: string): HttpTarget | undefined;
   url: string;
   inputs: Readonly<Record<string, string>>;
   secrets?: Readonly<Record<string, string>>;
@@ -28,6 +33,8 @@ export async function startEnvironment(input: {
   const { spec } = input;
   const graph = environmentDependencies(spec);
   const controller = new AbortController();
+  const nativeServices = new Map<string, NativeService>();
+  let exclusiveHandoff: Promise<void> | undefined;
   const running = new Map<string, Resource>();
   const jobs = new Map<string, Pick<Resource, 'stop'>>();
   const connections = new Map<string, DatabaseBinding>();
@@ -63,12 +70,28 @@ export async function startEnvironment(input: {
     },
     get routes() {
       const routes: Record<string, HttpTarget> = { '127.0.0.1': resource.target };
-      for (const [id, value] of running) routes[browserHostname(spec.name, id)] = value.target;
+      for (const [id, value] of running) if (isHttpService(spec.services[id])) routes[browserHostname(spec.name, id)] = value.target;
+      for (const [id, route] of Object.entries(spec.routes ?? {})) {
+        const port = nativeServices.get(route.service)?.ports[route.port];
+        if (port) routes[browserHostname(spec.name, id)] = { port, hostHeader: `127.0.0.1:${port}` };
+      }
       return routes;
     },
     exited,
     assertRunning,
     stop,
+    async stopExclusive() {
+      for (const [id, value] of nativeServices) {
+        const definition = spec.services[id];
+        if (definition.type === 'worker' && definition.overlap === 'exclusive') await value.pause();
+      }
+    },
+    async restoreExclusive() {
+      for (const [id, value] of nativeServices) {
+        const definition = spec.services[id];
+        if (definition.type === 'worker' && definition.overlap === 'exclusive') await value.resume();
+      }
+    },
   };
   input.onResource(resource);
 
@@ -76,11 +99,16 @@ export async function startEnvironment(input: {
     if (unexpected) throw unexpected;
     throwIfAborted(controller.signal);
     if (stopping) throw new PreviewError('CLOSED', 'The environment was stopped.');
-    for (const value of running.values()) value.assertRunning?.();
+    for (const [id, value] of running) {
+      const service = spec.services[id];
+      if (!('critical' in service) || service.critical) value.assertRunning?.();
+    }
   }
 
   function failed(id: string, error: Error): void {
     if (stopping || controller.signal.aborted || unexpected) return;
+    const service = spec.services[id];
+    if ('critical' in service && !service.critical && !(error instanceof PreviewError && error.code === 'CLEANUP_INCOMPLETE')) { status(id, 'failed', error); return; }
     unexpected = new PreviewError('START_FAILED', `Service ${id} failed: ${failure(error).message}`);
     status(id, 'failed', error);
     controller.abort();
@@ -99,8 +127,12 @@ export async function startEnvironment(input: {
     }
     if ('browserUrl' in value) return { url: browserUrl(value.browserUrl), redactions: [] };
     if ('publicUrl' in value) return { url: input.url, redactions: [] };
-    const resolved = connections.get(value.service);
+    const resolved = connections.get(value.port ? `${value.service}:${value.port}` : value.service);
     if (!resolved) throw new PreviewError('START_FAILED', `Service ${value.service} has no ready connection.`);
+    if (value.field) {
+      const url = new URL(resolved.url);
+      return { url: value.field === 'host' ? url.hostname : url.port, redactions: [] };
+    }
     return resolved;
   }
 
@@ -130,11 +162,15 @@ export async function startEnvironment(input: {
           if (!binding) throw new PreviewError('START_FAILED', `Database ${id} is not available.`);
           connections.set(id, binding);
         } else if (service.type === 'external-postgres' || service.type === 'external-redis') {
-          const url = resolveInput(service.url, input.inputs, input.secrets);
-          await probeDatabase(service.type === 'external-postgres' ? 'postgres' : 'redis', url, {
+          const url = resolveInput(service.url!, input.inputs, input.secrets);
+          if (service.check) await probeDatabase(service.type === 'external-postgres' ? 'postgres' : 'redis', url, {
             signal: controller.signal, timeoutMs: service.timeoutMs,
           });
           connections.set(id, { url, redactions: databaseRedactions(url) });
+        } else if (service.type === 'external-tcp') {
+          if (!service.port) throw new PreviewError('INVALID_INPUT', 'Select the external TCP port.');
+          if (service.check) await waitForTcp(service.port, service.timeoutMs, controller.signal);
+          connections.set(id, { url: `tcp://127.0.0.1:${service.port}`, redactions: [] });
         } else if (service.type === 'job') {
           if (service.run === 'once' && !await input.data!.beginJob(spec.name, id, input.rerunJob === id)) {
             status(id, 'skipped');
@@ -144,6 +180,8 @@ export async function startEnvironment(input: {
           const { env, redactions } = commandBindings(service.env);
           input.appendLog(`Running job.\n`, id);
           await runNativeJob({ spec: { ...service, env }, url: input.url, signal: controller.signal,
+            supervisor: input.supervisor,
+            ownership: input.ownership?.(),
             timeoutMs: service.timeoutMs, redactions, appendLog: text => input.appendLog(text, id),
             onResource: resource => jobs.set(id, resource),
           });
@@ -154,33 +192,43 @@ export async function startEnvironment(input: {
           input.appendLog(`Succeeded.\n`, id);
           return;
         } else {
-          let native: NativeResource | undefined;
           if (service.type === 'static') {
             own(id, await startStatic(service.directory, service.spa, input.privateDirectories));
+          } else if (service.type === 'preview') {
+            const proxy = await createGateway({ onError: error => failed(id, error), resolveTarget: () => input.resolvePreview(service.name, service.service) });
+            own(id, { target: { port: Number(new URL(proxy.url).port), hostHeader: new URL(proxy.url).host }, stop: () => proxy.close() });
           } else if (service.type === 'attach') {
-            const target = attachmentTarget(service.url);
+            const target = attachmentTarget(service.url!);
             if (target.port === Number(port)) throw new PreviewError('INVALID_INPUT', 'An environment cannot attach to its own public listener.');
             // Native consumers need a numeric URL even when the external server requires a Host alias.
             const proxy = await createGateway({ onError: (error) => failed(id, error) });
             own(id, { target: { port: Number(new URL(proxy.url).port), hostHeader: new URL(proxy.url).host }, stop: () => proxy.close() });
             proxy.setTarget(target);
           } else {
+            if (service.type === 'worker' && service.overlap === 'exclusive') {
+              exclusiveHandoff ??= input.beforeExclusiveStart?.() ?? Promise.resolve();
+              await exclusiveHandoff;
+              assertRunning();
+            }
             const { env, redactions } = commandBindings(service.env);
-            native = await startNative({
-              spec: { ...service, env }, url: browserUrl(id), signal: controller.signal,
-              appendLog: (text) => input.appendLog(text, id), redactions,
-              onResource: (value) => own(id, value),
+            const native = await startNativeService({
+              supervisor: input.supervisor, ownership: input.ownership,
+              probeBindings: probe => commandBindings(probe.env ?? service.env),
+              spec: service, env, url: service.type === 'command' ? browserUrl(id) : input.url, signal: controller.signal,
+              appendLog: text => input.appendLog(text, id), redactions,
+              status: (state, error) => status(id, state, error),
+              onResource: value => { nativeServices.set(id, value); own(id, value); },
             });
+            for (const [name, port] of Object.entries(native.ports)) connections.set(`${id}:${name}`, { url: `http://127.0.0.1:${port}`, redactions: [] });
           }
           assertRunning();
           const current = running.get(id)!;
-          if (service.type !== 'static') {
+          if ((service.type === 'attach' || service.type === 'preview') && service.check) {
             const ready = waitForHttp(current.target, service.readyPath, service.timeoutMs, controller.signal);
             await (current.exited ? Promise.race([ready, current.exited.then((error) => { throw error; })]) : ready);
-            if (native) await native.verifyListener();
           }
           assertRunning();
-          connections.set(id, { url: `http://127.0.0.1:${current.target.port}`, redactions: [] });
+          if (isHttpService(service)) connections.set(id, { url: `http://127.0.0.1:${current.target.port}`, redactions: [] });
         }
         assertRunning();
         status(id, 'ready');
@@ -226,9 +274,18 @@ export async function startEnvironment(input: {
   try {
     await Promise.all([...graph.keys()].map(start));
     assertRunning();
-    // Recheck native listeners after the last dependent becomes ready.
-    for (const value of running.values()) {
-      if ('verifyListener' in value && typeof value.verifyListener === 'function') await value.verifyListener();
+    // Join restarts before admitting this candidate to the public route.
+    for (const [id, native] of nativeServices) {
+      try { await native.verifyReady(); }
+      catch (error) { failed(id, error instanceof Error ? error : new Error('Process readiness failed.')); throw error; }
+    }
+    // Every published native listener must belong to its process after the graph is ready.
+    for (const [id, native] of nativeServices) {
+      if (spec.services[id].type === 'command') await native.verifyListener(native.ports.http);
+    }
+    for (const route of Object.values(spec.routes ?? {})) {
+      const native = nativeServices.get(route.service)!;
+      await native.verifyListener(native.ports[route.port]);
     }
     assertRunning();
     return resource;

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { PreviewError, throwIfAborted } from './errors.js';
 import type { HttpTarget } from './resources.js';
@@ -52,4 +53,26 @@ function probe(target: HttpTarget, pathname: string, timeoutMs: number, signal: 
     request.once('close', () => finish(Object.assign(new Error('Readiness connection closed before response headers.'), { code: 'ECONNRESET' })));
     if (signal.aborted) abort();
   });
+}
+
+/** TCP readiness observes only the selected loopback port and releases every socket. */
+export async function waitForTcp(port: number, timeoutMs: number, signal: AbortSignal): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    throwIfAborted(signal);
+    const connected = await new Promise<boolean>(resolve => {
+      const socket = net.connect({ host: '127.0.0.1', port });
+      const finish = (ready: boolean) => { clearTimeout(timer); signal.removeEventListener('abort', abort); socket.destroy(); resolve(ready); };
+      const abort = () => finish(false);
+      const timer = setTimeout(() => finish(false), Math.min(1000, deadline - Date.now()));
+      socket.once('connect', () => finish(true));
+      socket.once('error', () => finish(false));
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
+    throwIfAborted(signal);
+    if (connected) return;
+    await delay(50, undefined, { signal });
+  }
+  throw new PreviewError('TIMEOUT', 'TCP readiness timed out.');
 }

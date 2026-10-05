@@ -246,3 +246,52 @@ test('owned service loss stops its environment and leaves a concurrent environme
   assert.equal(JSON.parse((await request(two.url!)).text).revision, 'v2');
   assert.equal((await runtime.get('two')).active?.id, two.id);
 });
+
+test('dependency selection preserves consumer URLs through producer replacement and absence without owning external services', async t => {
+  const { runtime, directory } = await fixture(t);
+  const external = http.createServer((_request, response) => response.end('external'));
+  await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve, reject) => external.close(error => error ? reject(error) : resolve())));
+  const tcpPort = (external.address() as { port: number }).port;
+  const one = path.join(directory, 'producer-one');
+  const two = path.join(directory, 'producer-two');
+  await fs.mkdir(one); await fs.mkdir(two);
+  await fs.writeFile(path.join(one, 'index.html'), 'one');
+  await fs.writeFile(path.join(two, 'index.html'), 'two');
+  await fs.writeFile(path.join(directory, 'consumer.mjs'), `
+import http from 'node:http';
+http.createServer(async(req,res)=>{
+ if(req.url==='/ready') { res.end('ready'); return; }
+ if(req.url==='/connection') { res.end(process.env.BACKEND); return; }
+ try { const response=await fetch(process.env.BACKEND); res.writeHead(response.status); res.end(await response.text()); }
+ catch { res.writeHead(503).end(); }
+}).listen(Number(process.env.PORT),'127.0.0.1');
+`);
+  const consumer: EnvironmentInput = { name: 'consumer', type: 'environment', primary: 'web', services: {
+    backend: { type: 'attach', check: false },
+    socket: { type: 'external-tcp', port: tcpPort },
+    check: { type: 'job', cwd: directory, command: [process.execPath, '-e', "fetch('http://'+process.env.ADDRESS+':'+process.env.ENDPOINT).then(r=>r.text()).then(t=>{if(t!=='external')process.exit(8)})"],
+      env: { ADDRESS: { service: 'socket', field: 'host' }, ENDPOINT: { service: 'socket', field: 'port' } } },
+    web: { type: 'command', cwd: directory, command: [process.execPath, 'consumer.mjs'], readyPath: '/ready', env: { BACKEND: { service: 'backend' } }, dependsOn: ['check'] },
+  } };
+  const absent = await outcome(runtime, await runtime.start(consumer));
+  assert.equal(absent.state, 'failed');
+  const producer = await ready(runtime, await runtime.start({ name: 'producer', type: 'static', directory: one }));
+  const started = await runtime.configureDependency('consumer', absent.id, 'backend', { type: 'preview', name: 'producer' },
+    { operation: 'apply', expected: { active: null, candidate: null, latest: absent.id } });
+  const serving = await ready(runtime, started);
+  const connection = await (await fetch(`${serving.url}/connection`)).text();
+  assert.equal(await (await fetch(serving.url!)).text(), 'one');
+  await ready(runtime, await runtime.replace('producer', { name: 'producer', type: 'static', directory: two }));
+  assert.equal(await (await fetch(serving.url!)).text(), 'two');
+  await runtime.stop('producer');
+  assert.equal((await fetch(serving.url!)).status, 503);
+  assert.equal((await runtime.get('consumer')).active?.id, serving.id);
+  const restarted = await ready(runtime, await runtime.start({ name: 'producer', type: 'static', directory: one }));
+  assert.notEqual(restarted.url, producer.url);
+  assert.equal(await (await fetch(`${serving.url}/connection`)).text(), connection);
+  assert.equal(await (await fetch(serving.url!)).text(), 'one');
+  await runtime.stop('consumer');
+  assert.equal((await fetch(restarted.url!)).status, 200);
+  assert.equal(await (await fetch(`http://127.0.0.1:${tcpPort}`)).text(), 'external');
+});

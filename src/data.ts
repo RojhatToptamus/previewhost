@@ -467,7 +467,7 @@ function publishedPort(container: Record<string, unknown>, resource: StoredResou
   return port;
 }
 
-async function acquireRoot(directory: string, readOnly = false) {
+export async function acquireRoot(directory: string, readOnly = false, maxBytes = 65_536) {
   let handle: FileHandle | undefined;
   let directoryHandle: FileHandle | undefined;
   try {
@@ -497,12 +497,12 @@ async function acquireRoot(directory: string, readOnly = false) {
       const file = await open(join(directory, filename), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         const info = await file.stat();
-        if (!info.isFile() || info.nlink !== 1 || !isPrivate(join(directory, filename), info) || info.size > 65_536) {
+        if (!info.isFile() || info.nlink !== 1 || !isPrivate(join(directory, filename), info) || info.size > maxBytes) {
           throw cleanupError('A retained database record has unsafe size, ownership or permissions.');
         }
-        const buffer = Buffer.alloc(65_537);
+        const buffer = Buffer.alloc(maxBytes + 1);
         const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-        if (bytesRead !== info.size || bytesRead > 65_536) throw cleanupError('A retained database record changed while reading.');
+        if (bytesRead !== info.size || bytesRead > maxBytes) throw cleanupError('A retained database record changed while reading.');
         return buffer.subarray(0, bytesRead).toString('utf8');
       } finally { await file.close(); }
     };
@@ -526,6 +526,7 @@ async function acquireRoot(directory: string, readOnly = false) {
         return records;
       },
       async write(filename: string, value: string) {
+        if (Buffer.byteLength(value) > maxBytes) throw cleanupError('The private record exceeds its storage limit.');
         await assertRoot();
         const temporary = join(directory, `.record-${fresh()}.tmp`);
         let file: FileHandle | undefined;

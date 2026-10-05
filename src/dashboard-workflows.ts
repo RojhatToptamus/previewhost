@@ -5,7 +5,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { requestSchemas, limits, type ConfigurationBindingChange, type ConfigurationBindingRow, type PreviewDescription, type PreviewStatus, type EffectiveSpec, type StopOptions, type SecretSetupStatus } from './contracts.js';
+import { requestSchemas, needsExecution, limits, type ConfigurationBindingChange, type ConfigurationBindingRow, type PreviewDescription, type PreviewStatus, type EffectiveSpec, type StopOptions, type SecretSetupStatus } from './contracts.js';
 import { configurationBindings, changeConfigurationBindings, loadPreviewSpec, readPreviewSpec, resolvePreviewFile, readConfigurationDocument, updateConfigurationDocument, type ConfigurationDocument } from './config.js';
 import { connectProject, discoverProjectOwners, projectOwnerDirectory, type ProjectOwnerInfo } from './project.js';
 import { connectPreviewDaemon } from './client.js';
@@ -120,7 +120,7 @@ export class DashboardWorkflows {
     }
     const nodes = draft.description.spec.type === 'environment' ? Object.entries(draft.description.spec.services) : [['app', draft.description.spec] as const];
     const owner = (await this.discover()).find(item => item.connection?.projectDirectory === draft.project);
-    const executes = nodes.some(([, node]) => ['command', 'job', 'postgres', 'redis', 'external-postgres', 'external-redis'].includes(node.type));
+    const executes = needsExecution(draft.description.spec);
     const executionBlocked = owner && executes && !await this.withOwner(owner, async (_client, info) => info.allowExec)
       ? 'This owner does not allow execution. Explicitly shut down this project’s owner, then start it with --allow-exec. Shutdown stops its previews and ends secret approvals; data is retained.' : undefined;
     let setup: SecretSetupStatus | undefined;
@@ -271,8 +271,7 @@ export class DashboardWorkflows {
         const privateSetup = nodes.some(node => node.type === 'postgres' || node.type === 'redis') || (draft.spec ? secretRequirements(draft.spec, new Set()).length > 0 : draft.description.secrets?.length);
         if (privateSetup) throw new PreviewError('SECRET_REQUIRED', 'Complete private setup before starting this configuration.');
       }
-      const nodes = draft.description.spec.type === 'environment' ? Object.values(draft.description.spec.services) : [draft.description.spec];
-      const allowExec = nodes.some(node => ['command', 'job', 'postgres', 'redis', 'external-postgres', 'external-redis'].includes(node.type));
+      const allowExec = needsExecution(draft.description.spec);
       const result = await this.project(draft.project, { allowExec }, draft.roots, async client => {
         throwIfAborted(signal);
         if (p.action === 'previewSecrets') {

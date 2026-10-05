@@ -120,7 +120,7 @@ test('finite jobs gate servers, preserve short output, fail closed, rerun and cl
   await assert.rejects(runtime.rerunJob(spec.name, fixed.id, 'prepare'), { code: 'BUSY' });
   const stopped = await runtime.stop(spec.name);
   assert.equal((await outcome(runtime, await runtime.rerunJob(spec.name, stopped.latest!.id, 'prepare'), t.signal)).state, 'ready');
-  await assert.rejects(runtime.rerunJob(spec.name, failed.id, 'prepare'), { code: 'ATTEMPT_EXPIRED' });
+  await assert.rejects(runtime.rerunJob(spec.name, failed.id, 'prepare'), { code: 'STALE_ATTEMPT' });
 });
 
 test('timeout and cancellation stop job process groups before startup returns', native, async t => {
@@ -383,9 +383,13 @@ test('dashboard reset enforces authorization, stale and concurrent guards, and e
     allowDelete = true;
     ready = await outcome(f.runtime, await f.runtime.startAgain(f.spec.name, stopped.latest!.id), t.signal);
     assert.equal((await rows(ready.url!)).length, 2, 'denied deletion retained data');
-    // Stop retains the serving configuration after a failed update. Reset must use it too.
-    const failedUpdate: Spec = { ...f.spec, services: { ...f.spec.services, migrate: job(f.directory, 'process.exit(12)') } };
+    // Reset restarts the latest configuration after its failing source has been repaired.
+    const repairedMigration = join(f.directory, 'replacement-migrate.mjs');
+    await writeFile(repairedMigration, 'process.exit(12)');
+    const failedUpdate: Spec = { ...f.spec, services: { ...f.spec.services,
+      migrate: { ...f.spec.services.migrate, type: 'job', cwd: f.directory, command: [process.execPath, 'replacement-migrate.mjs'] } } };
     assert.equal((await outcome(f.runtime, await f.runtime.replace(f.spec.name, failedUpdate), t.signal)).state, 'failed');
+    await writeFile(repairedMigration, await readFile(join(f.directory, 'migrate.mjs'), 'utf8'));
     // Concurrent confirmations of the same serving attempt cannot delete twice.
     const request = await resetRequest(); const prior = deletionRequests;
     const simultaneous = await Promise.all([post(request), post(request)]);

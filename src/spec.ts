@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   previewSpecSchema, type EffectiveSpec, type EnvironmentService, type EnvironmentSpec,
-  type PreviewDescription, type PreviewSpec, type ScalarValue,
+  type PreviewDescription, type PreviewSpec, type ScalarValue, type NativeServiceSpec, type ReadinessProbe, type ProbeDescription,
 } from './contracts.js';
 import { PreviewError } from './errors.js';
 import type { HttpTarget } from './resources.js';
@@ -16,6 +16,17 @@ export function parseSpec(input: PreviewSpec): EffectiveSpec {
   }
   if (parsed.data.type === 'attach') attachmentTarget(parsed.data.url);
   if (parsed.data.type === 'environment') environmentDependencies(parsed.data);
+  if (parsed.data.type === 'compose') {
+    const spec = parsed.data;
+    if (new Set(spec.services.map(value => value.id)).size !== spec.services.length || !spec.services.find(value => value.id === spec.primary.service)?.ports[spec.primary.port]) throw new PreviewError('INVALID_INPUT', 'Select distinct Compose services and an exposed primary port.');
+    for (const [id, route] of Object.entries(spec.routes)) {
+      browserHostname(spec.name, id);
+      if (!spec.services.find(service => service.id === route.service)?.ports[route.port]) throw new PreviewError('INVALID_INPUT', 'A Compose route must select an exposed service port.');
+    }
+    for (const service of spec.services) {
+      if (service.ready && !service.ports[service.ready.port]) throw new PreviewError('INVALID_INPUT', 'Compose readiness refers to an undeclared port.');
+    }
+  }
   return parsed.data;
 }
 
@@ -26,7 +37,7 @@ export function isWithin(root: string, filename: string): boolean {
 
 export function sourceDirectories(spec: EffectiveSpec): string[] {
   const services = spec.type === 'environment' ? Object.values(spec.services) : [spec];
-  return [...new Set(services.flatMap(service => (service.type === 'command' || service.type === 'job') ? [service.cwd] : service.type === 'static' ? [service.directory] : []))].sort();
+  return [...new Set(services.flatMap(service => ((service.type === 'command' || service.type === 'worker' || service.type === 'job' || service.type === 'compose') ? [service.cwd] : service.type === 'static' ? [service.directory] : []).concat(probeEnvironments(service).flatMap(probe => probe.cwd ? [probe.cwd] : []))))].sort();
 }
 
 export async function canonicalDirectory(directory: string): Promise<string> {
@@ -43,8 +54,8 @@ export async function canonicalDirectory(directory: string): Promise<string> {
 export async function normalizeSpec(spec: EffectiveSpec, roots: string[], inputs: Readonly<Record<string, string>> = {}, privateDirectories: ReadonlySet<string> = new Set()): Promise<EffectiveSpec> {
   const services = spec.type === 'environment' ? Object.values(spec.services) : [spec];
   for (const service of services) {
-    if (service.type === 'command' || service.type === 'job') {
-      for (const value of Object.values(service.env)) {
+    if (service.type === 'command' || service.type === 'worker' || service.type === 'job') {
+      for (const value of Object.values(service.env).concat(probeEnvironments(service).flatMap(probe => Object.values(probe.env ?? {})))) {
         if (typeof value === 'object' && 'fromEnv' in value) resolveInput(value, inputs);
       }
     } else if ((service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'object' && 'fromEnv' in service.url) {
@@ -62,7 +73,8 @@ export async function normalizeSources(spec: EffectiveSpec, roots: string[], pri
       if ((service.type === 'external-postgres' || service.type === 'external-redis') && typeof service.url === 'string') {
         validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', service.url);
       }
-      if (service.type !== 'static' && service.type !== 'command' && service.type !== 'job') return [id, service];
+      if (service.type !== 'static' && service.type !== 'command' && service.type !== 'worker' && service.type !== 'job') return [id, service];
+      for (const probe of probeEnvironments(service)) { if (probe.cwd) probe.cwd = await allowedDirectory(probe.cwd, roots); }
       const directory = await allowedDirectory(service.type === 'static' ? service.directory : service.cwd, roots);
       if (service.type === 'static') checkStaticSource(directory, privateDirectories);
       return [id, service.type === 'static' ? { ...service, directory } : { ...service, cwd: directory }];
@@ -92,21 +104,23 @@ export function describeSpec(spec: EffectiveSpec): PreviewDescription {
   if (spec.type === 'environment') {
     const envKeys: string[] = [];
     const services = Object.fromEntries(Object.entries(spec.services).map(([id, service]) => {
-      if (service.type === 'command' || service.type === 'job') {
+      if (service.type === 'command' || service.type === 'worker' || service.type === 'job') {
         const { env, ...publicService } = service;
         const keys = Object.keys(env).sort();
         envKeys.push(...keys.map((key) => `${id}.${key}`));
-        return [id, { ...publicService, envKeys: keys,
+        const ready = 'ready' in service && service.ready ? describeProbe(service.ready) : undefined;
+        const liveness = 'liveness' in service && service.liveness ? { ...service.liveness, probe: describeProbe(service.liveness.probe) } : undefined;
+        return [id, { ...publicService, ...(ready ? { ready } : {}), ...(liveness ? { liveness } : {}), envKeys: keys,
           bindings: Object.fromEntries(Object.entries(env).filter((entry) => typeof entry[1] !== 'string')) }];
       }
       if (service.type === 'external-postgres' || service.type === 'external-redis') {
-        return [id, { type: service.type, timeoutMs: service.timeoutMs,
+        return [id, { type: service.type, timeoutMs: service.timeoutMs, check: service.check,
           ...(typeof service.url === 'object' ? { url: { ...service.url } } : {}) }];
       }
       return [id, { ...service }];
     }));
     return {
-      spec: { name: spec.name, type: 'environment', primary: spec.primary, timeoutMs: spec.timeoutMs, services },
+      spec: { name: spec.name, type: 'environment', primary: spec.primary, timeoutMs: spec.timeoutMs, ...(spec.routes ? { routes: spec.routes } : {}), services },
       envKeys: envKeys.sort(), source: 'live-directories-and-dependencies', cleanup: 'owned-apps-and-containers-data-retained',
     };
   }
@@ -116,13 +130,31 @@ export function describeSpec(spec: EffectiveSpec): PreviewDescription {
   }
   return {
     spec: { ...spec }, envKeys: [],
-    source: spec.type === 'static' ? 'caller-owned-live-directory' : 'external-http-server',
-    cleanup: spec.type === 'static' ? 'owned-file-server' : 'proxy-connections-only',
+    source: spec.type === 'compose' ? 'live-directories-and-dependencies' : spec.type === 'static' ? 'caller-owned-live-directory' : 'external-http-server',
+    cleanup: spec.type === 'compose' ? 'owned-apps-and-containers-data-retained' : spec.type === 'static' ? 'owned-file-server' : 'proxy-connections-only',
   };
 }
 
 export function isHttpService(service: EnvironmentService): boolean {
-  return service.type === 'static' || service.type === 'command' || service.type === 'attach';
+  return service.type === 'static' || service.type === 'command' || service.type === 'attach' || service.type === 'preview';
+}
+
+export function nativePorts(service: NativeServiceSpec): Record<string, string> {
+  return service.ports ?? (service.type === 'command' ? { http: 'PORT' } : {});
+}
+
+function validateNativeService(id: string, service: NativeServiceSpec): void {
+  const ports = nativePorts(service);
+  if (service.type === 'command' && !ports.http) throw new PreviewError('INVALID_INPUT', `HTTP service ${id} needs an http port.`);
+  const keys = Object.values(ports);
+  if (new Set(keys).size !== keys.length || keys.some(key => key === 'HOST' || key === 'PREVIEW_URL' || Object.hasOwn(service.env, key))) {
+    throw new PreviewError('INVALID_INPUT', `Service ${id} must use distinct port environment keys without other bindings.`);
+  }
+  if (ports.http && ports.http !== 'PORT' && keys.includes('PORT')) throw new PreviewError('INVALID_INPUT', `Service ${id} reserves PORT for its http port.`);
+  for (const probe of [service.ready, service.liveness?.probe]) {
+    if (probe?.type === 'command' && Object.keys(probe.env ?? {}).some(key => keys.includes(key) || key === 'HOST' || key === 'PREVIEW_URL')) throw new PreviewError('INVALID_INPUT', 'Probes cannot override owned port or address bindings.');
+    if (probe && probe.type !== 'command' && !ports[probe.port]) throw new PreviewError('INVALID_INPUT', `Service ${id} probe refers to undeclared port ${probe.port}.`);
+  }
 }
 
 export function browserHostname(name: string, service: string): string {
@@ -138,21 +170,33 @@ export function environmentDependencies(spec: EnvironmentSpec): Map<string, stri
   if (!Object.hasOwn(spec.services, spec.primary) || !isHttpService(spec.services[spec.primary])) {
     throw new PreviewError('INVALID_INPUT', 'The primary service must name an HTTP command, static server, or attachment.');
   }
+  for (const [id, route] of Object.entries(spec.routes ?? {})) {
+    browserHostname(spec.name, id);
+    const service = spec.services[route.service];
+    if (spec.services[id] || service?.type !== 'command' || !service.critical || !nativePorts(service)[route.port]) throw new PreviewError('INVALID_INPUT', 'Additional HTTP routes must have a distinct name and select a critical command port.');
+  }
   const graph = new Map<string, string[]>();
   for (const [id, service] of Object.entries(spec.services)) {
     if (isHttpService(service)) browserHostname(spec.name, id);
-    if (service.type === 'attach') attachmentTarget(service.url);
+    if (service.type === 'command' || service.type === 'worker') validateNativeService(id, service);
+    if (service.type === 'attach' && service.url) attachmentTarget(service.url);
+    if (service.type === 'preview' && service.name === spec.name) throw new PreviewError('INVALID_INPUT', 'An environment cannot depend on itself.');
     const dependencies = new Set<string>('dependsOn' in service ? service.dependsOn : []);
     for (const dependency of dependencies) {
       if (!Object.hasOwn(spec.services, dependency)) throw new PreviewError('INVALID_INPUT', `Node ${id} depends on missing node ${dependency}.`);
     }
-    if (service.type === 'command' || service.type === 'job') {
-      for (const value of Object.values(service.env)) {
+    if (service.type === 'command' || service.type === 'worker' || service.type === 'job') {
+      for (const value of Object.values(service.env).concat(probeEnvironments(service).flatMap(probe => Object.values(probe.env ?? {})))) {
         if (typeof value === 'string' || 'fromEnv' in value || 'secret' in value) continue;
         const target = 'service' in value ? value.service : 'publicUrl' in value ? value.publicUrl : value.browserUrl;
         if (!Object.hasOwn(spec.services, target)) throw new PreviewError('INVALID_INPUT', `Service ${id} refers to missing service ${target}.`);
         if ('service' in value) {
           if (spec.services[target].type === 'job') throw new PreviewError('INVALID_INPUT', `Job ${target} has no connection URL. Use dependsOn to wait for its completion.`);
+          const targetService = spec.services[target];
+          if (value.port && ((targetService.type !== 'command' && targetService.type !== 'worker') || !nativePorts(targetService)[value.port])) {
+            throw new PreviewError('INVALID_INPUT', `Service ${target} has no named port ${value.port}.`);
+          }
+          if (targetService.type === 'worker' && !value.port) throw new PreviewError('INVALID_INPUT', `Worker ${target} has no default connection. Select a named port or use dependsOn.`);
           dependencies.add(target);
         }
         else if (!isHttpService(spec.services[target])) throw new PreviewError('INVALID_INPUT', `Service ${target} has no public HTTP URL.`);
@@ -198,8 +242,11 @@ export function validateResolvedInputs(spec: EffectiveSpec, inputs: Readonly<Rec
   if (spec.type === 'command') validateEnvironmentSize(Object.fromEntries(Object.entries(spec.env).map(([key, value]) => [key, resolveInput(value, inputs, secrets)])));
   if (spec.type === 'environment') for (const service of Object.values(spec.services)) {
     if (service.type === 'external-postgres' || service.type === 'external-redis') {
+      if (!service.url) throw new PreviewError('INVALID_INPUT', 'Select a secret reference for the external database URL in Configuration.');
       validateDatabaseUrl(service.type === 'external-postgres' ? 'postgres' : 'redis', resolveInput(service.url, inputs, secrets));
-    } else if (service.type === 'command' || service.type === 'job') {
+    } else if (service.type === 'attach' && !service.url || service.type === 'external-tcp' && !service.port) {
+      throw new PreviewError('INVALID_INPUT', 'Select the missing external dependency in Configuration.');
+    } else if (service.type === 'command' || service.type === 'worker' || service.type === 'job') {
       const values = Object.fromEntries(Object.entries(service.env).map(([key, value]) => [key,
         typeof value === 'string' || 'fromEnv' in value || 'secret' in value ? resolveInput(value, inputs, secrets) : '']));
       validateEnvironmentSize(values);
@@ -213,12 +260,13 @@ export function validateEnvironmentSize(values: Record<string, string>): void {
 
 export function sameSources(before: EffectiveSpec, after: EffectiveSpec): boolean {
   if (before.type !== after.type) return false;
+  if (before.type === 'compose' && after.type === 'compose') return before.cwd === after.cwd;
   if (before.type === 'command' && after.type === 'command') return before.cwd === after.cwd;
   if (before.type === 'static' && after.type === 'static') return before.directory === after.directory;
   if (before.type === 'environment' && after.type === 'environment') {
     return Object.entries(before.services).every(([id, service]) => {
       const checked = after.services[id];
-      return (service.type === 'command' || service.type === 'job') ? checked?.type === service.type && service.cwd === checked.cwd :
+      return (service.type === 'command' || service.type === 'worker' || service.type === 'job') ? checked?.type === service.type && service.cwd === checked.cwd && JSON.stringify(probeEnvironments(service).map(probe => probe.cwd)) === JSON.stringify(probeEnvironments(checked).map(probe => probe.cwd)) :
         service.type === 'static' ? checked?.type === 'static' && service.directory === checked.directory : true;
     });
   }
@@ -232,4 +280,14 @@ export function attachmentTarget(input: string): HttpTarget {
   }
   const port = Number(match[2]);
   return { port, hostHeader: `${match[1]}:${port}` };
+}
+
+export function probeEnvironments(service: { type: string; ready?: ReadinessProbe; liveness?: { probe: ReadinessProbe } }): Array<Extract<ReadinessProbe, { type: 'command' }>> {
+  return [service.ready, service.liveness?.probe].filter((probe): probe is Extract<ReadinessProbe, { type: 'command' }> => probe?.type === 'command');
+}
+
+function describeProbe(probe: ReadinessProbe): ProbeDescription {
+  if (probe.type !== 'command') return { ...probe };
+  const { env, ...rest } = probe;
+  return { ...rest, ...(env ? { envKeys: Object.keys(env).sort(), bindings: Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value !== 'string')) as Record<string, Exclude<import('./contracts.js').EnvironmentValue, string>> } : {}) };
 }

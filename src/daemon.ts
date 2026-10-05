@@ -259,7 +259,7 @@ export async function startDaemon(options: { runtime: PreviewRuntime; port?: num
         const p = parse(requestSchemas.remove, value);
         // No await between checking private setup, removing history, and retiring an empty owner.
         secrets.assertRemovable(p.name);
-        const removed = runtime.remove(p.name, p.attemptId);
+        const removed = await runtime.remove(p.name, p.attemptId);
         const removedRequest = secrets.remove(p.name);
         if (p.name !== undefined && !removed && !removedRequest) throw new PreviewError('NOT_FOUND', 'This preview entry is no longer available.');
         if (options.owner && runtime.isEmpty() && secrets.isEmpty()) {

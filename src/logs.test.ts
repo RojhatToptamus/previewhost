@@ -50,3 +50,24 @@ test('tiny interleaved writes are bounded and tail limits distinguish omission f
   assert.equal(log.read({ source: 'job', after: 1990, maxBytes: 4 }).text, '0246');
   assert.equal(log.read({ source: 'job', after: 1990, maxBytes: 4 }).truncated, false);
 });
+
+
+test('all-output labels preserve lines split across writes and cursor pages', () => {
+  const log = new AttemptLog();
+  log.append('{"request":', 'api');
+  const first = log.read();
+  log.append('"one"}\nnext', 'api');
+  const next = log.read({ after: first.cursor });
+  assert.equal(first.text + next.text, '[api] {"request":"one"}\n[api] next');
+  log.append('job output\n', 'job');
+  log.append(' complete\n', 'api');
+  assert.equal(log.read().text, '[api] {"request":"one"}\n[api] next\n[job] job output\n[api]  complete\n');
+  assert.equal(log.read({ source: 'api' }).text, '{"request":"one"}\nnext complete\n');
+  let cursor = 0, text = '';
+  while (true) {
+    const page = log.read({ after: cursor, maxBytes: 4 });
+    if (page.cursor === cursor) break;
+    text += page.text; cursor = page.cursor;
+  }
+  assert.equal(text, log.read().text);
+});

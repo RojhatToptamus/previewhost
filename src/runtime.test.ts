@@ -32,6 +32,26 @@ async function ready(runtime: PreviewRuntime, status: PreviewStatus) {
 }
 const code = (expected: string) => (error: unknown) => error instanceof PreviewError && error.code === expected;
 
+test('an environment startup deadline does not expire while its owner reviews authorization', async (t) => {
+  let approve!: (allowed: boolean) => void;
+  let reviewing!: () => void;
+  const entered = new Promise<void>(resolve => { reviewing = resolve; });
+  const { runtime, directory } = await fixture(t, () => {
+    reviewing();
+    return new Promise<boolean>(resolve => { approve = resolve; });
+  });
+  const started = await runtime.start({
+    name: 'review', type: 'environment', primary: 'web', timeoutMs: 100,
+    services: { web: { type: 'static', directory: path.join(directory, 'one') } },
+  });
+  await entered;
+  await delay(200);
+  assert.equal((await runtime.get('review')).candidate?.id, started.candidate!.id);
+  approve(true);
+  const active = await ready(runtime, started);
+  assert.match((await request(active.url!, '/')).body, /one/);
+});
+
 function request(url: string, pathname: string, method = 'GET'): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const origin = new URL(url);
@@ -271,7 +291,7 @@ test('native library flow verifies readiness, preserves a working server on repl
   assert.ok((await fs.stat(path.join(directory, 'server.mjs'))).isFile());
 });
 
-test('guarded Stop and Start again retain the serving declaration after a failed replacement', async t => {
+test('guarded restart uses the accepted replacement and admits only one concurrent start', async t => {
   const { runtime, spec, directory } = await fixture(t);
   const original = await ready(runtime, await runtime.start(spec()));
   const failed = await runtime.replace('page', { name: 'page', type: 'static', directory: path.join(directory, 'missing') });
@@ -281,15 +301,17 @@ test('guarded Stop and Start again retain the serving declaration after a failed
   await assert.rejects(runtime.stop('page', { expected: { active: original.id, candidate: null, latest: original.id } }), code('STALE_ATTEMPT'));
   assert.equal(await (await fetch(original.url!)).text(), '<h1>one</h1>');
   const stopped = await runtime.stop('page');
-  assert.equal(stopped.latest?.id, original.id);
-  const results = await Promise.allSettled([runtime.startAgain('page', original.id), runtime.startAgain('page', original.id)]);
+  assert.equal(stopped.latest?.id, failed.candidate!.id);
+  await fs.mkdir(path.join(directory, 'missing'));
+  await fs.writeFile(path.join(directory, 'missing', 'index.html'), '<h1>corrected</h1>');
+  const results = await Promise.allSettled([runtime.startAgain('page', failed.candidate!.id), runtime.startAgain('page', failed.candidate!.id)]);
   assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
   const started = results.find(r => r.status === 'fulfilled')!;
   if (started.status !== 'fulfilled') throw new Error();
   const result = await ready(runtime, started.value);
-  assert.equal(await (await fetch(result.url!)).text(), '<h1>one</h1>');
+  assert.equal(await (await fetch(result.url!)).text(), '<h1>corrected</h1>');
   await runtime.stop('page');
-  await fs.rm(path.join(directory, 'one'), { recursive: true });
+  await fs.rm(path.join(directory, 'missing'), { recursive: true });
   const description = await runtime.describe('page', result.id);
   assert.equal(description.spec.type, 'static');
   const retry = await runtime.startAgain('page', result.id);
