@@ -26,15 +26,21 @@ async function until(check: () => Promise<boolean>) {
 
 test('exclusive workers never overlap and a failed or canceled replacement restores the serving worker', async t => {
   const { directory, runtime } = await fixture(t);
+  const reservation = http.createServer();
+  await new Promise<void>(resolve => reservation.listen(0, '127.0.0.1', resolve));
+  const address = reservation.address();
+  assert.ok(address && typeof address !== 'string');
+  const workerUrl = `http://127.0.0.1:${address.port}`;
+  await new Promise<void>((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()));
+  const readWorker = async () => (await fetch(workerUrl, { signal: AbortSignal.timeout(1000) })).text();
   await fs.writeFile(path.join(directory, 'worker.mjs'), `
-import fs from 'node:fs';
-const lock = fs.openSync('worker.lock', 'wx');
-fs.writeFileSync(lock, String(process.pid));
-process.once('SIGTERM', () => { fs.closeSync(lock); fs.unlinkSync('worker.lock'); process.exit(0); });
-console.log('worker running');
-setInterval(() => {}, 1000);
+import http from 'node:http';
+import { randomUUID } from 'node:crypto';
+const instance = randomUUID();
+// Binding the same socket prevents overlap, including when Windows stops a Job Object without signal handlers.
+http.createServer((request, response) => response.end(instance)).listen(${address.port}, '127.0.0.1');
 `);
-  const spec = (probe = "if(!require('fs').existsSync('worker.lock'))process.exit(1)"): Environment => ({
+  const spec = (probe = `fetch('${workerUrl}').then(response => { if (!response.ok) process.exitCode = 1; }).catch(() => { process.exitCode = 1; })`): Environment => ({
     name: 'exclusive', type: 'environment', primary: 'web', services: {
       web: { type: 'static', directory },
       worker: { type: 'worker', cwd: directory, command: [process.execPath, 'worker.mjs'],
@@ -43,11 +49,11 @@ setInterval(() => {}, 1000);
   });
   const first = await result(runtime, await runtime.start(spec()));
   assert.equal(first.state, 'ready', JSON.stringify(first));
-  const pid = await fs.readFile(path.join(directory, 'worker.lock'), 'utf8');
+  const instance = await readWorker();
   const failed = await result(runtime, await runtime.replace('exclusive', spec('process.exit(8)')));
   assert.equal(failed.state, 'failed');
   assert.equal((await runtime.get('exclusive')).active!.id, first.id);
-  assert.notEqual(await fs.readFile(path.join(directory, 'worker.lock'), 'utf8'), pid);
+  assert.notEqual(await readWorker(), instance);
   assert.equal(await (await fetch(first.url!)).text(), 'application');
   const replacement = await runtime.replace('exclusive', spec('setTimeout(()=>{}, 30000)'));
   await until(async () => (await runtime.get('exclusive')).candidate?.services?.worker.state === 'starting');
@@ -58,7 +64,7 @@ setInterval(() => {}, 1000);
   assert.equal(next.state, 'ready', JSON.stringify(next));
   assert.equal(next.url, first.url);
   await runtime.stop('exclusive');
-  await assert.rejects(fs.stat(path.join(directory, 'worker.lock')), { code: 'ENOENT' });
+  await assert.rejects(readWorker());
 });
 
 test('named ports stay stable through bounded restarts and noncritical worker liveness failure leaves HTTP serving', async t => {

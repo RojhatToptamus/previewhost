@@ -46,8 +46,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y procps lsof
+          docker compose version
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
+          docker pull alpine:3.21
           echo 'PREVIEWHOST_TEST_DOCKER_SOCKET=/var/run/docker.sock' >> "$GITHUB_ENV"
       - name: Shared suite
         if: runner.os == 'Linux'
@@ -98,17 +100,19 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: Install Docker tools
-        run: brew install lima docker
+        run: brew install lima docker docker-compose
       - name: Start local Docker
         run: |
           limactl start --name=previewhost --tty=false --vm-type=vz --cpus=2 --memory=4 --mount-none template:docker-rootful
           echo "DOCKER_HOST=unix://$HOME/.lima/previewhost/sock/docker.sock" >> "$GITHUB_ENV"
           echo "PREVIEWHOST_TEST_DOCKER_SOCKET=$HOME/.lima/previewhost/sock/docker.sock" >> "$GITHUB_ENV"
-      - name: Pull database images
+      - name: Pull test images
         run: |
           docker info
+          docker compose version
           docker pull postgres:17-alpine
           docker pull redis:7-alpine
+          docker pull alpine:3.21
       - run: npm run verify:release
       - name: Pack pull request
         if: github.event_name == 'pull_request'

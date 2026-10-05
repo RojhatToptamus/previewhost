@@ -21,8 +21,11 @@ export class ComposeCli {
   }
 
   private environment(): Record<string, string> {
-    return { HOME: this.directory, TMPDIR: this.directory, COMPOSE_DISABLE_ENV_FILE: '1', COMPOSE_ANSI: 'never', COMPOSE_MENU: '0',
+    const env: Record<string, string> = { HOME: this.directory, TMPDIR: this.directory, COMPOSE_DISABLE_ENV_FILE: '1', COMPOSE_ANSI: 'never', COMPOSE_MENU: '0',
       COMPOSE_EXPERIMENTAL: '0', PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' };
+    // Docker discovers its system Compose plugin under ProgramFiles on Windows.
+    if (process.platform === 'win32' && process.env.ProgramFiles) env.ProgramFiles = process.env.ProgramFiles;
+    return env;
   }
 
   private dockerArgs(): string[] {

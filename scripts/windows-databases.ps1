@@ -8,6 +8,8 @@ $daemon = $null
 $imported = $false
 New-Item -ItemType Directory $directory | Out-Null
 try {
+    # The hosted image supplies the Windows Docker CLI and Compose plugin.
+    docker compose version
     $rootfs = Join-Path $directory 'rootfs.tar.gz'
     Invoke-WebRequest 'https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64/alpine-minirootfs-3.22.6-x86_64.tar.gz' -OutFile $rootfs -TimeoutSec 60
     if ((Get-FileHash $rootfs -Algorithm SHA256).Hash -ne '27694aaa55fd7a9e3ef596e0ad4eb66802308bb20172b17030cd5f4d8ae9bac2') {
@@ -19,7 +21,7 @@ try {
     wsl.exe -d PreviewhostBackend --exec sh -c 'mkdir -p /sys/fs/cgroup; mountpoint -q /sys/fs/cgroup || mount -t cgroup2 none /sys/fs/cgroup'
     $daemon = Start-Process wsl.exe -ArgumentList '-d PreviewhostBackend --exec /usr/bin/dockerd' -PassThru -RedirectStandardOutput "$directory\docker.log" -RedirectStandardError "$directory\docker-error.log"
     # Bounded initial readiness, without restarting the daemon or repeating tests.
-    wsl.exe -d PreviewhostBackend --exec sh -c 'set -e; remaining=30; while [ ! -S /var/run/docker.sock ]; do remaining=$((remaining-1)); [ "$remaining" -gt 0 ] || exit 1; sleep 1; done; docker version; docker pull postgres:17-alpine; docker pull redis:7-alpine'
+    wsl.exe -d PreviewhostBackend --exec sh -c 'set -e; remaining=30; while [ ! -S /var/run/docker.sock ]; do remaining=$((remaining-1)); [ "$remaining" -gt 0 ] || exit 1; sleep 1; done; docker version; docker pull postgres:17-alpine; docker pull redis:7-alpine; docker pull alpine:3.21'
 
     New-Item -ItemType Directory "$directory\bridge" | Out-Null
     Copy-Item $source "$directory\bridge\main.go"

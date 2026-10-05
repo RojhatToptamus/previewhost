@@ -28,12 +28,13 @@ The CI helper removes its WSL distribution and terminates its transport children
 Some sandbox environments require explicit permission for local listeners and
 process inspection.
 
-Real database tests require local Docker Engine and cached database images.
+Real database and Compose tests require a local Docker Engine, Docker Compose, and cached test images.
 If images are absent, pull them before the checks:
 
 ```sh
 docker pull postgres:17-alpine
 docker pull redis:7-alpine
+docker pull alpine:3.21
 ```
 
 Select your local Docker Unix socket (`/var/run/docker.sock` on standard Linux installations). The command below uses the Docker Desktop default:

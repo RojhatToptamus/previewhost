@@ -11,7 +11,8 @@ Install Previewhost with npm. Check the Node.js, operating-system, and Docker re
 | `ps` and `lsof` | macOS uses system tools. Linux needs procps at `/bin/ps` and lsof at `/usr/bin/lsof`. |
 | macOS 13 or later | Optional automatic keystore unlock through Keychain. |
 | An unlocked keystore | Stored secrets and managed database credentials. See [Secrets](secrets.md). |
-| A local Docker Engine | Managed PostgreSQL and Redis only. See [Databases](databases.md#prepare-docker). |
+| A local Docker Engine | Managed PostgreSQL/Redis and Compose previews. See [Databases](databases.md#prepare-docker). |
+| Docker CLI with the Compose plugin | Compose previews. |
 | Your application's dependencies | Install these before startup, or declare [setup jobs](jobs.md). |
 
 Windows ARM64 is not supported.
