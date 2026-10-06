@@ -87,7 +87,7 @@ jobs:
   verify:
     name: Verify macOS x64
     runs-on: macos-15-intel
-    timeout-minutes: 40
+    timeout-minutes: 60
     outputs:
       pack-dir-artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:

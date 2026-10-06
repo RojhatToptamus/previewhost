@@ -204,7 +204,7 @@ test('discovery and bounded dashboard pages retain all 145 records, including un
 
 const dockerSocket = process.env.PREVIEWHOST_TEST_DOCKER_SOCKET;
 test('offline projects keep real PostgreSQL data discoverable and delete only explicitly confirmed resources', {
-  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 60_000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET', timeout: 180_000,
 }, async t => {
   const fixture = await testKeystore(t);
   const project = await realpath(await mkdtemp(join(tmpdir(), 'previewhost-offline-project-')));
@@ -227,6 +227,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
   try {
     const args = [resolve('dist/cli.js'), 'start', '--project', project, '--file', file, '--allow-exec', '--no-wait'];
     async function start(options: string[] = []) {
+      const startedAt = performance.now();
       const started: PreviewStatus = JSON.parse((await execute(process.execPath, [...args, ...options], {
         env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` }, signal: t.signal,
       })).stdout);
@@ -237,6 +238,7 @@ test('offline projects keep real PostgreSQL data discoverable and delete only ex
         catch (error) { if ((error as { code?: string }).code !== 'TIMEOUT') throw error; }
       }
       assert.equal(result.state, 'ready', JSON.stringify(result));
+      t.diagnostic(`Offline project startup: ${Math.round(performance.now() - startedAt)} ms`);
       return result;
     }
     const first = await start(['--data-dir', dataDirectory, '--docker-socket', dockerSocket!]);

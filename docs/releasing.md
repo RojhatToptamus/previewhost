@@ -28,7 +28,7 @@ During prerelease mode, consumed changesets stay under `.changeset/pre/` until p
 
 `.github/workflows/ci.yml` runs for PRs targeting `main`. Release also calls it
 before publication. It installs dependencies, starts local Docker through Lima,
-pulls the two database fixture images, and runs `npm run verify:release`.
+pulls the database and Compose fixture images, and runs `npm run verify:release`.
 That gate requires macOS, an explicit local Unix socket, and zero skipped,
 failed, canceled, or TODO tests. It rejects incomplete or duplicate TAP summaries.
 Release calls must return the uploaded, verified package artifact ID before publication.
@@ -38,7 +38,11 @@ The macOS job uses the free standard `macos-15-intel` runner.
 Lima uses its maintained `docker-rootful` template with the VZ backend, two virtual CPUs, and 4 GiB of memory.
 Previewhost runs on macOS. Docker runs inside the VM, without host filesystem mounts.
 Docker tool installation, VM startup, and image pulls have separate CI steps.
-The full suite retains its normal timeouts and the zero-skip release gate.
+The job allows 60 minutes for VM setup, the serial suite, and package verification.
+Docker lifecycle tests have bounded scenario deadlines that include startup,
+replacement or recovery, and cleanup. The Compose fixture uses the normal
+120-second startup default. Production readiness limits and the zero-skip release
+gate remain unchanged.
 Native compilation requires Xcode Command Line Tools. The build produces one
 ad-hoc signed Keychain helper with `arm64` and `x86_64` slices. Consumers do not
 compile it during installation. The macOS job uses Node.js 24.
