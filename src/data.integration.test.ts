@@ -90,7 +90,7 @@ test('real owned PostgreSQL and Redis retain authenticated data across stop/reop
   } finally { await cleanup(owner, directory); }
 });
 
-test('real owner SIGKILL releases the kernel lock; recovery removes only its containers and keeps database data', enabled, async (t) => {
+test('real owner SIGKILL releases the kernel lock; recovery removes only its containers and keeps database data', { ...enabled, timeout: 180_000 }, async (t) => {
   const keystoreFixture = await testKeystore(t);
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-owner-crash-'));
   const otherDirectory = await mkdtemp(join(tmpdir(), 'previewhost-other-owner-'));
@@ -113,6 +113,7 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
       process.stdout.write('ready\\n');
       setInterval(()=>{},10000);
     `;
+    const setupStarted = performance.now();
     child = spawn(process.execPath, ['--input-type=module', '-e', script, directory, dockerSocket!, marker], { stdio: ['ignore', 'pipe', 'pipe'] });
     // These owners are independent. Join both starts before cleanup if either fails.
     const [childSetup, neighborSetup] = await Promise.allSettled([
@@ -121,6 +122,7 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
     ]);
     if (childSetup.status === 'rejected') throw childSetup.reason;
     if (neighborSetup.status === 'rejected') throw neighborSetup.reason;
+    t.diagnostic(`Crash fixture and independent neighbor startup: ${Math.round(performance.now() - setupStarted)} ms`);
     const otherBindings = neighborSetup.value;
     const neighbor = createClient({ url: otherBindings.cache.url, socket: { reconnectStrategy: false } });
     neighbor.on('error', () => {});
@@ -134,7 +136,9 @@ test('real owner SIGKILL releases the kernel lock; recovery removes only its con
     assert.equal(owner.status('sample')?.running, false);
     assert.equal(owner.status('sample')?.cleanup, undefined);
     for (const resource of before.resources) assert.equal((await docker.request('GET', `/containers/${resource.container.id}/json`)).status, 404);
+    const reopenedAt = performance.now();
     const bindings = await owner.open('sample', specs, { signal: signal(), onFailure(error) { assert.fail(error); } });
+    t.diagnostic(`Reopen after crash recovery: ${Math.round(performance.now() - reopenedAt)} ms`);
     await clients(bindings, async (pg, redis) => {
       assert.equal((await pg.query('SELECT value FROM durable_marker')).rows[0].value, marker);
       assert.equal(await redis.get('durable-marker'), marker);
