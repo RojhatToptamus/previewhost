@@ -23,7 +23,7 @@ export async function waitForHttp(target: HttpTarget, readyPath: string, timeout
     }
     await delay(Math.min(50, Math.max(1, deadline - Date.now())), undefined, { signal });
   }
-  throw new PreviewError('START_FAILED', `HTTP readiness timed out${lastObservation ? ` (last check: ${lastObservation})` : ''}. Read the attempt logs and verify the readiness path and port.`);
+  throw new PreviewError('TIMEOUT', `HTTP readiness for ${readyPath} timed out after ${timeoutMs}ms${lastObservation ? ` (last check: ${lastObservation})` : ''}. Read the attempt logs and verify the readiness path and port.`);
 }
 
 function probe(target: HttpTarget, pathname: string, timeoutMs: number, signal: AbortSignal): Promise<number> {

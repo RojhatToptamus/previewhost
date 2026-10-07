@@ -167,7 +167,7 @@ export interface ConfigurationBindingRow {
 export type ErrorCode =
   | 'INVALID_INPUT' | 'SOURCE_DENIED' | 'EXECUTION_DENIED' | 'ALREADY_EXISTS'
   | 'BUSY' | 'NOT_FOUND' | 'STALE_ATTEMPT' | 'ATTEMPT_EXPIRED' | 'UNSUPPORTED_PLATFORM'
-  | 'START_FAILED' | 'TIMEOUT' | 'CLEANUP_INCOMPLETE' | 'UNAUTHORIZED'
+  | 'START_FAILED' | 'SUPERVISOR_FAILED' | 'TIMEOUT' | 'CLEANUP_INCOMPLETE' | 'UNAUTHORIZED'
   | 'DAEMON_UNAVAILABLE' | 'CLOSED' | 'SECRET_REQUIRED' | 'SECRET_DENIED' | 'SECRET_STORE_UNAVAILABLE';
 export interface Failure { code: ErrorCode; message: string; requirements?: SecretRequirement[]; outcome?: 'unknown' }
 export interface SecretRequirement {

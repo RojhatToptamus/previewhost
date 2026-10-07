@@ -29,6 +29,34 @@ async function fixture(t: test.TestContext) {
   return { directory, source, options, spec, create };
 }
 
+test('supervisor bootstrap failures retain redacted diagnostics before reporting failure', async t => {
+  const { directory, source, options, spec, create } = await fixture(t);
+  const launcher = join(directory, 'broken-supervisor.mjs');
+  const secret = 'SYNTHETIC_bootstrap/a b';
+  await writeFile(launcher, `
+process.stderr.write('bootstrap: ' + process.env.PRIVATE_VALUE.slice(0, 9));
+setTimeout(() => {
+  process.stderr.write(process.env.PRIVATE_VALUE.slice(9) + '\\n');
+  import('previewhost-intentionally-missing-dependency');
+}, 10);
+`);
+  const runtime = await create({ ...options, supervisor: {
+    executable: process.execPath, module: launcher, env: { PRIVATE_VALUE: secret },
+  } });
+  const pending = await runtime.start(spec);
+  const failed = await runtime.wait('app', pending.candidate!.id);
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.error?.code, 'SUPERVISOR_FAILED');
+  const logs = await runtime.logs('app', failed.id);
+  assert.match(logs.text, /ERR_MODULE_NOT_FOUND/);
+  assert.match(logs.text, /previewhost-intentionally-missing-dependency/);
+  assert.match(logs.text, /bootstrap: \[REDACTED\]/);
+  assert.equal(logs.text.includes(secret), false);
+  assert.equal(logs.text.includes(secret.slice(0, 9)), false);
+  assert.equal((await runtime.get('app')).cleanup, undefined);
+  assert.equal(await readFile(join(source, 'content.txt'), 'utf8'), 'first');
+});
+
 test('embedded native launch isolates host settings and retains configuration without replay after restart', async t => {
   const { directory, source, options, spec, create } = await fixture(t);
   const launcher = join(directory, 'launcher.mjs');

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { CommandSpec, RuntimeOptions } from './contracts.js';
 import type { Resource } from './resources.js';
 import { PreviewError, throwIfAborted } from './errors.js';
+import { captureOutput } from './stream-logs.js';
 import { validateEnvironmentSize } from './spec.js';
 import { requireSupportedPlatform } from './private-files.js';
 import { createWindowsJob, assertWindowsListener } from './windows.js';
@@ -97,6 +98,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   throwIfAborted(input.signal);
 
   let supervisor: ChildProcess | undefined;
+  let output: Promise<void>[] = [];
   let supervisorIdentity: ProcessIdentity | undefined;
   let commandIdentity: ProcessIdentity | undefined;
   let group: number | undefined;
@@ -217,8 +219,8 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
       env: { ...(process.platform === 'win32' ? commandEnvironment({}, undefined, '') : {}), ...input.supervisor?.env },
     });
     group = supervisor.pid;
-    supervisor.stdout?.resume();
-    supervisor.stderr?.resume();
+    const redactions = [...Object.values(input.spec.env), ...(input.redactions ?? []), ...Object.entries(input.supervisor?.env ?? {}).filter(([key]) => key !== 'ELECTRON_RUN_AS_NODE').map(([, value]) => value)];
+    output = [supervisor.stdout!, supervisor.stderr!].map(stream => captureOutput(stream, redactions, input.appendLog));
     supervisor.on('message', (message: Record<string, unknown>) => {
       if (message?.type === 'log' && typeof message.text === 'string') {
         input.appendLog(message.text);
@@ -227,15 +229,16 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
         complete({ code: typeof message.code === 'number' ? message.code : null, signal: typeof message.signal === 'string' ? message.signal : null });
         if (!job) recordUnexpected(new PreviewError('START_FAILED', `Native command exited (${message.code ?? message.signal ?? 'unknown'}).`));
       } else if (message?.type === 'failure' && !stopping) {
-        recordUnexpected(new PreviewError('START_FAILED', typeof message.message === 'string' ? message.message : 'Native command failed.'));
+        recordUnexpected(new PreviewError(message.code === 'SUPERVISOR_FAILED' ? 'SUPERVISOR_FAILED' : 'START_FAILED', typeof message.message === 'string' ? message.message : 'Native command failed.'));
       }
     });
     supervisor.once('error', (error) => {
-      recordUnexpected(new PreviewError('START_FAILED', `Native supervisor failed: ${error.message}`));
+      recordUnexpected(new PreviewError('SUPERVISOR_FAILED', `Native supervisor failed: ${error.message}`));
     });
     // A finite job's result can still be buffered in IPC when its supervisor exits.
-    supervisor.once(job ? 'close' : 'exit', (code, signal) => {
-      if (!finished) recordUnexpected(new PreviewError('START_FAILED', `Native supervisor exited (${code ?? signal ?? 'unknown'}).`));
+    supervisor.once(job ? 'close' : 'exit', async (code, signal) => {
+      await Promise.race([Promise.all(output), new Promise(resolve => setTimeout(resolve, 250))]);
+      if (!finished) recordUnexpected(new PreviewError('SUPERVISOR_FAILED', `Native supervisor exited (${code ?? signal ?? 'unknown'}).`));
     });
     const online = await waitMessage(supervisor, 'online', input.signal);
     ensureStarting();
@@ -282,6 +285,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     return resource;
   } catch (error) {
     await stop();
+    await Promise.race([Promise.all(output), new Promise(resolve => setTimeout(resolve, 250))]);
     throw error;
   }
 
@@ -337,27 +341,28 @@ export async function availablePort(): Promise<number> {
 
 function send(child: ChildProcess, message: Record<string, unknown>): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (!child.connected) { reject(new PreviewError('START_FAILED', 'Native supervisor IPC is closed.')); return; }
-    child.send(message, (error) => error ? reject(error) : resolve());
+    if (!child.connected) { reject(new PreviewError('SUPERVISOR_FAILED', 'Native supervisor IPC is closed.')); return; }
+    child.send(message, (error) => error ? reject(new PreviewError('SUPERVISOR_FAILED', `Native supervisor communication failed: ${error.message}`)) : resolve());
   });
 }
 
 function waitMessage(child: ChildProcess, type: string, signal: AbortSignal): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => finish(new PreviewError('START_FAILED', `Native supervisor timed out before ${type}.`)), 5_000);
+    const timer = setTimeout(() => finish(new PreviewError('SUPERVISOR_FAILED', `Native supervisor timed out before ${type}.`)), 5_000);
     const message = (value: Record<string, unknown>) => {
       if (value?.type === type) finish(undefined, value);
-      if (value?.type === 'failure') finish(new PreviewError('START_FAILED', String(value.message ?? 'Native launch failed.')));
+      if (value?.type === 'failure') finish(new PreviewError(value.code === 'SUPERVISOR_FAILED' ? 'SUPERVISOR_FAILED' : 'START_FAILED', String(value.message ?? 'Native launch failed.')));
     };
-    const close = () => finish(new PreviewError('START_FAILED', `Native supervisor exited before ${type}.`));
+    const close = () => finish(new PreviewError('SUPERVISOR_FAILED', `Native supervisor exited before ${type}.`));
     const abort = () => finish(new PreviewError('CLOSED', 'Native startup was canceled.'));
+    const failed = (error: Error) => finish(new PreviewError('SUPERVISOR_FAILED', `Native supervisor could not start: ${error.message}`));
     function finish(error?: Error, value?: Record<string, unknown>) {
       clearTimeout(timer);
-      child.off('message', message); child.off('close', close); child.off('error', finish);
+      child.off('message', message); child.off('close', close); child.off('error', failed);
       signal.removeEventListener('abort', abort);
       if (error) reject(error); else resolve(value!);
     }
-    child.on('message', message); child.once('close', close); child.once('error', finish);
+    child.on('message', message); child.once('close', close); child.once('error', failed);
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
   });
