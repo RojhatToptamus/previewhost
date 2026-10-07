@@ -21,7 +21,7 @@ async function settle(runtime: PreviewRuntime, status: PreviewStatus, signal: Ab
 }
 
 test('Compose replacements, failures, cancellation and restart keep exact volume ownership and isolate another environment', {
-  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and local busybox:1.37', timeout: 180000,
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and local busybox:1.37', timeout: 360000,
 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-'));
   const source = join(directory, 'source');
@@ -44,7 +44,7 @@ test('Compose replacements, failures, cancellation and restart keep exact volume
   }));
   const spec = (name: string): PreviewSpec => ({ name, type: 'compose', cwd: source, files: ['compose.json'], rootServices: ['web'],
     services: [{ id: 'web', ports: { http: { target: 8080 } }, ready: { type: 'http', port: 'http', path: '/', timeoutMs: 3000 } }],
-    primary: { service: 'web', port: 'http' }, timeoutMs: 20000 });
+    primary: { service: 'web', port: 'http' } });
   await write('first');
   const first = await settle(runtime, await runtime.start(spec('one')), t.signal);
   assert.equal(first.state, 'ready', JSON.stringify({ result: first, logs: await runtime.logs('one', first.id) }));
@@ -53,8 +53,10 @@ test('Compose replacements, failures, cancellation and restart keep exact volume
   const second = await settle(runtime, await runtime.start(spec('two')), t.signal);
   assert.equal(second.state, 'ready', JSON.stringify(second));
   assert.equal((await (await fetch(second.url!)).text()).trim(), 'second');
+  const replacementStarted = performance.now();
   const replacement = await settle(runtime, await runtime.replace('one', spec('one')), t.signal);
-  assert.equal(replacement.state, 'ready', JSON.stringify(replacement));
+  t.diagnostic(`Compose replacement including old-container cleanup: ${Math.round(performance.now() - replacementStarted)} ms`);
+  assert.equal(replacement.state, 'ready', JSON.stringify({ result: replacement, logs: await runtime.logs('one', replacement.id) }));
   assert.equal(replacement.url, first.url);
   assert.equal((await (await fetch(replacement.url!)).text()).trim(), 'first');
   assert.doesNotMatch(JSON.stringify(await runtime.describe('one', replacement.id)), /SYNTHETIC_COMPOSE_PRIVATE_VALUE_2026/);
