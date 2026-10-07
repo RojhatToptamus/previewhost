@@ -225,12 +225,12 @@ test('readiness rejects upgrades and stop cancels a server that never sends head
   received = () => {};
   const first = await runtime.start(spec);
   const upgrade = await runtime.wait(spec.name, first.candidate!.id);
-  assert.equal(upgrade.error?.code, 'START_FAILED');
+  assert.equal(upgrade.error?.code, 'TIMEOUT');
   assert.ok(upgrades > 0, 'The readiness check must receive an upgrade response.');
   upgrading = false;
   const silent = await runtime.start(spec);
   const timeout = await runtime.wait(spec.name, silent.candidate!.id);
-  assert.equal(timeout.error?.code, 'START_FAILED');
+  assert.equal(timeout.error?.code, 'TIMEOUT');
   assert.match(timeout.error.message, /response headers timed out/);
   const requestReceived = new Promise<void>((resolve) => { received = resolve; });
   const next = await runtime.start({ ...spec, timeoutMs: 5000 });
@@ -255,7 +255,7 @@ test('readiness reports the latest connection failure instead of an earlier HTTP
   const { runtime } = await fixture(t);
   const started = await runtime.start({ name: 'closed-health', type: 'attach', url: `http://127.0.0.1:${address.port}`, timeoutMs: 300 });
   const failed = await runtime.wait(started.name, started.candidate!.id);
-  assert.equal(failed.error?.code, 'START_FAILED');
+  assert.equal(failed.error?.code, 'TIMEOUT');
   assert.equal(requests, 1);
   assert.match(failed.error.message, /connection refused/);
   assert.doesNotMatch(failed.error.message, /503|fake-private|127\.0\.0\.1/);

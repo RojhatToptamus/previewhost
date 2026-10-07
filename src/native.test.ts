@@ -150,7 +150,7 @@ test('finite jobs drain their result after supervisor exit and fail when no resu
         appendLog(text) { logs += text; }, onResource() {},
       });
       if (code === 0) await work;
-      else await assert.rejects(work, { code: 'START_FAILED', message: code === 7
+      else await assert.rejects(work, { code: code === 7 ? 'START_FAILED' : 'SUPERVISOR_FAILED', message: code === 7
         ? /Job exited \(7\)/ : /Native supervisor exited/ });
       assert.equal(logs, 'final output');
     }
