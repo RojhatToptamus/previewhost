@@ -1,5 +1,4 @@
 // Bounded Compose source validation derives from Task Monki (MIT); see NOTICE.
-import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isAlias, parseDocument, visit, type Node } from 'yaml';
@@ -83,9 +82,9 @@ export async function prepareCompose(spec: ComposeSpec, cli: ComposeCli, signal:
   // Compose would read env and secret files again by path. It reads these private copies instead.
   const copies = new Map<string, { file: string; text: string }>();
   for (const input of inputs) {
+    // Dockerfiles are read once, without blocking, when a selected service builds (pinBuilds).
     if (input.kind === 'BUILD_CONTEXT') await resolveContainedDirectory(root, input.path);
-    else if (input.kind === 'DOCKERFILE') await resolveContainedFile(root, path.resolve(root, input.path), MAX_HOST_INPUT_BYTES);
-    else if (input.kind !== 'COMPOSE_FILE' && !copies.has(input.path)) {
+    else if ((input.kind === 'ENV_FILE' || input.kind === 'SECRET_FILE') && !copies.has(input.path)) {
       const bytes = await readContainedFile(root, input.path, MAX_HOST_INPUT_BYTES);
       const file = path.join(cli.directory, `input-${copies.size}`);
       await fs.writeFile(file, bytes, { mode: 0o600, flag: 'wx' });
@@ -185,6 +184,12 @@ async function pinBuilds(root: string, services: Record<string, unknown>, direct
     const source = containedPath(root, path.resolve(context, safeStaticPath(dockerfile, `Compose service ${id} dockerfile`)));
     const file = path.join(directory, `dockerfile-${copies++}`);
     await fs.writeFile(file, await readContainedFile(root, source, MAX_HOST_INPUT_BYTES), { mode: 0o600, flag: 'wx' });
+    // BuildKit reads `<Dockerfile>.dockerignore` beside the Dockerfile before the context's `.dockerignore`.
+    const ignore = await readContainedFile(root, `${source}.dockerignore`, MAX_HOST_INPUT_BYTES).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (ignore) await fs.writeFile(`${file}.dockerignore`, ignore, { mode: 0o600, flag: 'wx' });
     service.build = { context: composeLiteral(context), dockerfile: composeLiteral(file) };
   }
 }
@@ -550,20 +555,6 @@ async function resolveContainedDirectory(root: string, relative: string): Promis
   if (!isWithin(root, real) || !stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error('Compose project path must be a contained regular directory.');
   }
-  return real;
-}
-
-async function resolveContainedFile(root: string, candidate: string, maxBytes: number): Promise<string> {
-  const lexical = path.resolve(candidate);
-  if (!isWithin(root, lexical)) throw new Error('Compose host input escapes the source directory.');
-  const stat = await fs.lstat(lexical);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes) {
-    throw new Error('Compose host input must be a bounded regular file, not a symlink.');
-  }
-  const real = await fs.realpath(lexical);
-  if (!isWithin(root, real)) throw new Error('Compose host input escapes the source directory.');
-  const handle = await fs.open(real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  await handle.close();
   return real;
 }
 

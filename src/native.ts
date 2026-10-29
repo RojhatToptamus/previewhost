@@ -83,13 +83,17 @@ function supervisorMessage(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * An embedder's channel as a supervisor link. A message outside the protocol, an unrequested listener answer,
- * or a backlog past 1,024 messages closes the link with a supervisor failure and calls `violated`.
+ * An embedder's channel as a supervisor link. Messages wait in one queue that drains once per event-loop turn,
+ * after the caller's listeners attach, even when the embedder flushes queued messages at once; order is kept.
+ * A message outside the protocol, an unrequested listener answer, or more than 8 MiB of undelivered text
+ * (or 65,536 messages) closes the link with a supervisor failure and calls `violated`. A burst of ordinary
+ * output while the owner is busy stays well below that.
  */
 function channelLink(channel: SupervisorChannel, expected: (message: Record<string, unknown>) => boolean, violated: () => void): SupervisorLink {
   let open = true;
   let invalid = false;
-  let backlog = 0;
+  let queuedBytes = 0;
+  const queue: Array<{ message: Record<string, unknown> } | { exit: [number | null, string | null] }> = [];
   // A getter, not Object.assign: `connected` must follow the channel after it closes.
   const link = Object.defineProperties(new EventEmitter(), {
     connected: { get: () => open },
@@ -99,24 +103,30 @@ function channelLink(channel: SupervisorChannel, expected: (message: Record<stri
       return true;
     } },
   }) as SupervisorLink;
-  // Deliver after the caller's listeners attach, even when the embedder flushes queued messages at once. Order is kept.
+  const drain = () => {
+    const entries = queue.splice(0);
+    queuedBytes = 0;
+    for (const entry of entries) {
+      if (invalid) return;
+      if ('message' in entry) link.emit('message', entry.message);
+      else { open = false; link.emit('exit', ...entry.exit); link.emit('close', ...entry.exit); }
+    }
+  };
+  const enqueue = (entry: (typeof queue)[number]) => { if (queue.push(entry) === 1) setImmediate(drain); };
   channel.onMessage(message => {
     if (invalid) return;
-    if (!supervisorMessage(message) || !expected(message) || ++backlog > 1024) {
-      invalid = true; open = false;
-      setImmediate(() => {
-        link.emit('message', { type: 'failure', code: 'SUPERVISOR_FAILED', message: 'The application supervisor sent a message outside its protocol.' });
-        link.emit('exit', null, null); link.emit('close', null, null);
-      });
-      violated();
-      return;
+    if (supervisorMessage(message) && expected(message)) {
+      queuedBytes += typeof message.text === 'string' ? Buffer.byteLength(message.text) + 64 : 64;
+      if (queuedBytes <= 8 * 1024 * 1024 && queue.length < 65_536) { enqueue({ message }); return; }
     }
-    setImmediate(() => { backlog--; if (!invalid) link.emit('message', message); });
+    invalid = true; open = false; queue.length = 0;
+    setImmediate(() => {
+      link.emit('message', { type: 'failure', code: 'SUPERVISOR_FAILED', message: 'The application supervisor sent a message outside its protocol.' });
+      link.emit('exit', null, null); link.emit('close', null, null);
+    });
+    violated();
   });
-  channel.onExit((code, signal) => setImmediate(() => {
-    if (invalid) return;
-    open = false; link.emit('exit', code, signal); link.emit('close', code, signal);
-  }));
+  channel.onExit((code, signal) => { if (!invalid) enqueue({ exit: [code, signal] }); });
   return link;
 }
 

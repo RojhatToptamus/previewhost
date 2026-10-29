@@ -398,8 +398,9 @@ export interface ApplicationProcessLauncher {
  * Deliver every message in order, and queue messages that arrive before the first `onMessage` listener.
  * The supervisor runs as the command's user, so job results and listener verdicts come from that user.
  * Previewhost accepts only these messages, within bounds (`log.text` 16,384 characters, `failure.message`
- * 1,024, a listener answer only for an open request, 1,024 undelivered messages); anything else stops the
- * channel and fails the process.
+ * 1,024, a listener answer only for an open request, 8 MiB of undelivered text); anything else stops the
+ * channel and fails the process. Cap each message's serialized size before parsing it, for example at 1 MiB.
+ *
  */
 export interface SupervisorChannel {
   send(message: unknown): void;

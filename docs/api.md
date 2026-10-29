@@ -106,7 +106,9 @@ The channel carries the supervisor's JSON messages unchanged. Deliver them in or
 messages that arrive before the first `onMessage` listener. Call `onExit` listeners after the last
 message, as Node's `close` event does. Previewhost accepts only the messages below, with `log` text up
 to 16,384 characters, `failure` messages up to 1,024, listener answers only for an open request, and at
-most 1,024 undelivered messages. Anything else stops the channel and fails the process.
+most 8 MiB of undelivered text. Anything else stops the channel and fails the process.
+The supervisor runs as the other user, so cap each message's serialized size before you parse it, for
+example at 1 MiB: Node's own IPC buffers a line without a newline without limit.
 
 | From | Message | Meaning |
 | --- | --- | --- |

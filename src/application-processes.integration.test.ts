@@ -15,7 +15,7 @@ const posix = { skip: process.platform === 'win32' && 'Application process launc
 
 /**
  * A test embedder: forks the supervisor into its own process group and proves cleanup by that group's absence.
- * `inject()` returns a message delivered as if the supervisor had sent it, right after `started`.
+ * `inject()` returns a message, or several, delivered as if the supervisor had sent them right after `started`.
  */
 function embedder(baseEnvironment: Record<string, string>, { module, inject }: { module?: string; inject?: () => unknown } = {}) {
   const requests: Array<{ module: string; env: Record<string, string>; cwd: string }> = [];
@@ -36,7 +36,10 @@ function embedder(baseEnvironment: Record<string, string>, { module, inject }: {
       const exits: Array<(code: number | null, signal: string | null) => void> = [];
       let exit: [number | null, string | null] | undefined;
       const deliver = (message: unknown) => { if (listeners.length) for (const listener of listeners) listener(message); else queued.push(message); };
-      child.on('message', (message: { type?: string }) => { deliver(message); if (inject && message.type === 'started') deliver(inject()); });
+      child.on('message', (message: { type?: string }) => {
+        deliver(message);
+        if (inject && message.type === 'started') for (const extra of [inject()].flat()) if (extra !== undefined) deliver(extra);
+      });
       child.once('close', (code, signal) => { exit = [code, signal]; for (const listener of exits) listener(code, signal); });
       return {
         send(message) {
@@ -261,4 +264,21 @@ test('a launcher that rejects, honors cancellation, or never returns does not ho
   pendingStart!({ send() {}, onMessage() {}, onExit() {}, stdout: Readable.from([]), stderr: Readable.from([]), async stop() { stops.push('stop'); } });
   assert.equal((await runtime.stop('never')).latest?.state, 'stopped');
   assert.deepEqual(stops, ['stop']);
+});
+
+test('a burst of ordinary output delivered in one turn passes, and a flood past the byte bound fails', posix, async t => {
+  const { source, start } = await fixture(t);
+  await writeFile(join(source, 'server.cjs'), server);
+  let injected: unknown[] = [];
+  const { runtime } = await start({ inject: () => injected });
+  // As when the owner is busy: thousands of short log messages arrive before it next drains the channel.
+  injected = Array.from({ length: 5000 }, (_, index) => ({ type: 'log', text: `burst line ${index}\n` }));
+  const burst = await runtime.wait('burst', (await runtime.start({ name: 'burst', type: 'command', cwd: source, command: [process.execPath, 'server.cjs'] })).candidate!.id);
+  assert.equal(burst.state, 'ready', JSON.stringify(burst));
+  assert.match((await runtime.logs('burst', burst.id)).text, /burst line 4999/);
+  injected = Array.from({ length: 600 }, () => ({ type: 'log', text: 'x'.repeat(16_000) }));
+  const flood = await runtime.wait('flood', (await runtime.start({ name: 'flood', type: 'command', cwd: source, command: [process.execPath, 'server.cjs'] })).candidate!.id);
+  assert.equal(flood.state, 'failed');
+  assert.equal(flood.error?.code, 'SUPERVISOR_FAILED');
+  assert.match(flood.error!.message, /outside its protocol/);
 });

@@ -77,8 +77,12 @@ in the receiving code.
 
 Static previews reject traversal, hidden paths, escaping symlinks, special files,
 and directory listings. They exclude the private data directory and its resolved aliases.
-A file is opened only if every directory on its resolved path is unchanged and not a link before
-and after the open, so a directory replaced by a link during a request is refused.
+On macOS and Linux, the opened file's own path, from `fcntl(F_GETPATH)` or `/proc/self/fd`, must pass
+the same rules, so a directory replaced by a link during a request cannot redirect it. Windows checks only
+that each directory on the path is unchanged and not a link before and after the open.
+A hard-linked file inside the directory is served, as `cp -l` and pnpm produce; its other names are not
+checked. Linux's `protected_hardlinks` stops another user from linking a file it cannot read; macOS has no
+such protection.
 Attachments connect only to IPv4 loopback.
 These checks do not isolate hostile filesystem changes by another same-user process.
 
@@ -211,14 +215,15 @@ See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
 ## Compose inputs
 
 Inspection reads each Compose file, env file, and secret file once. Each must be a regular file inside
-the source directory, reached without a symlink in any path component, with a single hard link.
+the source directory, reached without a symlink in any path component, with a single hard link. On macOS
+and Linux, the opened file's own path must also lie inside the source directory.
 Compose files are limited to 1 MiB and other files to 64 KiB. Previewhost writes private copies
 to its owner directory and normalizes only those copies. `docker compose` then runs with `-f` on that
 normalized model, whose env and secret files name the copies. A file changed or replaced after
 inspection is not used.
 
 Each Dockerfile is read once under the same rules, within 64 KiB, and Docker builds from the private copy.
-A `Dockerfile.dockerignore` beside the original no longer applies; a `.dockerignore` in the context does.
+A Dockerfile-specific ignore file beside it, such as `Dockerfile.dockerignore`, is copied beside the copy.
 
 Build contexts are different. Docker reads each context directory by path while it builds, after
 authorization, so a context is not read once. Previewhost checks that it is a local directory inside

@@ -130,17 +130,20 @@ test('Compose normalizes private copies, so env and secret files swapped for lin
   assert.doesNotMatch(JSON.stringify(prepared), /outside/);
 });
 
-test('Compose builds from a root context with the Dockerfile it inspected, even when a link replaces it before the build', {
+test('Compose builds from a root context with the Dockerfile and ignore file it inspected, even when a link replaces the Dockerfile before the build', {
   skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and local busybox:1.37', timeout: 240000,
 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-build-'));
   const source = join(directory, 'source');
   await mkdir(source);
-  await writeFile(join(source, 'inspected.txt'), 'inspected');
-  await writeFile(join(source, 'swapped.txt'), 'swapped');
-  const dockerfile = (page: string) => `FROM busybox:1.37\nCOPY ${page} /www/index.html\nCMD ["httpd", "-f", "-p", "8080", "-h", "/www"]\n`;
-  await writeFile(join(source, 'Dockerfile'), dockerfile('inspected.txt'));
-  await writeFile(join(directory, 'outside.Dockerfile'), dockerfile('swapped.txt'));
+  await writeFile(join(source, 'index.html'), 'inspected');
+  await writeFile(join(source, 'excluded.txt'), 'excluded');
+  await writeFile(join(source, 'swapped.html'), 'swapped');
+  const command = 'CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]\n';
+  await writeFile(join(source, 'Dockerfile'), `FROM busybox:1.37\nCOPY . /www\n${command}`);
+  // Docker reads this ignore file beside the Dockerfile, so it must sit beside the private copy too.
+  await writeFile(join(source, 'Dockerfile.dockerignore'), 'excluded.txt\n');
+  await writeFile(join(directory, 'outside.Dockerfile'), `FROM busybox:1.37\nCOPY swapped.html /www/index.html\n${command}`);
   await writeFile(join(source, 'compose.yaml'), 'services:\n  web:\n    build: .\n    expose: [8080]\n');
   // Authorization runs after inspection and before Docker reads the Dockerfile.
   const runtime = await createPreviewRuntime({ allowedRoots: [source], dataDirectory: join(directory, 'data'), keystoreDirectory: join(directory, 'keystore'), dockerSocket,
@@ -158,6 +161,7 @@ test('Compose builds from a root context with the Dockerfile it inspected, even 
     primary: { service: 'web', port: 'http' } }), t.signal);
   assert.equal(result.state, 'ready', JSON.stringify({ result, logs: await runtime.logs('build', result.id) }));
   assert.equal((await (await fetch(result.url!)).text()).trim(), 'inspected');
+  assert.equal((await fetch(new URL('/excluded.txt', result.url!))).status, 404);
 });
 
 test('Compose pins build contexts to verified absolute directories and Dockerfiles to private copies', {
