@@ -201,6 +201,18 @@ Previewhost records no receipt for commands started through `applicationProcesse
 signals a process the owner did not start. The embedder stops those processes after an owner crash.
 See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
 
+## Compose inputs
+
+Inspection reads each Compose file, env file, and secret file once. Each must be a regular file inside
+the source directory, reached without a symlink in any path component, with a single hard link.
+Compose files are limited to 1 MiB and other files to 64 KiB. Previewhost writes private copies
+to its owner directory and normalizes only those copies. `docker compose` then runs with `-f` on that
+normalized model, whose env and secret files name the copies. A file changed or replaced after
+inspection is not used.
+
+Build contexts remain directories that Docker reads during the build. Every build context and
+Dockerfile must stay inside the source directory, and `additional_contexts` is rejected.
+
 ## Database ownership and recovery
 
 Managed PostgreSQL and Redis require an unlocked keystore, a local Docker Engine, downloaded database images, and private data storage.

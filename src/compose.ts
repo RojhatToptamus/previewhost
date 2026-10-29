@@ -139,11 +139,6 @@ export class ComposeOwner {
       delete service.env_file;
       input.serviceStatus(id, { type: 'compose', state: 'waiting' });
     }
-    for (const [id, value] of Object.entries(input.prepared.secretFiles)) {
-      const file = join(input.cli.directory, `secret-${randomUUID()}`);
-      await writeFile(file, value, { mode: 0o600, flag: 'wx' });
-      object(configuration.secrets)[id] = { file };
-    }
     const file = join(input.cli.directory, 'compose.json');
     await writeFile(file, JSON.stringify(configuration), { mode: 0o600, flag: 'wx' });
     let command: Pick<Resource, 'stop'> | undefined;

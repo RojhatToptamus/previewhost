@@ -64,8 +64,9 @@ export class ComposeCli {
     return version.trim().replace(/^v/, '');
   }
 
-  config(spec: ComposeSpec, materialized: boolean, signal: AbortSignal): Promise<string> {
-    return this.read([...this.base(spec, 'previewhost-inspect', spec.files), 'config', '--format', 'json', '--no-path-resolution',
+  /** `files` are private copies; relative paths in them still resolve from the source directory. */
+  config(spec: ComposeSpec, files: string[], materialized: boolean, signal: AbortSignal): Promise<string> {
+    return this.read([...this.base(spec, 'previewhost-inspect', files), 'config', '--format', 'json', '--no-path-resolution',
       ...(materialized ? [] : ['--no-interpolate', '--no-env-resolution'])], spec.cwd, signal);
   }
 
