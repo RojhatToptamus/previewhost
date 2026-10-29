@@ -171,11 +171,16 @@ nor signals process groups for those commands. It sends `stop` over IPC, then re
 `stop()` to prove that no process remains. Docker Compose still runs under the owner's supervisor.
 
 The supervisor answers the listener check as the command's user. Every listener on the selected port
-must bind loopback and belong to the command or one of its descendants. On Linux it reads `/proc`,
-which also works with `hidepid` or `ProtectProc=invisible`. On macOS it runs `lsof` and `ps`; a
-listener owned by another user is invisible there, so that port counts as missing.
-The answer comes from the application's own user. It guards against a stale or unrelated listener,
-not against that user.
+must bind loopback and belong to the command or one of its descendants, and one must bind `127.0.0.1`,
+where the gateway connects. On Linux it reads `/proc`, which also works with `hidepid` or
+`ProtectProc=invisible`. On macOS it runs `lsof` and `ps`; a listener owned by another user is
+invisible there. The check reads the supervisor's network namespace, so the embedder must run the
+supervisor in the owner's.
+
+Job results and listener verdicts come from the command's own user. They guard against a stale or
+unrelated listener and report a job's exit, not against that user. Previewhost accepts only the
+supervisor's protocol messages, within size and backlog bounds. Any other message stops the channel
+and fails the process.
 
 Application commands start from the embedder's `baseEnvironment`. The owner's `HOME`, `TMPDIR`, and
 other basic variables do not reach them.
@@ -210,8 +215,14 @@ to its owner directory and normalizes only those copies. `docker compose` then r
 normalized model, whose env and secret files name the copies. A file changed or replaced after
 inspection is not used.
 
-Build contexts remain directories that Docker reads during the build. Every build context and
-Dockerfile must stay inside the source directory, and `additional_contexts` is rejected.
+Each Dockerfile is read once under the same rules, within 64 KiB, and Docker builds from the private copy.
+A `Dockerfile.dockerignore` beside the original no longer applies; a `.dockerignore` in the context does.
+
+Build contexts are different. Docker reads each context directory by path while it builds, after
+authorization, so a context is not read once. Previewhost checks that it is a local directory inside
+the source directory and passes Docker that verified absolute path. Remote contexts (a value with `:`),
+contexts starting with `~`, and `additional_contexts` are rejected. With `applicationProcesses`, whose
+commands could replace a directory before Docker reads it, Compose image builds are refused; use `image:`.
 
 ## Database ownership and recovery
 

@@ -95,6 +95,8 @@ const runtime = await createPreviewRuntime({
   A rejection reports `CLEANUP_INCOMPLETE`; the next `stop` calls it again.
 - Previewhost never inspects or signals these processes and records no recovery receipt for them.
   After an owner crash, the embedder stops them.
+- The supervisor checks listeners in its own network namespace. Run it in the owner's.
+- Compose previews still run, but image builds are refused; services must use `image:`.
 
 `applicationSupervisorFiles()` returns the supervisor module and every file it imports, as absolute
 paths in the installed package. They import only Node.js built-ins and each other. Node.js loads them
@@ -102,7 +104,9 @@ as ES modules when no `package.json` above their directory sets `"type": "common
 
 The channel carries the supervisor's JSON messages unchanged. Deliver them in order, and queue
 messages that arrive before the first `onMessage` listener. Call `onExit` listeners after the last
-message, as Node's `close` event does.
+message, as Node's `close` event does. Previewhost accepts only the messages below, with `log` text up
+to 16,384 characters, `failure` messages up to 1,024, listener answers only for an open request, and at
+most 1,024 undelivered messages. Anything else stops the channel and fails the process.
 
 | From | Message | Meaning |
 | --- | --- | --- |
@@ -118,8 +122,8 @@ message, as Node's `close` event does.
 | Supervisor | `{type: 'failure', code, message}` | `START_FAILED` or `SUPERVISOR_FAILED`. |
 | Supervisor | `{type: 'listener', id, result}` | The answer to `check-listener` with the same `id`. |
 
-`result` is `owned` when every listener on the port binds `127.0.0.1` or `::1` and belongs to the
-command or one of its descendants. Other results are `missing`, `non-loopback`, `foreign`, and
+`result` is `owned` when every listener on the port binds `127.0.0.1` or `::1`, belongs to the
+command or one of its descendants, and one of them binds `127.0.0.1`. Other results are `missing`, `non-loopback`, `foreign`, and
 `unavailable`; each fails the readiness check. The supervisor reads `/proc` on Linux and runs
 `lsof` and `ps` on macOS, as the command's user. It needs no access to other users' processes.
 

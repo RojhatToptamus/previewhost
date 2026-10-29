@@ -5,15 +5,19 @@ import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'nod
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createPreviewRuntime } from './runtime.js';
 import { applicationSupervisorFiles } from './native.js';
-import type { ApplicationProcessLauncher, RuntimeOptions } from './contracts.js';
+import type { ApplicationProcessLauncher, RuntimeOptions, SupervisorChannel } from './contracts.js';
 
 const posix = { skip: process.platform === 'win32' && 'Application process launchers require macOS or Linux' };
 
-/** A test embedder: forks the supervisor into its own process group and proves cleanup by that group's absence. */
-function embedder(baseEnvironment: Record<string, string>, module?: string) {
+/**
+ * A test embedder: forks the supervisor into its own process group and proves cleanup by that group's absence.
+ * `inject()` returns a message delivered as if the supervisor had sent it, right after `started`.
+ */
+function embedder(baseEnvironment: Record<string, string>, { module, inject }: { module?: string; inject?: () => unknown } = {}) {
   const requests: Array<{ module: string; env: Record<string, string>; cwd: string }> = [];
   const channels: Array<{ cwd: string; events: string[] }> = [];
   const groups = new Set<number>();
@@ -31,7 +35,8 @@ function embedder(baseEnvironment: Record<string, string>, module?: string) {
       const listeners: Array<(message: unknown) => void> = [];
       const exits: Array<(code: number | null, signal: string | null) => void> = [];
       let exit: [number | null, string | null] | undefined;
-      child.on('message', message => { if (listeners.length) for (const listener of listeners) listener(message); else queued.push(message); });
+      const deliver = (message: unknown) => { if (listeners.length) for (const listener of listeners) listener(message); else queued.push(message); };
+      child.on('message', (message: { type?: string }) => { deliver(message); if (inject && message.type === 'started') deliver(inject()); });
       child.once('close', (code, signal) => { exit = [code, signal]; for (const listener of exits) listener(code, signal); });
       return {
         send(message) {
@@ -81,8 +86,8 @@ async function fixture(t: test.TestContext) {
     await rm(directory, { recursive: true, force: true });
   });
   /** Starts a runtime whose application processes run through a test embedder; both are cleaned up in reverse. */
-  async function start(module?: string) {
-    const host = embedder(base, module);
+  async function start(behavior?: Parameters<typeof embedder>[1]) {
+    const host = embedder(base, behavior);
     cleanup.push(() => host.cleanup());
     const runtime = await createPreviewRuntime({ ...options, applicationProcesses: host.launcher });
     cleanup.push(() => runtime.close());
@@ -106,7 +111,7 @@ test('an embedder runs a copied supervisor from its base environment and stops i
   // The listener is a descendant of the command, as with `npm run dev`.
   await writeFile(join(source, 'launcher.cjs'), `require('child_process').spawn(process.execPath, ['server.cjs'], { stdio: 'inherit' });`);
   await writeFile(join(source, 'server.cjs'), server);
-  const { host, runtime } = await start(join(installed, basename(files.module)));
+  const { host, runtime } = await start({ module: join(installed, basename(files.module)) });
 
   const pending = await runtime.start({ name: 'app', type: 'command', cwd: source, command: [process.execPath, 'launcher.cjs'], env: { VALUE: 'bound' } });
   const ready = await runtime.wait('app', pending.candidate!.id);
@@ -174,4 +179,86 @@ test('the supervisor refuses a listener outside its command tree and a non-loopb
   const refused = await runtime.wait('wildcard', wildcard.candidate!.id);
   assert.equal(refused.state, 'failed');
   assert.match(refused.error!.message, /non-loopback/);
+});
+
+test('a restarted service and its command probe both run through the embedder', posix, async t => {
+  const { source, base, start } = await fixture(t);
+  await writeFile(join(source, 'once.cjs'), `const fs = require('fs');
+if (!fs.existsSync('failed-once')) { fs.writeFileSync('failed-once', ''); process.exit(1); }
+${server}`);
+  await writeFile(join(source, 'probe.cjs'), `require('http').get('http://127.0.0.1:' + process.env.PORT, response => {
+  require('fs').writeFileSync('probe.txt', process.env.HOME); process.exit(response.statusCode === 200 ? 0 : 1);
+}).on('error', () => process.exit(1));`);
+  const { host, runtime } = await start();
+  const pending = await runtime.start({ name: 'restart', type: 'environment', primary: 'web', services: {
+    web: { type: 'command', cwd: source, command: [process.execPath, 'once.cjs'], restart: { mode: 'on-failure', maxRestarts: 2, backoffMs: 0 },
+      ready: { type: 'command', command: [process.execPath, 'probe.cjs'], timeoutMs: 10000 } },
+  } });
+  const ready = await runtime.wait('restart', pending.candidate!.id);
+  assert.equal(ready.state, 'ready', JSON.stringify({ ready, logs: await runtime.logs('restart', ready.id) }));
+  assert.match((await runtime.logs('restart', ready.id, { source: 'web' })).text, /Restart 1\/2/);
+  // The probe ran from the embedder's environment, not the owner's.
+  assert.equal(await readFile(join(source, 'probe.txt'), 'utf8'), base.HOME);
+  assert.ok(host.requests.length >= 3, `two service starts and at least one probe: ${host.requests.length}`);
+  await runtime.stop('restart');
+});
+
+test('a supervisor message outside the protocol stops the channel and fails the command', posix, async t => {
+  const { source, start } = await fixture(t);
+  await writeFile(join(source, 'idle.cjs'), 'setInterval(() => {}, 1000);');
+  let injected: unknown;
+  const { host, runtime } = await start({ inject: () => injected });
+  for (const [name, message] of [
+    ['wrong-id', { type: 'listener', id: 99, result: 'owned' }],
+    ['unknown', { type: 'debug', text: 'hello' }],
+    ['oversized', { type: 'log', text: 'x'.repeat(16_385) }],
+  ] as const) {
+    injected = message;
+    const pending = await runtime.start({ name, type: 'command', cwd: source, command: [process.execPath, 'idle.cjs'] });
+    const failed = await runtime.wait(name, pending.candidate!.id);
+    assert.equal(failed.state, 'failed', name);
+    assert.equal(failed.error?.code, 'SUPERVISOR_FAILED', name);
+    assert.match(failed.error!.message, /outside its protocol/, name);
+    // An untrusted supervisor gets no IPC grace: the embedder stops it directly.
+    assert.deepEqual(host.channels.at(-1)!.events, ['stop'], name);
+    assert.equal((await runtime.get(name)).cleanup, undefined, name);
+  }
+});
+
+test('a launcher that rejects, honors cancellation, or never returns does not hold startup or hide cleanup', posix, async t => {
+  const { source, base, options, cleanup } = await fixture(t);
+  await writeFile(join(source, 'server.cjs'), server);
+  const spec = (name: string) => ({ name, type: 'command' as const, cwd: source, command: [process.execPath, 'server.cjs'] });
+  let pendingStart: ((channel: SupervisorChannel) => void) | undefined;
+  let mode: 'reject' | 'abort' | 'never' = 'reject';
+  const runtime = await createPreviewRuntime({ ...options, applicationProcesses: { baseEnvironment: base, start: ({ signal }) => {
+    if (mode === 'reject') return Promise.reject(new Error('sandbox unavailable'));
+    if (mode === 'abort') return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+    return new Promise(resolve => { pendingStart = resolve; });
+  } } });
+  cleanup.push(() => runtime.close());
+
+  const rejected = await runtime.wait('reject', (await runtime.start(spec('reject'))).candidate!.id);
+  assert.equal(rejected.state, 'failed');
+  assert.equal(rejected.error?.code, 'SUPERVISOR_FAILED');
+  assert.match(rejected.error!.message, /sandbox unavailable/);
+
+  mode = 'abort';
+  const aborting = (await runtime.start(spec('abort'))).candidate!.id;
+  await delay(100);
+  await runtime.cancel('abort', aborting);
+  const canceled = await runtime.get('abort');
+  assert.equal(canceled.latest?.state, 'canceled');
+  assert.equal(canceled.cleanup, undefined);
+
+  mode = 'never';
+  const never = (await runtime.start(spec('never'))).candidate!.id;
+  for (const deadline = Date.now() + 5000; !pendingStart; await delay(25)) assert.ok(Date.now() < deadline, 'start was not called');
+  // Startup ends at cancellation; cleanup stays visible while the launcher has not returned.
+  await runtime.cancel('never', never).catch(error => assert.equal(error.code, 'CLEANUP_INCOMPLETE'));
+  assert.equal((await runtime.get('never')).latest?.state, 'cleanup-incomplete');
+  const stops: string[] = [];
+  pendingStart!({ send() {}, onMessage() {}, onExit() {}, stdout: Readable.from([]), stderr: Readable.from([]), async stop() { stops.push('stop'); } });
+  assert.equal((await runtime.stop('never')).latest?.state, 'stopped');
+  assert.deepEqual(stops, ['stop']);
 });

@@ -62,9 +62,10 @@ export class ComposeOwner {
       ...(this.cleanup.has(name) ? { cleanup: this.cleanup.get(name) } : {}) };
   }
 
-  async prepare(spec: ComposeSpec, signal: AbortSignal): Promise<{ cli: ComposeCli; prepared: PreparedCompose }> {
+  /** `build: false` refuses image builds, whose contexts Docker reads by path after authorization. */
+  async prepare(spec: ComposeSpec, signal: AbortSignal, options: { build: boolean }): Promise<{ cli: ComposeCli; prepared: PreparedCompose }> {
     const cli = await ComposeCli.create(this.commands, this.socket);
-    try { return { cli, prepared: await prepareCompose(spec, cli, signal) }; }
+    try { return { cli, prepared: await prepareCompose(spec, cli, signal, options) }; }
     catch (error) { await cli.close(); throw error; }
   }
 

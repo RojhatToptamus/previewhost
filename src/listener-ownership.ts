@@ -7,8 +7,9 @@ import { endianness } from 'node:os';
 export type ListenerResult = 'owned' | 'missing' | 'non-loopback' | 'foreign' | 'unavailable';
 
 /**
- * Classifies the TCP listeners on `port` from the target's own user: `owned` when every one binds loopback
- * and belongs to `target` or a descendant. It needs no other user's processes, `ps` from others, or root.
+ * Classifies the TCP listeners on `port` from the target's own user: `owned` when every one binds loopback,
+ * belongs to `target` or a descendant, and one of them binds 127.0.0.1, where the owner connects. It needs
+ * no other user's processes, `ps` from others, or root. It reads this process's network namespace.
  */
 export async function listenerOwnership(target: number, port: number): Promise<ListenerResult> {
   try { return process.platform === 'linux' ? await fromProc(target, port) : await fromLsof(target, port); }
@@ -18,6 +19,7 @@ export async function listenerOwnership(target: number, port: number): Promise<L
 /** Linux: socket tables and descriptors from /proc, which `hidepid` and ProtectProc=invisible leave readable for own processes. */
 async function fromProc(target: number, port: number): Promise<ListenerResult> {
   const listeners = new Map<string, boolean>();
+  let ipv4 = false;
   for (const [table, bytes] of [['tcp', 4], ['tcp6', 16]] as const) {
     let rows: string;
     try { rows = await readFile(`/proc/self/net/${table}`, 'utf8'); }
@@ -29,6 +31,7 @@ async function fromProc(target: number, port: number): Promise<ListenerResult> {
       const [address, hexPort] = fields[1].split(':');
       if (Number.parseInt(hexPort, 16) !== port) continue;
       listeners.set(fields[9], isLoopback(address, bytes));
+      if (bytes === 4 && isLoopback(address, bytes)) ipv4 = true;
     }
   }
   if (!listeners.size) return 'missing';
@@ -42,7 +45,8 @@ async function fromProc(target: number, port: number): Promise<ListenerResult> {
       if (socket) held.add(socket[1]);
     }
   }
-  return [...listeners.keys()].every(inode => held.has(inode)) ? 'owned' : 'foreign';
+  if (![...listeners.keys()].every(inode => held.has(inode))) return 'foreign';
+  return ipv4 ? 'owned' : 'missing';
 }
 
 /** /proc/net prints each 32-bit address word in host byte order. Only 127.0.0.1 and ::1 count. */
@@ -68,7 +72,10 @@ async function procParents(): Promise<Array<[number, number]>> {
   return pairs;
 }
 
-/** macOS: lsof and ps as the target's user. lsof cannot see another user's sockets; that port then counts as missing. */
+/**
+ * macOS: lsof and ps as the target's user. lsof cannot see another user's sockets, so only an owned
+ * 127.0.0.1 listener proves that no other user holds the address the owner connects to.
+ */
 async function fromLsof(target: number, port: number): Promise<ListenerResult> {
   let output: string;
   try { output = await run(process.platform === 'darwin' ? '/usr/sbin/lsof' : '/usr/bin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn']); }
@@ -87,7 +94,8 @@ async function fromLsof(target: number, port: number): Promise<ListenerResult> {
   if (listeners.some(({ address }) => address !== `127.0.0.1:${port}` && address !== `[::1]:${port}`)) return 'non-loopback';
   const owned = await descendants(target, async () => (await run('/bin/ps', ['-axo', 'pid=,ppid='])).trim().split('\n')
     .map(row => row.trim().split(/\s+/).map(Number) as [number, number]));
-  return listeners.every(({ pid }) => owned.has(pid)) ? 'owned' : 'foreign';
+  if (!listeners.every(({ pid }) => owned.has(pid))) return 'foreign';
+  return listeners.some(({ address }) => address === `127.0.0.1:${port}`) ? 'owned' : 'missing';
 }
 
 async function descendants(target: number, parents: () => Promise<Array<[number, number]>>): Promise<Set<number>> {

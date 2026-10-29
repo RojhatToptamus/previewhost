@@ -654,7 +654,7 @@ class Runtime implements PreviewRuntime {
       attempt.summary.sources = sourceDirectories(spec);
       if (spec.type === 'compose') {
         if (!this.compose) throw new PreviewError('INVALID_INPUT', 'Compose requires a private dataDirectory.');
-        preparedCompose = await this.compose.prepare(spec, signal);
+        preparedCompose = await this.compose.prepare(spec, signal, { build: !this.applicationProcesses });
         attempt.compose = preparedCompose.prepared.description;
       }
       this.admitted(slot, attempt);

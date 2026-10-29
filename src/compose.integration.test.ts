@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
@@ -130,27 +130,72 @@ test('Compose normalizes private copies, so env and secret files swapped for lin
   assert.doesNotMatch(JSON.stringify(prepared), /outside/);
 });
 
-test('Compose starts with the env file content it inspected when the file changes before up', {
-  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and local busybox:1.37', timeout: 180000,
+test('Compose builds from a root context with the Dockerfile it inspected, even when a link replaces it before the build', {
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and local busybox:1.37', timeout: 240000,
 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-copies-'));
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-build-'));
   const source = join(directory, 'source');
   await mkdir(source);
-  await writeFile(join(source, 'app.env'), 'VALUE=inspected\n');
-  await writeFile(join(source, 'compose.json'), JSON.stringify({ services: { web: { image: 'busybox:1.37', env_file: 'app.env', expose: [8080],
-    command: ['sh', '-c', 'echo "$$VALUE" > /tmp/index.html && exec httpd -f -p 8080 -h /tmp'] } } }));
-  // Authorization runs after inspection and before Compose builds or starts anything.
+  await writeFile(join(source, 'inspected.txt'), 'inspected');
+  await writeFile(join(source, 'swapped.txt'), 'swapped');
+  const dockerfile = (page: string) => `FROM busybox:1.37\nCOPY ${page} /www/index.html\nCMD ["httpd", "-f", "-p", "8080", "-h", "/www"]\n`;
+  await writeFile(join(source, 'Dockerfile'), dockerfile('inspected.txt'));
+  await writeFile(join(directory, 'outside.Dockerfile'), dockerfile('swapped.txt'));
+  await writeFile(join(source, 'compose.yaml'), 'services:\n  web:\n    build: .\n    expose: [8080]\n');
+  // Authorization runs after inspection and before Docker reads the Dockerfile.
   const runtime = await createPreviewRuntime({ allowedRoots: [source], dataDirectory: join(directory, 'data'), keystoreDirectory: join(directory, 'keystore'), dockerSocket,
-    authorize: async request => { if (request.operation === 'start') await writeFile(join(source, 'app.env'), 'VALUE=changed\n'); return true; } });
+    authorize: async request => {
+      if (request.operation === 'start') { await rm(join(source, 'Dockerfile')); await symlink(join(directory, 'outside.Dockerfile'), join(source, 'Dockerfile')); }
+      return true;
+    } });
   t.after(async () => {
-    await runtime.stop('copies').catch(() => {});
+    await runtime.stop('build').catch(() => {});
     await runtime.close();
     await rm(directory, { recursive: true, force: true });
   });
-  const result = await settle(runtime, await runtime.start({ name: 'copies', type: 'compose', cwd: source, files: ['compose.json'], rootServices: ['web'],
+  const result = await settle(runtime, await runtime.start({ name: 'build', type: 'compose', cwd: source, files: ['compose.yaml'], rootServices: ['web'],
     services: [{ id: 'web', ports: { http: { target: 8080 } }, ready: { type: 'http', port: 'http', path: '/', timeoutMs: 10000 } }],
     primary: { service: 'web', port: 'http' } }), t.signal);
-  assert.equal(result.state, 'ready', JSON.stringify(result));
-  assert.equal(await readFile(join(source, 'app.env'), 'utf8'), 'VALUE=changed\n');
+  assert.equal(result.state, 'ready', JSON.stringify({ result, logs: await runtime.logs('build', result.id) }));
   assert.equal((await (await fetch(result.url!)).text()).trim(), 'inspected');
+});
+
+test('Compose pins build contexts to verified absolute directories and Dockerfiles to private copies', {
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET and the Docker Compose CLI',
+}, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-context-'));
+  const source = join(directory, 'source');
+  // A relative context with this name would be a Git remote to Docker.
+  const context = join(source, 'github.com/x/y');
+  await mkdir(context, { recursive: true });
+  await writeFile(join(context, 'Dockerfile'), 'FROM busybox:1.37\n');
+  await writeFile(join(source, 'compose.yaml'), 'services:\n  web:\n    build: github.com/x/y\n    expose: [8080]\n');
+  const cli = await ComposeCli.create(directory, dockerSocket!);
+  t.after(async () => { await cli.close(); await rm(directory, { recursive: true, force: true }); });
+  const spec: ComposeSpec = { name: 'context', type: 'compose', cwd: source, files: ['compose.yaml'], profiles: [], rootServices: ['web'],
+    services: [{ id: 'web', ports: { http: { target: 8080 } } }], primary: { service: 'web', port: 'http' }, routes: {}, timeoutMs: 120000 };
+  const prepared = await prepareCompose(spec, cli, t.signal);
+  const build = (prepared.configuration.services as Record<string, { build: { context: string; dockerfile: string } }>).web.build;
+  assert.equal(build.context, await realpath(context));
+  assert.ok(build.dockerfile.startsWith(cli.directory), build.dockerfile);
+  assert.equal(await readFile(build.dockerfile, 'utf8'), 'FROM busybox:1.37\n');
+  assert.deepEqual(prepared.description.services[0].build, { context: 'github.com/x/y', dockerfile: 'Dockerfile' });
+});
+
+test('Compose image builds are refused while application commands run through an embedder', {
+  skip: (!dockerSocket || process.platform === 'win32') && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET on macOS or Linux',
+}, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-embedded-'));
+  const source = join(directory, 'source');
+  await mkdir(source);
+  await writeFile(join(source, 'Dockerfile'), 'FROM busybox:1.37\n');
+  await writeFile(join(source, 'compose.yaml'), 'services:\n  web:\n    build: .\n    expose: [8080]\n');
+  const runtime = await createPreviewRuntime({ allowedRoots: [source], dataDirectory: join(directory, 'data'), keystoreDirectory: join(directory, 'keystore'), dockerSocket,
+    authorize: () => true, applicationProcesses: { baseEnvironment: { PATH: '/usr/bin:/bin' }, start: () => Promise.reject(new Error('Compose must not use the embedder.')) } });
+  t.after(async () => { await runtime.close(); await rm(directory, { recursive: true, force: true }); });
+  const result = await settle(runtime, await runtime.start({ name: 'embedded', type: 'compose', cwd: source, files: ['compose.yaml'], rootServices: ['web'],
+    services: [{ id: 'web', ports: { http: { target: 8080 } } }], primary: { service: 'web', port: 'http' } }), t.signal);
+  assert.equal(result.state, 'failed');
+  assert.equal(result.error?.code, 'INVALID_INPUT');
+  assert.match(result.error!.message, /Builds are unavailable while application commands run through applicationProcesses/);
 });

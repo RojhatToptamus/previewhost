@@ -345,7 +345,8 @@ export interface RuntimeOptions {
   /**
    * Starts the supervisor of the repository's own commands (a `command` preview and an environment's
    * `command` services, workers, jobs and command probes) through the embedder, for example as another
-   * user. Compose and anything else Previewhost runs itself stay on `supervisor`. macOS and Linux only.
+   * user. Compose and anything else Previewhost runs itself stay on `supervisor`, and Compose image builds
+   * are refused. macOS and Linux only.
    */
   applicationProcesses?: ApplicationProcessLauncher;
   dockerSocket?: string;
@@ -365,7 +366,8 @@ export interface ApplicationProcessLauncher {
    * Starts `module` (Previewhost's supervisor, see `applicationSupervisorFiles()`) as the other user,
    * connected over Node IPC; `cwd` is the command's working directory. `env` is the supervisor's own
    * environment (the base environment); the command's environment arrives over IPC in `configure`.
-   * The supervisor should lead its own process group, as a systemd service or `fork(..., { detached: true })` does.
+   * The supervisor should lead its own process group, as a systemd service or `fork(..., { detached: true })` does,
+   * and must share the owner's network namespace: it checks listeners in its own.
    * When `signal` aborts, start may reject; if it resolves anyway, Previewhost stops the channel.
    * Reject only when no process is left running.
    */
@@ -391,9 +393,13 @@ export interface ApplicationProcessLauncher {
  * - `{ type: 'failure', code: 'START_FAILED' | 'SUPERVISOR_FAILED', message: string }`.
  * - `{ type: 'listener', id: number, result: 'owned' | 'missing' | 'non-loopback' | 'foreign' | 'unavailable' }`:
  *   the answer to `check-listener` with the same `id`. `owned` means every listener on the port binds
- *   127.0.0.1 or ::1 and belongs to the command or one of its descendants.
+ *   127.0.0.1 or ::1 and belongs to the command or one of its descendants, and one binds 127.0.0.1.
  *
  * Deliver every message in order, and queue messages that arrive before the first `onMessage` listener.
+ * The supervisor runs as the command's user, so job results and listener verdicts come from that user.
+ * Previewhost accepts only these messages, within bounds (`log.text` 16,384 characters, `failure.message`
+ * 1,024, a listener answer only for an open request, 1,024 undelivered messages); anything else stops the
+ * channel and fails the process.
  */
 export interface SupervisorChannel {
   send(message: unknown): void;

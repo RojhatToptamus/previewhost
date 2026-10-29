@@ -64,19 +64,59 @@ interface SupervisorLink extends EventEmitter {
   send(message: Record<string, unknown>, callback: (error: Error | null) => void): boolean;
 }
 
-function channelLink(channel: SupervisorChannel): SupervisorLink {
+const listenerResults = ['owned', 'missing', 'non-loopback', 'foreign', 'unavailable'];
+
+/** The embedder's supervisor runs as the command's user: accept only the protocol's own messages, within bounds. */
+function supervisorMessage(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) return false;
+  const message = value as Record<string, unknown>;
+  switch (message.type) {
+    case 'online': case 'configured': return true;
+    case 'started': return Number.isSafeInteger(message.pid) && (message.pid as number) > 0;
+    case 'log': return typeof message.text === 'string' && message.text.length <= 16_384;
+    case 'target-exit': return (message.code === null || Number.isSafeInteger(message.code)) &&
+      (message.signal === null || typeof message.signal === 'string' && message.signal.length <= 32);
+    case 'failure': return (message.code === 'START_FAILED' || message.code === 'SUPERVISOR_FAILED') && typeof message.message === 'string' && message.message.length <= 1024;
+    case 'listener': return Number.isSafeInteger(message.id) && listenerResults.includes(message.result as string);
+    default: return false;
+  }
+}
+
+/**
+ * An embedder's channel as a supervisor link. A message outside the protocol, an unrequested listener answer,
+ * or a backlog past 1,024 messages closes the link with a supervisor failure and calls `violated`.
+ */
+function channelLink(channel: SupervisorChannel, expected: (message: Record<string, unknown>) => boolean, violated: () => void): SupervisorLink {
   let open = true;
-  const link = Object.assign(new EventEmitter(), {
-    get connected() { return open; },
-    send(message: Record<string, unknown>, callback: (error: Error | null) => void) {
+  let invalid = false;
+  let backlog = 0;
+  // A getter, not Object.assign: `connected` must follow the channel after it closes.
+  const link = Object.defineProperties(new EventEmitter(), {
+    connected: { get: () => open },
+    send: { value(message: Record<string, unknown>, callback: (error: Error | null) => void) {
       try { channel.send(message); } catch (error) { callback(error instanceof Error ? error : new Error('IPC send failed.')); return false; }
       callback(null);
       return true;
-    },
-  });
+    } },
+  }) as SupervisorLink;
   // Deliver after the caller's listeners attach, even when the embedder flushes queued messages at once. Order is kept.
-  channel.onMessage(message => setImmediate(() => link.emit('message', message)));
-  channel.onExit((code, signal) => setImmediate(() => { open = false; link.emit('exit', code, signal); link.emit('close', code, signal); }));
+  channel.onMessage(message => {
+    if (invalid) return;
+    if (!supervisorMessage(message) || !expected(message) || ++backlog > 1024) {
+      invalid = true; open = false;
+      setImmediate(() => {
+        link.emit('message', { type: 'failure', code: 'SUPERVISOR_FAILED', message: 'The application supervisor sent a message outside its protocol.' });
+        link.emit('exit', null, null); link.emit('close', null, null);
+      });
+      violated();
+      return;
+    }
+    setImmediate(() => { backlog--; if (!invalid) link.emit('message', message); });
+  });
+  channel.onExit((code, signal) => setImmediate(() => {
+    if (invalid) return;
+    open = false; link.emit('exit', code, signal); link.emit('close', code, signal);
+  }));
   return link;
 }
 
@@ -139,6 +179,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   const launch = new AbortController();
   let supervisorExit: Promise<void> | undefined;
   let listenerChecks = 0;
+  const pendingChecks = new Set<number>();
   let output: Promise<void>[] = [];
   let supervisorIdentity: ProcessIdentity | undefined;
   let commandIdentity: ProcessIdentity | undefined;
@@ -164,11 +205,14 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
       if (application) {
         if (!link) throw new PreviewError('START_FAILED', 'The native supervisor is no longer running.');
         const id = ++listenerChecks;
-        const [answer] = await Promise.all([
-          waitMessage(link, 'listener', input.signal, value => value.id === id),
-          send(link, { type: 'check-listener', id, port: listenPort }),
-        ]);
-        assertListenerResult(answer.result, listenPort);
+        pendingChecks.add(id);
+        try {
+          const [answer] = await Promise.all([
+            waitMessage(link, 'listener', input.signal, value => value.id === id),
+            send(link, { type: 'check-listener', id, port: listenPort }),
+          ]);
+          assertListenerResult(answer.result, listenPort);
+        } finally { pendingChecks.delete(id); }
         ensureStarting();
         return;
       }
@@ -291,9 +335,13 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
         if (stopping || input.signal.aborted) throw new PreviewError('CLOSED', 'Native startup was canceled.');
         throw new PreviewError('SUPERVISOR_FAILED', `The application process launcher failed: ${error instanceof Error ? error.message : 'unknown error'}`);
       });
-      channel = await launching;
+      // A launcher that never returns must not hold startup past cancellation or stop.
+      channel = await untilAborted(launching, AbortSignal.any([input.signal, launch.signal]));
       ensureStarting();
-      link = channelLink(channel);
+      link = channelLink(channel, message => message.type !== 'listener' || pendingChecks.has(message.id as number), () => {
+        recordUnexpected(new PreviewError('SUPERVISOR_FAILED', 'The application supervisor sent a message outside its protocol.'));
+        void stop().catch(() => undefined);
+      });
       supervisorExit = new Promise(resolve => link!.once('exit', () => resolve()));
       const redactions = [...Object.values(input.spec.env), ...(input.redactions ?? [])];
       output = [channel.stdout, channel.stderr].map(stream => captureOutput(stream, redactions, input.appendLog));
@@ -428,6 +476,15 @@ export async function availablePort(): Promise<number> {
   const port = (server.address() as net.AddressInfo).port;
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   return port;
+}
+
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new PreviewError('CLOSED', 'Native startup was canceled.'));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener('abort', abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 
 function assertListenerResult(result: unknown, port: number): void {
