@@ -77,6 +77,8 @@ in the receiving code.
 
 Static previews reject traversal, hidden paths, escaping symlinks, special files,
 and directory listings. They exclude the private data directory and its resolved aliases.
+A file is opened only if every directory on its resolved path is unchanged and not a link before
+and after the open, so a directory replaced by a link during a request is refused.
 Attachments connect only to IPv4 loopback.
 These checks do not isolate hostile filesystem changes by another same-user process.
 

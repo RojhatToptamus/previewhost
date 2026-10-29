@@ -7,6 +7,7 @@ import type { ComposeSpec } from './contracts.js';
 import { isWithin } from './spec.js';
 import { ComposeCli } from './compose-cli.js';
 import { PreviewError } from './errors.js';
+import { openContained } from './contained-file.js';
 
 const MAX_COMPOSE_FILE_BYTES = 1024 * 1024;
 const MAX_HOST_INPUT_BYTES = 64 * 1024;
@@ -568,16 +569,7 @@ async function resolveContainedFile(root: string, candidate: string, maxBytes: n
 
 /** Reads a regular file once: no link in any path component, no hard link, nothing past the size limit. */
 async function readContainedFile(root: string, relative: string, maxBytes: number): Promise<Buffer> {
-  const file = path.resolve(root, relative);
-  const parents: string[] = [];
-  for (let directory = path.dirname(file); directory.length > root.length && isWithin(root, directory); directory = path.dirname(directory)) parents.unshift(directory);
-  const directories = () => Promise.all(parents.map(async directory => {
-    const stat = await fs.lstat(directory, { bigint: true });
-    if (!stat.isDirectory()) throw new Error('Compose host input must not pass through a symlink.');
-    return `${stat.dev}:${stat.ino}`;
-  }));
-  const before = await directories();
-  const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)).catch((error: NodeJS.ErrnoException) => {
+  const handle = await openContained(root, path.resolve(root, relative)).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ELOOP') throw new Error('Compose host input must be a bounded regular file, not a symlink.');
     throw error;
   });
@@ -594,11 +586,7 @@ async function readContainedFile(root: string, relative: string, maxBytes: numbe
       length += bytesRead;
     }
     if (length > maxBytes) throw new Error('Compose host input must be a bounded regular file, not a symlink.');
-    const entry = await fs.lstat(file, { bigint: true });
-    if (entry.dev !== stat.dev || entry.ino !== stat.ino || (await directories()).join() !== before.join()) {
-      throw new Error('Compose host input changed while it was read.');
-    }
-    // A link made and removed while the parents were checked shows in the open file's link count.
+    // A link made and removed while the path was checked shows in the open file's link count.
     if ((await handle.stat({ bigint: true })).nlink !== 1n) throw new Error('Compose host input changed while it was read.');
     return buffer.subarray(0, length);
   } finally { await handle.close(); }

@@ -47,7 +47,8 @@ test('Compose files over 1 MiB and env or secret files over 64 KiB are refused',
 });
 
 test('remote and home build contexts are refused even when a directory has that literal name', async t => {
-  for (const context of ['~cache', 'git@github.com:x/y.git', 'https://github.com/x/y.git#main']) {
+  // Windows file names cannot contain ':', so only the home form gets a literal directory there.
+  for (const context of process.platform === 'win32' ? ['~cache'] : ['~cache', 'git@github.com:x/y.git', 'https://github.com/x/y.git#main']) {
     const directory = context.replace('https://', 'https:/');
     await assert.rejects(refused(t, { 'compose.yaml': service(`    build: { context: '${context}' }\n`), [`${directory}/Dockerfile`]: 'FROM busybox:1.37\n' }),
       /must be a local directory/, context);
