@@ -1,6 +1,6 @@
 # Ownership, security, and recovery
 
-Application commands run with your user permissions, without a sandbox. Stopping a preview ends its processes but keeps managed database data.
+Application commands run with your user permissions, without a sandbox, unless an embedder [starts them](#commands-started-by-an-embedder) as another user. Stopping a preview ends its processes but keeps managed database data.
 
 ## Ownership
 
@@ -163,6 +163,23 @@ Windows uses one non-inheritable Job Object handle owned by the runtime. Assignm
 Owner termination closes the handle and terminates job members. Normal stop terminates the job and checks its active-process count.
 Windows has no Unix TERM grace period.
 
+### Commands started by an embedder
+
+With [`applicationProcesses`](api.md#application-processes), the embedder starts the supervisor of
+application commands, possibly as another user. Previewhost then neither checks process identities
+nor signals process groups for those commands. It sends `stop` over IPC, then requires the embedder's
+`stop()` to prove that no process remains. Docker Compose still runs under the owner's supervisor.
+
+The supervisor answers the listener check as the command's user. Every listener on the selected port
+must bind loopback and belong to the command or one of its descendants. On Linux it reads `/proc`,
+which also works with `hidepid` or `ProtectProc=invisible`. On macOS it runs `lsof` and `ps`; a
+listener owned by another user is invisible there, so that port counts as missing.
+The answer comes from the application's own user. It guards against a stale or unrelated listener,
+not against that user.
+
+Application commands start from the embedder's `baseEnvironment`. The owner's `HOME`, `TMPDIR`, and
+other basic variables do not reach them.
+
 ## Recovery
 
 Application attempts and routes remain in memory.
@@ -179,6 +196,9 @@ A new daemon lacks the records needed to retry cleanup of those processes.
 
 If both owner and supervisor die before cleanup, remaining processes can require manual inspection.
 previewhost does not infer their ownership after restart.
+
+Previewhost records no receipt for commands started through `applicationProcesses`, so recovery never
+signals a process the owner did not start. The embedder stops those processes after an owner crash.
 See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
 
 ## Database ownership and recovery

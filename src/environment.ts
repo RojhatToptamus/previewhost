@@ -14,6 +14,7 @@ import type { HttpTarget, Resource } from './resources.js';
 /** One attempt owns this application graph. Database handles belong to its slot. */
 export async function startEnvironment(input: {
   supervisor?: RuntimeOptions['supervisor'];
+  applicationProcesses?: RuntimeOptions['applicationProcesses'];
   ownership?: () => NativeOwnership;
   spec: EnvironmentSpec;
   beforeExclusiveStart?(): Promise<void>;
@@ -180,7 +181,7 @@ export async function startEnvironment(input: {
           const { env, redactions } = commandBindings(service.env);
           input.appendLog(`Running job.\n`, id);
           await runNativeJob({ spec: { ...service, env }, url: input.url, signal: controller.signal,
-            supervisor: input.supervisor,
+            supervisor: input.supervisor, applicationProcesses: input.applicationProcesses,
             ownership: input.ownership?.(),
             timeoutMs: service.timeoutMs, redactions, appendLog: text => input.appendLog(text, id),
             onResource: resource => jobs.set(id, resource),
@@ -212,7 +213,7 @@ export async function startEnvironment(input: {
             }
             const { env, redactions } = commandBindings(service.env);
             const native = await startNativeService({
-              supervisor: input.supervisor, ownership: input.ownership,
+              supervisor: input.supervisor, applicationProcesses: input.applicationProcesses, ownership: input.ownership,
               probeBindings: probe => commandBindings(probe.env ?? service.env),
               spec: service, env, url: service.type === 'command' ? browserUrl(id) : input.url, signal: controller.signal,
               appendLog: text => input.appendLog(text, id), redactions,

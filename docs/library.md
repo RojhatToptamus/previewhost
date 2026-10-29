@@ -94,6 +94,9 @@ The executable uses Electron's Node mode, and the module points to the packaged 
 The host supplies `ELECTRON_RUN_AS_NODE: "1"` in that supervisor environment.
 Application environment variables still pass through Previewhost's restricted environment construction.
 
+To run the repository's commands as another user, supply [`applicationProcesses`](api.md#application-processes).
+The host then starts and stops their supervisor and recovers them after a crash.
+
 `resolvePreviewFile(project)` selects `preview.yaml` or `preview.yml` and rejects ambiguous defaults.
 `configureBindings` edits the retained definition without exposing concealed values.
 `describe` and log reads expose redacted results. The host never needs a plaintext secret-read endpoint.

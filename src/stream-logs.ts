@@ -1,7 +1,6 @@
 import { StringDecoder } from 'node:string_decoder';
-import type { Readable } from 'node:stream';
 
-export function captureOutput(readable: Readable, values: string[], write: (text: string) => void | Promise<void>): Promise<void> {
+export function captureOutput(readable: NodeJS.ReadableStream, values: string[], write: (text: string) => void | Promise<void>): Promise<void> {
   let flushed!: () => void;
   const complete = new Promise<void>(resolve => { flushed = resolve; });
   const decoder = new StringDecoder('utf8');

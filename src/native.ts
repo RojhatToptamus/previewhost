@@ -1,9 +1,10 @@
 import { fork, execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
-import type { CommandSpec, RuntimeOptions } from './contracts.js';
+import type { ApplicationProcessLauncher, CommandSpec, RuntimeOptions, SupervisorChannel } from './contracts.js';
 import type { Resource } from './resources.js';
 import { PreviewError, throwIfAborted } from './errors.js';
 import { captureOutput } from './stream-logs.js';
@@ -41,12 +42,42 @@ export interface NativeInput {
   hostEnvironment?: Record<string, string>;
   ownership?: NativeOwnership;
   supervisor?: RuntimeOptions['supervisor'];
+  /** Repository commands only. The embedder starts and stops their supervisor; no receipt is recorded. */
+  applicationProcesses?: ApplicationProcessLauncher;
   spec: Pick<NativeCommandSpec, 'cwd' | 'command' | 'env'>;
   url: string;
   signal: AbortSignal;
   appendLog(text: string): void;
   redactions?: string[];
   onResource(resource: NativeResource): void;
+}
+
+/** The supervisor and every file it imports, for an embedder that installs them where another user can read them. */
+export function applicationSupervisorFiles(): { module: string; files: string[] } {
+  const file = (name: string) => fileURLToPath(new URL(`./${name}`, import.meta.url));
+  return { module: file('supervisor.js'), files: ['supervisor.js', 'stream-logs.js', 'listener-ownership.js'].map(file) };
+}
+
+/** Node IPC to a supervisor: a forked child, or an embedder's channel. */
+interface SupervisorLink extends EventEmitter {
+  readonly connected: boolean;
+  send(message: Record<string, unknown>, callback: (error: Error | null) => void): boolean;
+}
+
+function channelLink(channel: SupervisorChannel): SupervisorLink {
+  let open = true;
+  const link = Object.assign(new EventEmitter(), {
+    get connected() { return open; },
+    send(message: Record<string, unknown>, callback: (error: Error | null) => void) {
+      try { channel.send(message); } catch (error) { callback(error instanceof Error ? error : new Error('IPC send failed.')); return false; }
+      callback(null);
+      return true;
+    },
+  });
+  // Deliver after the caller's listeners attach, even when the embedder flushes queued messages at once. Order is kept.
+  channel.onMessage(message => setImmediate(() => link.emit('message', message)));
+  channel.onExit((code, signal) => setImmediate(() => { open = false; link.emit('exit', code, signal); link.emit('close', code, signal); }));
+  return link;
 }
 
 export function startNative(input: NativeInput): Promise<NativeResource> {
@@ -89,15 +120,25 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   requireSupportedPlatform();
   throwIfAborted(input.signal);
   validateEnvironmentSize(input.spec.env);
+  const application = input.applicationProcesses;
+  if (application && process.platform === 'win32') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Application process launchers require macOS or Linux.');
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(input.spec.command[0])) {
     throw new PreviewError('INVALID_INPUT', 'Windows batch files require an explicit cmd.exe command. Use node.exe with the script path to preserve literal arguments.');
   }
-  if (process.platform !== 'win32') await Promise.all(nativeTools().map((name) => access(name, constants.X_OK)));
+  if (!application && process.platform !== 'win32') await Promise.all(nativeTools().map((name) => access(name, constants.X_OK)));
   throwIfAborted(input.signal);
   const port = job ? 0 : input.port ?? await availablePort();
   throwIfAborted(input.signal);
+  // Recovery of embedder-started processes belongs to the embedder: never record a PID the owner did not start.
+  const ownership = application ? undefined : input.ownership;
 
   let supervisor: ChildProcess | undefined;
+  let link: SupervisorLink | undefined;
+  let channel: SupervisorChannel | undefined;
+  let launching: Promise<SupervisorChannel> | undefined;
+  const launch = new AbortController();
+  let supervisorExit: Promise<void> | undefined;
+  let listenerChecks = 0;
   let output: Promise<void>[] = [];
   let supervisorIdentity: ProcessIdentity | undefined;
   let commandIdentity: ProcessIdentity | undefined;
@@ -120,6 +161,17 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     assertRunning: ensureStarting,
     async verifyListener(listenPort = port) {
       ensureStarting();
+      if (application) {
+        if (!link) throw new PreviewError('START_FAILED', 'The native supervisor is no longer running.');
+        const id = ++listenerChecks;
+        const [answer] = await Promise.all([
+          waitMessage(link, 'listener', input.signal, value => value.id === id),
+          send(link, { type: 'check-listener', id, port: listenPort }),
+        ]);
+        assertListenerResult(answer.result, listenPort);
+        ensureStarting();
+        return;
+      }
       if (!group) throw new PreviewError('START_FAILED', 'The native supervisor is no longer running.');
       if (process.platform === 'win32') {
         if (!windowsJob) throw new PreviewError('START_FAILED', 'Windows process ownership is unavailable.');
@@ -148,8 +200,9 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     if (stopped) return Promise.resolve();
     if (stopWork) return stopWork;
     stopping = true;
+    launch.abort();
     input.signal.removeEventListener('abort', onAbort);
-    stopWork = stopOnce().then(async () => { await input.ownership?.clear(); stopped = true; }).catch((error: unknown) => {
+    stopWork = stopOnce().then(async () => { await ownership?.clear(); stopped = true; }).catch((error: unknown) => {
       if (error instanceof PreviewError && error.code === 'CLEANUP_INCOMPLETE') throw error;
       throw new PreviewError('CLEANUP_INCOMPLETE', `Native cleanup failed${group ? ` for process group ${group}` : ''}.`);
     }).finally(() => { stopWork = undefined; });
@@ -157,6 +210,25 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
   }
 
   async function stopOnce(): Promise<void> {
+    if (application) {
+      let timer: NodeJS.Timeout | undefined;
+      // The start signal is aborted. A launcher that never returns leaves cleanup to a retried stop, not a hang.
+      const started = channel ?? await Promise.race([
+        launching?.catch(() => undefined),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PreviewError('CLEANUP_INCOMPLETE', 'The application process launcher has not returned. Retry stop.')), 5_000); }),
+      ]).finally(() => clearTimeout(timer));
+      if (!started) return;
+      // IPC first lets the supervisor give the command its TERM grace period; the embedder then proves cleanup.
+      if (link?.connected) {
+        void send(link, { type: 'stop' }).catch(() => undefined);
+        await Promise.race([supervisorExit, new Promise(resolve => setTimeout(resolve, 2_000))]);
+      }
+      try { await started.stop(); }
+      catch (error) {
+        throw new PreviewError('CLEANUP_INCOMPLETE', `The application process launcher could not confirm cleanup: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
+      return;
+    }
     if (!supervisor || !group) return;
     if (process.platform === 'win32') {
       if (windowsJob) {
@@ -211,17 +283,37 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
 
   try {
     ensureStarting();
-    supervisor = fork(input.supervisor?.module ?? fileURLToPath(new URL('./supervisor.js', import.meta.url)), [], {
-      detached: process.platform !== 'win32',
-      silent: true,
-      execArgv: [],
-      execPath: input.supervisor?.executable ?? process.execPath,
-      env: { ...(process.platform === 'win32' ? commandEnvironment({}, undefined, '') : {}), ...input.supervisor?.env },
-    });
-    group = supervisor.pid;
-    const redactions = [...Object.values(input.spec.env), ...(input.redactions ?? []), ...Object.entries(input.supervisor?.env ?? {}).filter(([key]) => key !== 'ELECTRON_RUN_AS_NODE').map(([, value]) => value)];
-    output = [supervisor.stdout!, supervisor.stderr!].map(stream => captureOutput(stream, redactions, input.appendLog));
-    supervisor.on('message', (message: Record<string, unknown>) => {
+    if (application) {
+      launching = application.start({
+        module: applicationSupervisorFiles().module, env: { ...application.baseEnvironment }, cwd: input.spec.cwd,
+        signal: AbortSignal.any([input.signal, launch.signal]),
+      }).catch((error: unknown) => {
+        if (stopping || input.signal.aborted) throw new PreviewError('CLOSED', 'Native startup was canceled.');
+        throw new PreviewError('SUPERVISOR_FAILED', `The application process launcher failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      });
+      channel = await launching;
+      ensureStarting();
+      link = channelLink(channel);
+      supervisorExit = new Promise(resolve => link!.once('exit', () => resolve()));
+      const redactions = [...Object.values(input.spec.env), ...(input.redactions ?? [])];
+      output = [channel.stdout, channel.stderr].map(stream => captureOutput(stream, redactions, input.appendLog));
+    } else {
+      supervisor = fork(input.supervisor?.module ?? applicationSupervisorFiles().module, [], {
+        detached: process.platform !== 'win32',
+        silent: true,
+        execArgv: [],
+        execPath: input.supervisor?.executable ?? process.execPath,
+        env: { ...(process.platform === 'win32' ? commandEnvironment({}, undefined, '') : {}), ...input.supervisor?.env },
+      });
+      link = supervisor;
+      group = supervisor.pid;
+      const redactions = [...Object.values(input.spec.env), ...(input.redactions ?? []), ...Object.entries(input.supervisor?.env ?? {}).filter(([key]) => key !== 'ELECTRON_RUN_AS_NODE').map(([, value]) => value)];
+      output = [supervisor.stdout!, supervisor.stderr!].map(stream => captureOutput(stream, redactions, input.appendLog));
+      supervisor.once('error', (error) => {
+        recordUnexpected(new PreviewError('SUPERVISOR_FAILED', `Native supervisor failed: ${error.message}`));
+      });
+    }
+    link.on('message', (message: Record<string, unknown>) => {
       if (message?.type === 'log' && typeof message.text === 'string') {
         input.appendLog(message.text);
       } else if (message?.type === 'target-exit' && !stopping) {
@@ -232,20 +324,18 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
         recordUnexpected(new PreviewError(message.code === 'SUPERVISOR_FAILED' ? 'SUPERVISOR_FAILED' : 'START_FAILED', typeof message.message === 'string' ? message.message : 'Native command failed.'));
       }
     });
-    supervisor.once('error', (error) => {
-      recordUnexpected(new PreviewError('SUPERVISOR_FAILED', `Native supervisor failed: ${error.message}`));
-    });
     // A finite job's result can still be buffered in IPC when its supervisor exits.
-    supervisor.once(job ? 'close' : 'exit', async (code, signal) => {
+    link.once(job ? 'close' : 'exit', async (code, signal) => {
       await Promise.race([Promise.all(output), new Promise(resolve => setTimeout(resolve, 250))]);
       if (!finished) recordUnexpected(new PreviewError('SUPERVISOR_FAILED', `Native supervisor exited (${code ?? signal ?? 'unknown'}).`));
     });
-    const online = await waitMessage(supervisor, 'online', input.signal);
+    const online = await waitMessage(link, 'online', input.signal);
     ensureStarting();
-    if (process.platform === 'win32') {
+    // The embedder's processes may belong to another user, whom the owner can neither see nor signal.
+    if (!application && process.platform === 'win32') {
       if (!group || typeof online.started !== 'string') throw new PreviewError('START_FAILED', 'Windows supervisor identity is missing.');
       windowsJob = createWindowsJob(group, online.started);
-    } else {
+    } else if (!application) {
       supervisorIdentity = group ? await inspectProcess(group) : undefined;
       if (!supervisorIdentity || supervisorIdentity.group !== group) {
         throw new PreviewError('START_FAILED', 'The native supervisor did not establish its owned process group.');
@@ -254,25 +344,25 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
     ensureStarting();
     const argv = job ? input.spec.command : input.spec.command.map((arg) => arg.replaceAll('{port}', String(port)));
     await Promise.all([
-      waitMessage(supervisor, 'configured', input.signal),
-      send(supervisor, {
+      waitMessage(link, 'configured', input.signal),
+      send(link, {
         type: 'configure', command: argv,
         cwd: input.spec.cwd,
-        env: { ...commandEnvironment(input.spec.env, job || !port ? undefined : port, input.url), ...input.portEnvironment, ...input.hostEnvironment },
+        env: { ...commandEnvironment(input.spec.env, job || !port ? undefined : port, input.url, application?.baseEnvironment), ...input.portEnvironment, ...input.hostEnvironment },
         redactions: [...Object.values(input.spec.env), ...(input.redactions ?? [])],
       }),
     ]);
     ensureStarting();
     // Persist authority before commit permits the supervisor to spawn application code.
-    if (supervisorIdentity) await input.ownership?.save({ source: input.spec.cwd, supervisor: supervisorIdentity });
+    if (supervisorIdentity) await ownership?.save({ source: input.spec.cwd, supervisor: supervisorIdentity });
     ensureStarting();
     const [started] = await Promise.all([
-      waitMessage(supervisor, 'started', input.signal),
-      send(supervisor, { type: 'commit' }),
+      waitMessage(link, 'started', input.signal),
+      send(link, { type: 'commit' }),
     ]);
     ensureStarting();
     if (typeof started.pid !== 'number') throw new PreviewError('START_FAILED', 'Native command identity is missing.');
-    if (windowsJob) return resource;
+    if (windowsJob || application) return resource;
     commandIdentity = await inspectProcess(started.pid);
     // Fast jobs may exit before ps observes them. Persist live job children for stop-only recovery.
     if (job && !commandIdentity) return resource;
@@ -280,7 +370,7 @@ async function launchNative(input: NativeInput, job: boolean): Promise<NativeRes
       throw new PreviewError('START_FAILED', 'Native command exited before its process identity could be verified.');
     }
     ensureStarting();
-    await input.ownership?.save({ source: input.spec.cwd, supervisor: supervisorIdentity!, command: commandIdentity });
+    await ownership?.save({ source: input.spec.cwd, supervisor: supervisorIdentity!, command: commandIdentity });
     ensureStarting();
     return resource;
   } catch (error) {
@@ -315,9 +405,10 @@ function cleanupError(group: number) {
   return new PreviewError('CLEANUP_INCOMPLETE', `Could not verify cleanup of native process group ${group}. Inspect its processes manually; previewhost will not signal an unknown owner.`);
 }
 
-export function commandEnvironment(values: Record<string, string>, port: number | undefined, url: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TERM', ...(process.platform === 'win32' ? ['SYSTEMROOT', 'WINDIR', 'USERPROFILE', 'COMSPEC', 'PATHEXT'] : [])]) {
+/** An embedder's base environment replaces the owner's own basic variables. */
+export function commandEnvironment(values: Record<string, string>, port: number | undefined, url: string, base?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+  if (!base) for (const key of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TERM', ...(process.platform === 'win32' ? ['SYSTEMROOT', 'WINDIR', 'USERPROFILE', 'COMSPEC', 'PATHEXT'] : [])]) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   if (process.platform === 'win32') {
@@ -339,18 +430,26 @@ export async function availablePort(): Promise<number> {
   return port;
 }
 
-function send(child: ChildProcess, message: Record<string, unknown>): Promise<void> {
+function assertListenerResult(result: unknown, port: number): void {
+  if (result === 'owned') return;
+  if (result === 'non-loopback') throw new PreviewError('START_FAILED', `Native port ${port} has a non-loopback listener.`);
+  if (result === 'foreign') throw new PreviewError('START_FAILED', `Native port ${port} belongs to a process outside the command's process tree.`);
+  if (result === 'missing') throw new PreviewError('START_FAILED', `No owned listener was observed on native port ${port}.`);
+  throw new PreviewError('START_FAILED', `The supervisor could not verify the listener on native port ${port}.`);
+}
+
+function send(child: SupervisorLink, message: Record<string, unknown>): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!child.connected) { reject(new PreviewError('SUPERVISOR_FAILED', 'Native supervisor IPC is closed.')); return; }
     child.send(message, (error) => error ? reject(new PreviewError('SUPERVISOR_FAILED', `Native supervisor communication failed: ${error.message}`)) : resolve());
   });
 }
 
-function waitMessage(child: ChildProcess, type: string, signal: AbortSignal): Promise<Record<string, unknown>> {
+function waitMessage(child: SupervisorLink, type: string, signal: AbortSignal, match: (value: Record<string, unknown>) => boolean = () => true): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new PreviewError('SUPERVISOR_FAILED', `Native supervisor timed out before ${type}.`)), 5_000);
     const message = (value: Record<string, unknown>) => {
-      if (value?.type === type) finish(undefined, value);
+      if (value?.type === type && match(value)) finish(undefined, value);
       if (value?.type === 'failure') finish(new PreviewError(value.code === 'SUPERVISOR_FAILED' ? 'SUPERVISOR_FAILED' : 'START_FAILED', String(value.message ?? 'Native launch failed.')));
     };
     const close = () => finish(new PreviewError('SUPERVISOR_FAILED', `Native supervisor exited before ${type}.`));

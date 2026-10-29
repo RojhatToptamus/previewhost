@@ -95,7 +95,8 @@ A cleanup failure blocks restoration, so two workers cannot consume the same que
 HTTP services default to `readyPath` on their `http` port. An explicit `ready` probe replaces that check.
 TCP probes use `{type: tcp, port: NAME, timeoutMs: 5000}`.
 HTTP probes use `{type: http, port: NAME, path: /health, timeoutMs: 5000}`.
-Previewhost verifies that native listeners belong to the owned process group.
+Previewhost verifies that native listeners belong to the owned process group, or, with an
+[application process launcher](api.md#application-processes), to the command's process tree.
 
 The `ports` map declares named ports and their environment keys.
 HTTP commands default to `{http: PORT}`. Workers default to no ports.

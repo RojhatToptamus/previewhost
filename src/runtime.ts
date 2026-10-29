@@ -97,7 +97,7 @@ export interface PreparedSecretSetup {
 }
 
 export async function createPreviewRuntime(options: RuntimeOptions): Promise<PreviewRuntime> {
-  const { roots, inputs, secretIds } = await runtimeContext(options);
+  const { roots, inputs, secretIds, applicationProcesses } = await runtimeContext(options);
   let keystoreDirectory = options.keystoreDirectory;
   if (keystoreDirectory) {
     if (!isAbsolute(keystoreDirectory)) throw new PreviewError('INVALID_INPUT', 'The keystore directory must be absolute.');
@@ -111,7 +111,7 @@ export async function createPreviewRuntime(options: RuntimeOptions): Promise<Pre
   try {
     data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket, keystore }) : undefined;
     compose = options.dataDirectory ? await ComposeOwner.open(`${data!.directory}-compose`, options.dockerSocket) : undefined;
-    const runtime = new Runtime(roots, options.authorize, inputs, secretIds, data, keystore, { dataDirectory: options.dataDirectory, dockerSocket: options.dockerSocket }, options.supervisor, records, compose);
+    const runtime = new Runtime(roots, options.authorize, inputs, secretIds, data, keystore, { dataDirectory: options.dataDirectory, dockerSocket: options.dockerSocket }, options.supervisor, applicationProcesses, records, compose);
     await runtime.recover();
     return runtime;
   } catch (error) {
@@ -133,6 +133,7 @@ class Runtime implements PreviewRuntime {
     private readonly inputs: Readonly<Record<string, string>>, private readonly secretIds: Set<string>, private readonly data: DataOwner | undefined, readonly keystore: Keystore,
     private readonly storage: Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket'>,
     private readonly supervisor: RuntimeOptions['supervisor'],
+    private readonly applicationProcesses: RuntimeOptions['applicationProcesses'],
     private readonly records?: RuntimeRecords,
     private readonly compose?: ComposeOwner,
   ) {
@@ -218,7 +219,7 @@ class Runtime implements PreviewRuntime {
 
   async inspect(input: PreviewSpec) {
     this.assertOpen();
-    const description = await inspectPreviewSpec(input, { ...this.storage, roots: this.roots, inputs: this.inputs, secretIds: this.secretIds }, this.privateDirectories);
+    const description = await inspectPreviewSpec(input, { ...this.storage, applicationProcesses: this.applicationProcesses, roots: this.roots, inputs: this.inputs, secretIds: this.secretIds }, this.privateDirectories);
     this.assertOpen();
     return description;
   }
@@ -694,7 +695,7 @@ class Runtime implements PreviewRuntime {
         attempt.resource = { target, stop: async () => {} };
       } else if (spec.type === 'command') {
         const resource = await startNative({
-          supervisor: this.supervisor,
+          supervisor: this.supervisor, applicationProcesses: this.applicationProcesses,
           ownership: this.records?.ownership(slot.name),
           spec: { ...spec, env: Object.fromEntries(Object.entries(spec.env).map(([key, value]) => [key, resolveInput(value, this.inputs, secrets)])) },
           url: slot.gateway.url, signal,
@@ -732,7 +733,7 @@ class Runtime implements PreviewRuntime {
           ? await this.data.open(slot.name, databases, { signal, onFailure: (error) => this.environmentFailed(slot, error) }) : {};
         this.admitted(slot, attempt);
         attempt.resource = await startEnvironment({
-          supervisor: this.supervisor,
+          supervisor: this.supervisor, applicationProcesses: this.applicationProcesses,
           ownership: this.records ? () => this.records!.ownership(slot.name) : undefined,
           beforeExclusiveStart: async () => {
             exclusiveStopped = true;

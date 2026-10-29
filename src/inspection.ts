@@ -1,12 +1,12 @@
 import { constants } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
-import { limits, type EffectiveSpec, type PrerequisiteFinding, type PreviewSpec, type RuntimeOptions } from './contracts.js';
+import { limits, type ApplicationProcessLauncher, type EffectiveSpec, type PrerequisiteFinding, type PreviewSpec, type RuntimeOptions } from './contracts.js';
 import { Docker, defaultDockerEndpoint } from './docker.js';
 import { PreviewError } from './errors.js';
 import { nativeTools } from './native.js';
 import { requireSupportedPlatform } from './private-files.js';
-import { canonicalDirectory, describeSpec, environmentDependencies, isWithin, normalizeSpec, parseSpec } from './spec.js';
+import { canonicalDirectory, describeSpec, environmentDependencies, isWithin, normalizeSpec, parseSpec, validateEnvironmentSize } from './spec.js';
 import { secretRequirements, validateSecretId } from './secrets.js';
 
 /** Shared validation for owner creation and offline inspection. Neither starts resources. */
@@ -27,13 +27,28 @@ export async function runtimeContext(options: RuntimeOptions) {
     throw new PreviewError('INVALID_INPUT', 'Owner inputs must be at most 128 named strings of at most 4096 characters.');
   }
   if (options.dockerSocket && !options.dataDirectory) throw new PreviewError('INVALID_INPUT', 'dockerSocket requires a dataDirectory.');
-  return { roots, inputs, secretIds };
+  return { roots, inputs, secretIds, applicationProcesses: applicationLauncher(options.applicationProcesses) };
+}
+
+/** Validates once and snapshots the base environment, so later changes to the embedder's object cannot bypass it. */
+function applicationLauncher(launcher: RuntimeOptions['applicationProcesses']): ApplicationProcessLauncher | undefined {
+  if (launcher === undefined) return;
+  if (process.platform === 'win32') throw new PreviewError('UNSUPPORTED_PLATFORM', 'Application process launchers require macOS or Linux.');
+  const base: unknown = launcher?.baseEnvironment;
+  if (typeof launcher?.start !== 'function' || !base || typeof base !== 'object' || Array.isArray(base) || Object.keys(base).length > 128 ||
+    Object.entries(base).some(([key, value]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || ['PORT', 'HOST', 'PREVIEW_URL'].includes(key) ||
+      typeof value !== 'string' || value.includes('\0'))) {
+    throw new PreviewError('INVALID_INPUT', 'applicationProcesses needs a start function and a base environment of at most 128 named strings, without PORT, HOST or PREVIEW_URL.');
+  }
+  const baseEnvironment = { ...base as Record<string, string> };
+  validateEnvironmentSize(baseEnvironment);
+  return { baseEnvironment, start: request => launcher.start(request) };
 }
 
 /** Consume approved roots as identities; resolving them again would grant a replaced symlink target. */
 export async function inspectPreviewSpec(input: PreviewSpec, context: {
   roots: string[]; inputs: Readonly<Record<string, string>>; secretIds: ReadonlySet<string>;
-} & Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket'>, privateDirectories: ReadonlySet<string>) {
+} & Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket' | 'applicationProcesses'>, privateDirectories: ReadonlySet<string>) {
   const { roots, inputs, secretIds } = context;
   const spec = await normalizeSpec(parseSpec(input), roots, inputs, privateDirectories);
   const secrets = secretRequirements(spec, secretIds);
@@ -41,7 +56,7 @@ export async function inspectPreviewSpec(input: PreviewSpec, context: {
   return { ...describeSpec(spec), ...(secrets.length ? { secrets } : {}), ...(prerequisites.length ? { prerequisites } : {}) };
 }
 
-async function inspectPrerequisites(spec: EffectiveSpec, roots: string[], options: Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket'>): Promise<PrerequisiteFinding[]> {
+async function inspectPrerequisites(spec: EffectiveSpec, roots: string[], options: Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket' | 'applicationProcesses'>): Promise<PrerequisiteFinding[]> {
   const findings: PrerequisiteFinding[] = [];
   const services = spec.type === 'environment' ? Object.entries(spec.services) : [[undefined, spec] as const];
   const graph = spec.type === 'environment' ? environmentDependencies(spec) : new Map<string, string[]>();
@@ -56,7 +71,8 @@ async function inspectPrerequisites(spec: EffectiveSpec, roots: string[], option
     return spec.type === 'environment' ? [...visited].filter(name => spec.services[name].type === 'job') : [];
   }
   const commands = services.filter(([, service]) => service.type === 'command' || service.type === 'worker' || service.type === 'job');
-  for (const helper of commands.length ? nativeTools() : []) {
+  // An embedder's supervisor inspects its own listeners; the owner then needs no process helpers.
+  for (const helper of commands.length && !options.applicationProcesses ? nativeTools() : []) {
     if (!await executableFile(helper)) findings.push({ requirement: 'native-helper', status: 'missing', message: `Install the system helper ${helper} before starting native commands.` });
   }
   for (const [service, command] of commands) {
@@ -69,7 +85,8 @@ async function inspectPrerequisites(spec: EffectiveSpec, roots: string[], option
       findings.push({ ...scope, requirement: 'executable', status: 'unverified', message: 'Executable lookup uses an explicit PATH binding. Verify it during startup; inspection does not resolve that binding.' });
       continue;
     }
-    const locations = (process.env.PATH ?? (process.platform === 'win32' ? '' : '/usr/bin:/bin')).split(delimiter).map(path => resolve(command.cwd, path));
+    const searchPath = options.applicationProcesses ? options.applicationProcesses.baseEnvironment.PATH : process.env.PATH;
+    const locations = (searchPath ?? (process.platform === 'win32' ? '' : '/usr/bin:/bin')).split(delimiter).map(path => resolve(command.cwd, path));
     const candidates = direct ? [resolve(command.cwd, executable)] : locations.map(directory => resolve(directory, executable));
     if (process.platform === 'win32' && !/\.exe$/i.test(executable)) candidates.push(...candidates.map(path => `${path}.exe`));
     let checked = false;
