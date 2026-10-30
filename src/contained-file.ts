@@ -7,11 +7,13 @@ import { isWithin } from './spec.js';
  * Opens the regular file `file`, an absolute path inside the real directory `root`, and proves where the opened
  * descriptor itself lives: no check of the path can, because a directory on it can be swapped for a link before
  * the open and restored before the check. On Linux the descriptor's path comes from `/proc/self/fd`, on macOS
- * from `fcntl(F_GETPATH)`; either must lie inside `root` and satisfy `allowed`, and an unavailable path fails
- * closed. The open never follows a final link and never blocks on a FIFO.
+ * from `fcntl(F_GETPATH)`; either must be an absolute path inside `root` that satisfies `allowed`, and an
+ * unavailable path (Linux without `/proc`, for example) fails closed.
+ * The open never follows a final link and never blocks on a FIFO.
  * Windows has neither source and keeps only the identity checks of every directory on the path.
  */
-export async function openContained(root: string, file: string, allowed: (real: string) => boolean = () => true): Promise<fs.FileHandle> {
+export async function openContained(root: string, file: string, allowed: (real: string) => boolean = () => true,
+  descriptor: (fd: number) => Promise<string | undefined> = descriptorPath): Promise<fs.FileHandle> {
   if (file === root || !isWithin(root, file)) throw new Error('The file is outside its directory.');
   const parents: string[] = [];
   for (let directory = path.dirname(file); ; directory = path.dirname(directory)) {
@@ -28,8 +30,11 @@ export async function openContained(root: string, file: string, allowed: (real: 
   try {
     const opened = await handle.stat({ bigint: true });
     if (!opened.isFile()) throw new Error('The file is not a regular file.');
-    const real = await descriptorPath(handle.fd);
-    if (real !== undefined && (!isWithin(root, real) || real === root || !allowed(real))) throw new Error('The opened file is outside its directory.');
+    const real = await descriptor(handle.fd);
+    // Linux can report a non-path form such as `(unreachable)/name`, which would resolve against the working directory.
+    if (real !== undefined && (!path.isAbsolute(real) || !isWithin(root, real) || real === root || !allowed(real))) {
+      throw new Error('The opened file is outside its directory.');
+    }
     const entry = await fs.lstat(file, { bigint: true });
     if (await identities() !== before || entry.dev !== opened.dev || entry.ino !== opened.ino) {
       throw new Error('The file changed while it was opened.');

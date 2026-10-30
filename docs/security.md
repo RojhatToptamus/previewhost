@@ -80,6 +80,8 @@ and directory listings. They exclude the private data directory and its resolved
 On macOS and Linux, the opened file's own path, from `fcntl(F_GETPATH)` or `/proc/self/fd`, must pass
 the same rules, so a directory replaced by a link during a request cannot redirect it. Windows checks only
 that each directory on the path is unchanged and not a link before and after the open.
+On Linux without `/proc`, as in a minimal chroot or container, the opened file's path is unavailable and
+every such open fails closed: static files return 404 and Compose files are refused.
 A hard-linked file inside the directory is served, as `cp -l` and pnpm produce; its other names are not
 checked. Linux's `protected_hardlinks` stops another user from linking a file it cannot read; macOS has no
 such protection.
