@@ -8,7 +8,11 @@ import { PreviewError } from './errors.js';
 import { runNativeJob, startNative, type NativeOwnership } from './native.js';
 import type { Resource } from './resources.js';
 
-/** Compose reads and build commands use an explicit local engine and a private, empty CLI home. */
+/**
+ * Compose reads and build commands use an explicit local engine and a private, empty CLI home, and run from that
+ * directory. Buildx Bake reads files under its working directory and the build contexts Compose grants, so the private
+ * Dockerfile copies beside it are readable to the build, and nothing resolves against the repository.
+ */
 export class ComposeCli {
   private constructor(readonly directory: string, private readonly socket: string, private readonly docker: string) {}
 
@@ -40,18 +44,18 @@ export class ComposeCli {
       ...files.flatMap(file => ['-f', file]), ...spec.profiles.flatMap(profile => ['--profile', profile])];
   }
 
-  private read(args: string[], cwd: string, signal: AbortSignal): Promise<string> {
+  private read(args: string[], signal: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
-      execFile(this.docker, args, { cwd, env: this.environment(), timeout: 20000, maxBuffer: 4 * 1024 * 1024, signal, windowsHide: true },
+      execFile(this.docker, args, { cwd: this.directory, env: this.environment(), timeout: 20000, maxBuffer: 4 * 1024 * 1024, signal, windowsHide: true },
         (error, stdout) => error ? reject(new PreviewError('START_FAILED', 'Docker Compose inspection failed. Check the local CLI and configuration. Command output is private.')) : resolve(stdout));
     });
   }
 
   async probe(signal: AbortSignal): Promise<string> {
     const results = await Promise.allSettled([
-      this.read([...this.dockerArgs(), 'version', '--short'], this.directory, signal),
-      this.read([...this.dockerArgs(), 'config', '--help'], this.directory, signal),
-      this.read([...this.dockerArgs(), 'up', '--help'], this.directory, signal),
+      this.read([...this.dockerArgs(), 'version', '--short'], signal),
+      this.read([...this.dockerArgs(), 'config', '--help'], signal),
+      this.read([...this.dockerArgs(), 'up', '--help'], signal),
     ]);
     const [versionResult, configResult, upResult] = results;
     if (versionResult.status === 'rejected') throw versionResult.reason;
@@ -66,17 +70,17 @@ export class ComposeCli {
     return version.trim().replace(/^v/, '');
   }
 
-  /** `files` are private copies; relative paths in them still resolve from the source directory. */
+  /** `files` are private copies; relative paths in them still resolve from the source directory (`--project-directory`). */
   config(spec: ComposeSpec, files: string[], materialized: boolean, signal: AbortSignal): Promise<string> {
     return this.read([...this.base(spec, 'previewhost-inspect', files), 'config', '--format', 'json', '--no-path-resolution',
-      ...(materialized ? [] : ['--no-interpolate', '--no-env-resolution'])], spec.cwd, signal);
+      ...(materialized ? [] : ['--no-interpolate', '--no-env-resolution'])], signal);
   }
 
   run(spec: ComposeSpec, project: string, file: string, args: string[], options: {
     signal: AbortSignal; supervisor?: RuntimeOptions['supervisor']; ownership?: NativeOwnership;
     redactions: string[]; appendLog(text: string): void; onResource(resource: Pick<Resource, 'stop'>): void;
   }): Promise<void> {
-    return runNativeJob({ ...options, spec: { cwd: spec.cwd, command: [this.docker, ...this.base(spec, project, [file]), ...args], env: {} }, hostEnvironment: this.environment(),
+    return runNativeJob({ ...options, spec: { cwd: this.directory, command: [this.docker, ...this.base(spec, project, [file]), ...args], env: {} }, hostEnvironment: this.environment(),
       url: '', timeoutMs: spec.timeoutMs });
   }
 
