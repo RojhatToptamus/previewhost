@@ -73,10 +73,12 @@ test('Compose replacements, failures, cancellation and restart keep exact volume
   assert.equal((await fetch(second.url!)).status, 200);
   await write('ignored', false, true);
   const candidate = await runtime.start(spec('one'));
-  const cancelDeadline = Date.now() + 10000;
+  // Reaching the started container takes a whole Compose start, as long as the Docker host needs. The attempt's own
+  // startup deadline bounds the wait: the test fails as soon as the candidate stops starting without it.
   while (!(await runtime.logs('one', candidate.candidate!.id)).text.includes('Started')) {
-    if (Date.now() >= cancelDeadline) {
-      assert.fail(`The candidate container did not start: ${JSON.stringify({ status: await runtime.get('one'), logs: await runtime.logs('one', candidate.candidate!.id) })}`);
+    const status = await runtime.get('one');
+    if (status.candidate?.id !== candidate.candidate!.id || status.candidate.state !== 'starting') {
+      assert.fail(`The candidate stopped before its container started: ${JSON.stringify({ status, logs: await runtime.logs('one', candidate.candidate!.id) })}`);
     }
     await delay(50);
   }
@@ -191,7 +193,7 @@ test('Compose pins build contexts to verified absolute directories and Dockerfil
   assert.deepEqual(prepared.description.services[0].build, { context: 'github.com/x/y', dockerfile: 'Dockerfile' });
 });
 
-test('a Dockerfile-specific ignore file, even an empty one, is kept for BuildKit and refused without Buildx', {
+test('a Dockerfile-specific ignore file, even an empty one, is kept for BuildKit and refused where Compose would use the legacy builder', {
   skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET, the Docker Compose CLI and Docker Buildx',
 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-ignore-'));
@@ -203,15 +205,19 @@ test('a Dockerfile-specific ignore file, even an empty one, is kept for BuildKit
   const spec: ComposeSpec = { name: 'ignore', type: 'compose', cwd: source, files: ['compose.yaml'], profiles: [], rootServices: ['web'],
     services: [{ id: 'web', ports: { http: { target: 8080 } } }], primary: { service: 'web', port: 'http' }, routes: {}, timeoutMs: 120000 };
   // Each preparation writes its copies into a command directory of its own.
-  const commandDirectory = async (legacy = false) => {
+  // `without` reports a Compose version and no Buildx plugin, as Compose would find them.
+  const commandDirectory = async (without?: { compose: string }) => {
     const cli = await ComposeCli.create(directory, dockerSocket!);
     t.after(() => cli.close());
-    return legacy ? Object.assign(Object.create(cli), { buildx: async () => false }) as ComposeCli : cli;
+    if (!without) return cli;
+    return Object.assign(Object.create(cli), { probe: async (signal: AbortSignal) => { await cli.probe(signal); return without.compose; }, buildx: async () => false }) as ComposeCli;
   };
-  // Without an ignore file of its own, either builder applies the context's .dockerignore.
-  await prepareCompose(spec, await commandDirectory(true), t.signal);
+  // Without an ignore file of its own, every builder applies the context's .dockerignore.
+  await prepareCompose(spec, await commandDirectory({ compose: '5.5.0' }), t.signal);
   await writeFile(join(source, 'Dockerfile.dockerignore'), '');
-  await assert.rejects(prepareCompose(spec, await commandDirectory(true), t.signal), /Install Docker Buildx/);
+  // Compose 5 without Buildx uses the legacy builder; Compose 2 falls back to its own BuildKit client.
+  await assert.rejects(prepareCompose(spec, await commandDirectory({ compose: '5.5.0' }), t.signal), /Install Docker Buildx/);
+  await prepareCompose(spec, await commandDirectory({ compose: '2.40.3' }), t.signal);
   const prepared = await prepareCompose(spec, await commandDirectory(), t.signal);
   const build = (prepared.configuration.services as Record<string, { build: { dockerfile: string } }>).web.build;
   assert.equal(await readFile(`${build.dockerfile}.dockerignore`, 'utf8'), '');

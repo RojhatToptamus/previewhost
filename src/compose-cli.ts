@@ -71,8 +71,8 @@ export class ComposeCli {
   }
 
   /**
-   * Whether Compose builds with BuildKit, through Bake. Without the Buildx plugin, Compose falls back to the legacy
-   * builder, which reads only the context's `.dockerignore`.
+   * Whether the Buildx plugin is available, through which Compose builds with BuildKit (Bake). Without it, Compose 5
+   * falls back to the legacy builder, which reads only the context's `.dockerignore`.
    */
   async buildx(signal: AbortSignal): Promise<boolean> {
     const found = await this.read([...this.dockerArgs().slice(0, -1), 'buildx', 'version'], signal).then(() => true, () => false);

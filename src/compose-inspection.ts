@@ -133,7 +133,10 @@ export async function prepareCompose(spec: ComposeSpec, cli: ComposeCli, signal:
   if (spec.services.some(service => !selected.has(service.id))) throw new Error('Every exposed Compose service must belong to the selected roots or their dependencies.');
   publicConfig.services = publicConfig.services.filter(service => selected.has(service.id));
   configuration.services = Object.fromEntries(Object.entries(requiredRecord(configuration.services, 'Compose services')).filter(([id]) => selected.has(id)));
-  await pinBuilds(root, configuration.services as Record<string, unknown>, cli, options.build, signal);
+  // Compose 5 builds with BuildKit only through the Buildx plugin and otherwise falls back to the legacy builder.
+  // Compose 2 falls back to its own BuildKit client instead.
+  const legacyBuilder = async () => Number.parseInt(composeVersion, 10) >= 5 && !(await cli.buildx(signal));
+  await pinBuilds(root, configuration.services as Record<string, unknown>, cli.directory, options.build, legacyBuilder);
   const usedVolumes = new Set(publicConfig.services.flatMap(service => service.namedVolumes.map(volume => volume.source)));
   const usedNetworks = new Set(publicConfig.services.flatMap(service => service.networks));
   const usedSecrets = new Set(publicConfig.services.flatMap(service => service.secretSources));
@@ -167,12 +170,12 @@ function composeLiteral(value: string): string {
  * Docker reads a build context by path while it builds, after authorization. Pin the verified absolute
  * directory and give Docker a Dockerfile read once. Where application commands run as another user, who
  * could replace the directory before Docker reads it, builds are refused. A Dockerfile-specific ignore
- * file is read only by BuildKit; without Buildx, Compose's legacy builder would put what it excludes into
- * the image, so such a build is refused.
+ * file is applied only by BuildKit; Compose's legacy builder would put what it excludes into the image, so a
+ * build that would use it is refused.
  */
-async function pinBuilds(root: string, services: Record<string, unknown>, cli: Pick<ComposeCli, 'directory' | 'buildx'>, allowed: boolean, signal: AbortSignal): Promise<void> {
+async function pinBuilds(root: string, services: Record<string, unknown>, directory: string, allowed: boolean, legacyBuilder: () => Promise<boolean>): Promise<void> {
   let copies = 0;
-  let buildx: boolean | undefined;
+  let legacy: boolean | undefined;
   for (const [id, candidate] of Object.entries(services)) {
     const service = requiredRecord(candidate, `Compose service ${id}`);
     if (service.build === undefined || service.build === null) continue;
@@ -185,7 +188,7 @@ async function pinBuilds(root: string, services: Record<string, unknown>, cli: P
     if (typeof build.context !== 'string' || typeof dockerfile !== 'string') throw new Error(`Compose service ${id} build is invalid.`);
     const context = await resolveContainedDirectory(root, containedPath(root, localContext(build.context, `Compose service ${id} build context`), true));
     const source = containedPath(root, path.resolve(context, safeStaticPath(dockerfile, `Compose service ${id} dockerfile`)));
-    const file = path.join(cli.directory, `dockerfile-${copies++}`);
+    const file = path.join(directory, `dockerfile-${copies++}`);
     await fs.writeFile(file, await readContainedFile(root, source, MAX_HOST_INPUT_BYTES), { mode: 0o600, flag: 'wx' });
     // BuildKit reads `<Dockerfile>.dockerignore` beside the Dockerfile, even an empty one, instead of the context's `.dockerignore`.
     const ignore = await readContainedFile(root, `${source}.dockerignore`, MAX_HOST_INPUT_BYTES).catch((error: NodeJS.ErrnoException) => {
@@ -193,8 +196,8 @@ async function pinBuilds(root: string, services: Record<string, unknown>, cli: P
       throw error;
     });
     if (ignore !== undefined) {
-      buildx ??= await cli.buildx(signal);
-      if (!buildx) {
+      legacy ??= await legacyBuilder();
+      if (legacy) {
         throw new PreviewError('START_FAILED', `Compose service ${id} has ${path.basename(source)}.dockerignore, which only BuildKit applies. Install Docker Buildx so Compose builds with BuildKit.`);
       }
       await fs.writeFile(`${file}.dockerignore`, ignore, { mode: 0o600, flag: 'wx' });

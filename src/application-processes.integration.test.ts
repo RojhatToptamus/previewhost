@@ -66,10 +66,21 @@ function embedder(baseEnvironment: Record<string, string>, { module, inject }: {
   };
 }
 
+/**
+ * Kills a process group and waits until it is gone. On macOS a group whose only members are unreaped zombies answers
+ * EPERM, so EPERM means "still present", as in Previewhost's own `groupExists`, and only ESRCH proves absence.
+ */
 async function killGroup(group: number) {
-  try { process.kill(-group, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
-  for (const deadline = Date.now() + 5_000; ; await delay(25)) {
-    try { process.kill(-group, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return; throw error; }
+  const signal = (name: NodeJS.Signals | 0): boolean => {
+    try { process.kill(-group, name); return true; } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ESRCH') return false;
+      if (code === 'EPERM') return true;
+      throw error;
+    }
+  };
+  signal('SIGKILL');
+  for (const deadline = Date.now() + 5_000; signal(0); await delay(25)) {
     if (Date.now() > deadline) throw new Error(`Process group ${group} survived.`);
   }
 }

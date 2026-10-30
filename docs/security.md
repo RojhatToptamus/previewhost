@@ -226,8 +226,9 @@ inspection is not used.
 
 Each Dockerfile is read once under the same rules, within 64 KiB, and Docker builds from the private copy.
 A Dockerfile-specific ignore file beside it, such as `Dockerfile.dockerignore`, is copied beside the copy.
-Only BuildKit applies that file. Without Docker Buildx, Compose builds with the legacy builder, which would
-include what it excludes, so Previewhost refuses such a build until Buildx is installed.
+Only BuildKit applies that file. Compose 5 builds with BuildKit only through Docker Buildx and otherwise uses
+the legacy builder, which would include what the file excludes, so Previewhost refuses such a build until
+Buildx is installed. Compose 2 falls back to its own BuildKit client.
 
 Build contexts are different. Docker reads each context directory by path while it builds, after
 authorization, so a context is not read once. Previewhost checks that it is a local directory inside
