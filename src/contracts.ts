@@ -337,10 +337,80 @@ export interface RuntimeOptions {
   keystoreDirectory?: string;
   /** Locked private directory for retained declarations and native cleanup receipts. Startup never replays commands. */
   stateDirectory?: string;
-  /** Host-only launch settings for packaged embedders such as Electron. Never sent to application commands. */
+  /**
+   * Host-only launch settings for packaged embedders such as Electron. Never sent to application commands.
+   * They start the supervisor of Docker Compose and, without `applicationProcesses`, of application commands.
+   */
   supervisor?: { executable?: string; module?: string; env?: Record<string, string> };
+  /**
+   * Starts the supervisor of the repository's own commands (a `command` preview and an environment's
+   * `command` services, workers, jobs and command probes) through the embedder, for example as another
+   * user. Compose and anything else Previewhost runs itself stay on `supervisor`, and Compose image builds
+   * are refused. macOS and Linux only.
+   */
+  applicationProcesses?: ApplicationProcessLauncher;
   dockerSocket?: string;
   authorize?: (request: AuthorizationRequest) => boolean | Promise<boolean>;
+}
+
+/**
+ * Runs Previewhost's supervisor where the embedder chooses, for example as another user in a sandbox.
+ * Previewhost then never checks identities or signals process groups for these processes, records
+ * no recovery receipt for them, and asks the supervisor, over IPC, who listens on a port.
+ * Recovery after an owner crash belongs to the embedder.
+ */
+export interface ApplicationProcessLauncher {
+  /** The environment the repository's commands start from, in place of the owner's own. */
+  baseEnvironment: Record<string, string>;
+  /**
+   * Starts `module` (Previewhost's supervisor, see `applicationSupervisorFiles()`) as the other user,
+   * connected over Node IPC; `cwd` is the command's working directory. `env` is the supervisor's own
+   * environment (the base environment); the command's environment arrives over IPC in `configure`.
+   * The supervisor should lead its own process group, as a systemd service or `fork(..., { detached: true })` does,
+   * and must share the owner's network namespace: it checks listeners in its own.
+   * When `signal` aborts, start may reject; if it resolves anyway, Previewhost stops the channel.
+   * Reject only when no process is left running.
+   */
+  start(request: { module: string; env: Record<string, string>; cwd: string; signal: AbortSignal }): Promise<SupervisorChannel>;
+}
+
+/**
+ * One supervisor's Node IPC channel, relayed by the embedder. Messages are JSON objects with a `type`:
+ *
+ * From Previewhost to the supervisor:
+ * - `{ type: 'configure', command: string[], cwd: string, env: Record<string, string>, redactions: string[] }`:
+ *   the exact command. `env` and `redactions` contain secret values; never log or persist them.
+ * - `{ type: 'commit' }`: start the configured command.
+ * - `{ type: 'check-listener', id: number, port: number }`: classify the TCP listeners on `port`.
+ * - `{ type: 'stop' }`: stop the command and its process group, then exit.
+ *
+ * From the supervisor to Previewhost:
+ * - `{ type: 'online' }`: ready for `configure`.
+ * - `{ type: 'configured' }`: `configure` was accepted.
+ * - `{ type: 'started', pid: number }`: the command started. The pid is in the supervisor's PID namespace.
+ * - `{ type: 'log', text: string }`: redacted command output.
+ * - `{ type: 'target-exit', code: number | null, signal: string | null }`: the command exited.
+ * - `{ type: 'failure', code: 'START_FAILED' | 'SUPERVISOR_FAILED', message: string }`.
+ * - `{ type: 'listener', id: number, result: 'owned' | 'missing' | 'non-loopback' | 'foreign' | 'unavailable' }`:
+ *   the answer to `check-listener` with the same `id`. `owned` means every listener on the port binds
+ *   127.0.0.1 or ::1 and belongs to the command or one of its descendants, and one binds 127.0.0.1.
+ *
+ * Deliver every message in order, and queue messages that arrive before the first `onMessage` listener.
+ * The supervisor runs as the command's user, so job results and listener verdicts come from that user.
+ * Previewhost accepts only these messages, within bounds (`log.text` 16,384 characters, `failure.message`
+ * 1,024, a listener answer only for an open request, 8 MiB of undelivered text); anything else stops the
+ * channel and fails the process. Cap each message's serialized size before parsing it, for example at 1 MiB.
+ *
+ */
+export interface SupervisorChannel {
+  send(message: unknown): void;
+  onMessage(listener: (message: unknown) => void): void;
+  /** Call listeners once, after the supervisor's last message (Node's `close` event); call late listeners at once. */
+  onExit(listener: (code: number | null, signal: string | null) => void): void;
+  stdout: NodeJS.ReadableStream;
+  stderr: NodeJS.ReadableStream;
+  /** Stops every process the supervisor started; resolves only once none is left, rejects when the embedder cannot prove it. */
+  stop(): Promise<void>;
 }
 
 const attemptIdSchema = z.string().min(1).max(128).describe('Exact candidate attempt ID returned by start/replace or current status.');

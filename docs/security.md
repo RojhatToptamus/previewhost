@@ -1,6 +1,6 @@
 # Ownership, security, and recovery
 
-Application commands run with your user permissions, without a sandbox. Stopping a preview ends its processes but keeps managed database data.
+Application commands run with your user permissions, without a sandbox, unless an embedder [starts them](#commands-started-by-an-embedder) as another user. Stopping a preview ends its processes but keeps managed database data.
 
 ## Ownership
 
@@ -77,6 +77,14 @@ in the receiving code.
 
 Static previews reject traversal, hidden paths, escaping symlinks, special files,
 and directory listings. They exclude the private data directory and its resolved aliases.
+On macOS and Linux, the opened file's own path, from `fcntl(F_GETPATH)` or `/proc/self/fd`, must pass
+the same rules, so a directory replaced by a link during a request cannot redirect it. Windows checks only
+that each directory on the path is unchanged and not a link before and after the open.
+On Linux without `/proc`, as in a minimal chroot or container, the opened file's path is unavailable and
+every such open fails closed: static files return 404 and Compose files are refused.
+A hard-linked file inside the directory is served, as `cp -l` and pnpm produce; its other names are not
+checked. Linux's `protected_hardlinks` stops another user from linking a file it cannot read; macOS has no
+such protection.
 Attachments connect only to IPv4 loopback.
 These checks do not isolate hostile filesystem changes by another same-user process.
 
@@ -163,6 +171,28 @@ Windows uses one non-inheritable Job Object handle owned by the runtime. Assignm
 Owner termination closes the handle and terminates job members. Normal stop terminates the job and checks its active-process count.
 Windows has no Unix TERM grace period.
 
+### Commands started by an embedder
+
+With [`applicationProcesses`](api.md#application-processes), the embedder starts the supervisor of
+application commands, possibly as another user. Previewhost then neither checks process identities
+nor signals process groups for those commands. It sends `stop` over IPC, then requires the embedder's
+`stop()` to prove that no process remains. Docker Compose still runs under the owner's supervisor.
+
+The supervisor answers the listener check as the command's user. Every listener on the selected port
+must bind loopback and belong to the command or one of its descendants, and one must bind `127.0.0.1`,
+where the gateway connects. On Linux it reads `/proc`, which also works with `hidepid` or
+`ProtectProc=invisible`. On macOS it runs `lsof` and `ps`; a listener owned by another user is
+invisible there. The check reads the supervisor's network namespace, so the embedder must run the
+supervisor in the owner's.
+
+Job results and listener verdicts come from the command's own user. They guard against a stale or
+unrelated listener and report a job's exit, not against that user. Previewhost accepts only the
+supervisor's protocol messages, within size and backlog bounds. Any other message stops the channel
+and fails the process.
+
+Application commands start from the embedder's `baseEnvironment`. The owner's `HOME`, `TMPDIR`, and
+other basic variables do not reach them.
+
 ## Recovery
 
 Application attempts and routes remain in memory.
@@ -179,7 +209,32 @@ A new daemon lacks the records needed to retry cleanup of those processes.
 
 If both owner and supervisor die before cleanup, remaining processes can require manual inspection.
 previewhost does not infer their ownership after restart.
+
+Previewhost records no receipt for commands started through `applicationProcesses`, so recovery never
+signals a process the owner did not start. The embedder stops those processes after an owner crash.
 See [cleanup recovery](troubleshooting.md#replacement-or-cleanup-is-incomplete).
+
+## Compose inputs
+
+Inspection reads each Compose file, env file, and secret file once. Each must be a regular file inside
+the source directory, reached without a symlink in any path component, with a single hard link. On macOS
+and Linux, the opened file's own path must also lie inside the source directory.
+Compose files are limited to 1 MiB and other files to 64 KiB. Previewhost writes private copies
+to its owner directory and normalizes only those copies. `docker compose` then runs with `-f` on that
+normalized model, whose env and secret files name the copies. A file changed or replaced after
+inspection is not used.
+
+Each Dockerfile is read once under the same rules, within 64 KiB, and Docker builds from the private copy.
+A Dockerfile-specific ignore file beside it, such as `Dockerfile.dockerignore`, is copied beside the copy.
+Only BuildKit applies that file. Compose 5 builds with BuildKit only through Docker Buildx and otherwise uses
+the legacy builder, which would include what the file excludes, so Previewhost refuses such a build until
+Buildx is installed. Compose 2 falls back to its own BuildKit client.
+
+Build contexts are different. Docker reads each context directory by path while it builds, after
+authorization, so a context is not read once. Previewhost checks that it is a local directory inside
+the source directory and passes Docker that verified absolute path. Remote contexts (a value with `:`),
+contexts starting with `~`, and `additional_contexts` are rejected. With `applicationProcesses`, whose
+commands could replace a directory before Docker reads it, Compose image builds are refused; use `image:`.
 
 ## Database ownership and recovery
 

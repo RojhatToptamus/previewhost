@@ -1,8 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { captureOutput } from './stream-logs.js';
-import { windowsProcessStart } from './windows.js';
+import { listenerOwnership } from './listener-ownership.js';
 
 // Process-group and owner-IPC behavior derives from Task Monki (MIT); see NOTICE.
+// An embedder may install this module elsewhere for another user. Import only Node built-ins and the
+// files listed by applicationSupervisorFiles(); Windows-only code loads dynamically.
 
 interface Launch {
   command: string[];
@@ -21,6 +23,15 @@ const deadline = setTimeout(() => { void stop(); }, 5_000);
 process.on('message', (value: Record<string, unknown>) => {
   if (value?.type === 'stop') { void stop(); return; }
   if (stopping) return;
+  if (value?.type === 'check-listener') {
+    const { id, port } = value;
+    if (!Number.isSafeInteger(id) || !Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535) {
+      void fail('The supervisor received an invalid listener check.', true); return;
+    }
+    const pid = target?.exitCode === null && target.signalCode === null ? target.pid : undefined;
+    void (pid ? listenerOwnership(pid, port as number) : Promise.resolve('missing')).then(result => send({ type: 'listener', id, result }));
+    return;
+  }
   if (value?.type === 'configure' && !launch && !committed) {
     if (!Array.isArray(value.command) || !value.command.length || !value.command.every((item) => typeof item === 'string') ||
       typeof value.cwd !== 'string' || !value.env || typeof value.env !== 'object' || !Array.isArray(value.redactions)) {
@@ -56,7 +67,10 @@ process.on('SIGINT', () => { void stop(); });
 process.on('SIGTERM', () => { void stop(); });
 process.on('uncaughtException', () => { void fail('The native supervisor encountered an internal error.', true); });
 process.on('unhandledRejection', () => { void fail('The native supervisor encountered an internal error.', true); });
-void send({ type: 'online', ...(process.platform === 'win32' ? { started: windowsProcessStart() } : {}) });
+void (async () => {
+  const identity = process.platform === 'win32' ? { started: (await import('./windows.js')).windowsProcessStart() } : {};
+  await send({ type: 'online', ...identity });
+})();
 
 async function fail(message: string, supervisor = false) {
   await send({ type: 'failure', code: supervisor ? 'SUPERVISOR_FAILED' : 'START_FAILED', message: message.slice(0, 1024) });
@@ -80,7 +94,13 @@ async function stop() {
     catch { process.exit(1); }
   }, 500);
   try { process.kill(-process.pid, 'SIGTERM'); }
-  catch { clearTimeout(killTimer); process.exit(1); }
+  catch {
+    // Not a group leader (an embedder started this supervisor inside its own group): signal only the
+    // command. The embedder's stop() removes anything left.
+    clearTimeout(killTimer);
+    target?.kill('SIGTERM');
+    setTimeout(() => { target?.kill('SIGKILL'); process.exit(0); }, 500);
+  }
 }
 
 function send(message: Record<string, unknown>): Promise<void> {

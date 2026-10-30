@@ -1,5 +1,5 @@
 export type {
-  PreviewSpec, ComposeSpec, PreviewStatus, PreviewDescription, PreviewApi, RuntimeOptions, PrerequisiteFinding,
+  PreviewSpec, ComposeSpec, PreviewStatus, PreviewDescription, PreviewApi, RuntimeOptions, ApplicationProcessLauncher, SupervisorChannel, PrerequisiteFinding,
   AttemptSummary, AttemptResult, Failure, ErrorCode, LogResult, LogOptions, DeleteDataOptions, WaitOptions,
   ServiceStatus, DataStatus, StartOptions, StopOptions, AuthorizationRequest,
   SecretRequirement, SecretSetupApi, SecretSetupStatus, SecretSetupSummary, PreviewManagementApi,
@@ -7,6 +7,7 @@ export type {
 } from './contracts.js';
 export { PreviewError } from './errors.js';
 export { createPreviewRuntime } from './runtime.js';
+export { applicationSupervisorFiles } from './native.js';
 export type { PreviewRuntime } from './runtime.js';
 export { connectPreviewDaemon } from './client.js';
 export type { ClientOptions } from './client.js';

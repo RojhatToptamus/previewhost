@@ -1,9 +1,9 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
-import { constants } from 'node:fs';
 import path from 'node:path';
 import type { Socket } from 'node:net';
 import { isWithin } from './spec.js';
+import { openContained } from './contained-file.js';
 import type { Resource } from './resources.js';
 
 const mime: Record<string, string> = {
@@ -80,14 +80,14 @@ async function serve(directory: string, spa: boolean, privateDirectories: Readon
     if (!spa || path.extname(decoded)) { error(404, 'File not found.'); return; }
     try { filename = await fs.realpath(path.join(directory, 'index.html')); } catch { error(404, 'File not found.'); return; }
   }
-  if (!available(filename)
-    || path.relative(directory, filename).split(path.sep).some((part) => part.startsWith('.'))) { error(403, 'Path is not available.'); return; }
-  if (!(await fs.stat(filename)).isFile()) { error(404, 'File not found.'); return; }
+  const servable = (real: string) => available(real) && !path.relative(directory, real).split(path.sep).some((part) => part.startsWith('.'));
+  if (!servable(filename)) { error(403, 'Path is not available.'); return; }
   let file: fs.FileHandle;
-  try { file = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); } catch { error(404, 'File not found.'); return; }
+  // realpath resolved links once. The opened file's own path must pass the same rules: a directory swapped for
+  // a link before the open must not redirect it outside the root, into a hidden path, or into private storage.
+  try { file = await openContained(directory, filename, servable); } catch { error(404, 'File not found.'); return; }
   try {
     const stat = await file.stat();
-    if (!stat.isFile()) { error(404, 'File not found.'); await file.close(); return; }
     if (response.destroyed) { await file.close(); return; }
     response.writeHead(200, { 'content-type': mime[path.extname(filename).toLowerCase()] ?? 'application/octet-stream', 'content-length': stat.size, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
     if (request.method === 'HEAD') { response.end(); await file.close(); return; }

@@ -7,7 +7,7 @@ For setup instructions, see [MCP setup](mcp.md), [CLI quickstart](first-preview.
 ## Runtime and client
 
 The ESM package exports `createPreviewRuntime`, `connectPreviewDaemon`,
-`loadPreviewSpec`, `savePreviewSpec`, `PreviewError`, and public TypeScript types. The runtime and
+`loadPreviewSpec`, `savePreviewSpec`, `applicationSupervisorFiles`, `PreviewError`, and public TypeScript types. The runtime and
 daemon client implement `PreviewApi`.
 
 These configuration fragments assume imports from `previewhost`.
@@ -59,6 +59,75 @@ cannot restart a canceled attempt. Source files can change while approval is pen
 `runtime.close()` stops all owned previews and prevents new work. `client.close()`
 only closes client requests. `client.shutdown()` explicitly stops the daemon.
 MCP exposes the same owner-wide operation as `preview_shutdown`.
+
+### Application processes
+
+`applicationProcesses` lets the embedder start the supervisor of the repository's own commands,
+for example as another user in a sandbox. It covers a `command` preview and an environment's
+`command` services, workers, jobs, and command probes. Docker Compose and other commands that
+Previewhost runs itself keep using `supervisor`. It requires macOS or Linux.
+
+```ts
+const { module, files } = applicationSupervisorFiles();
+await installForAgent(files); // Copy them into one directory the other user can read.
+
+const runtime = await createPreviewRuntime({
+  allowedRoots: ['/absolute/task'],
+  applicationProcesses: {
+    baseEnvironment: { PATH: '/usr/bin:/bin', HOME: '/absolute/task-home', TMPDIR: '/absolute/task-tmp' },
+    start: ({ module, env, cwd, signal }) => startAsAgent({ module, env, cwd, signal }),
+  },
+});
+```
+
+`installForAgent` and `startAsAgent` represent your application's code.
+
+- `baseEnvironment` replaces the owner's `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`,
+  `LC_ALL`, and `TERM`. Spec values, `PORT`, `HOST`, and `PREVIEW_URL` are added as usual.
+  It holds at most 128 strings within 64 KiB and cannot set `PORT`, `HOST`, or `PREVIEW_URL`.
+- `start` runs `module` with Node.js in `cwd`, connected over Node IPC, with `env` as the
+  supervisor's own environment. `env` is the base environment. The supervisor should lead its own
+  process group. It resolves with a channel: `send`, `onMessage`, `onExit`, `stdout`, `stderr`, and `stop`.
+- If `signal` aborts, `start` may reject. If it resolves anyway, Previewhost stops that channel.
+  Reject only when nothing is left running.
+- To stop, Previewhost sends `stop` over IPC, waits up to two seconds for the supervisor to exit,
+  then awaits `channel.stop()`. `stop()` resolves only when no process the supervisor started remains.
+  A rejection reports `CLEANUP_INCOMPLETE`; the next `stop` calls it again.
+- Previewhost never inspects or signals these processes and records no recovery receipt for them.
+  After an owner crash, the embedder stops them.
+- The supervisor checks listeners in its own network namespace. Run it in the owner's.
+- Compose previews still run, but image builds are refused; services must use `image:`.
+
+`applicationSupervisorFiles()` returns the supervisor module and every file it imports, as absolute
+paths in the installed package. They import only Node.js built-ins and each other. Node.js loads them
+as ES modules when no `package.json` above their directory sets `"type": "commonjs"`.
+
+The channel carries the supervisor's JSON messages unchanged. Deliver them in order, and queue
+messages that arrive before the first `onMessage` listener. Call `onExit` listeners after the last
+message, as Node's `close` event does. Previewhost accepts only the messages below, with `log` text up
+to 16,384 characters, `failure` messages up to 1,024, listener answers only for an open request, and at
+most 8 MiB of undelivered text. Anything else stops the channel and fails the process.
+The supervisor runs as the other user, so cap each message's serialized size before you parse it, for
+example at 1 MiB: Node's own IPC buffers a line without a newline without limit.
+
+| From | Message | Meaning |
+| --- | --- | --- |
+| Previewhost | `{type: 'configure', command, cwd, env, redactions}` | The exact command. `env` and `redactions` contain secret values. |
+| Previewhost | `{type: 'commit'}` | Start the configured command. |
+| Previewhost | `{type: 'check-listener', id, port}` | Classify the TCP listeners on `port`. |
+| Previewhost | `{type: 'stop'}` | Stop the command's process group, then exit. |
+| Supervisor | `{type: 'online'}` | Ready for `configure`. |
+| Supervisor | `{type: 'configured'}` | `configure` was accepted. |
+| Supervisor | `{type: 'started', pid}` | The command started. |
+| Supervisor | `{type: 'log', text}` | Redacted command output. |
+| Supervisor | `{type: 'target-exit', code, signal}` | The command exited. |
+| Supervisor | `{type: 'failure', code, message}` | `START_FAILED` or `SUPERVISOR_FAILED`. |
+| Supervisor | `{type: 'listener', id, result}` | The answer to `check-listener` with the same `id`. |
+
+`result` is `owned` when every listener on the port binds `127.0.0.1` or `::1`, belongs to the
+command or one of its descendants, and one of them binds `127.0.0.1`. Other results are `missing`, `non-loopback`, `foreign`, and
+`unavailable`; each fails the readiness check. The supervisor reads `/proc` on Linux and runs
+`lsof` and `ps` on macOS, as the command's user. It needs no access to other users' processes.
 
 ## Specs
 
@@ -125,7 +194,8 @@ allocated port. The command must listen on that port and bind to loopback.
 previewhost does not add arguments or retry a command after a port conflict.
 
 The environment inherits only `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`,
-`LC_ALL`, and `TERM`. Explicit `env` values override these values.
+`LC_ALL`, and `TERM`. With [`applicationProcesses`](#application-processes), it starts from
+`baseEnvironment` instead. Explicit `env` values override these values.
 `PORT`, `HOST`, and `PREVIEW_URL` are reserved for previewhost.
 Other host environment values require selected `{fromEnv: NAME}` bindings or explicit literals.
 Standalone command entries accept literals, `{fromEnv: NAME}`, and `{secret: ID}`.

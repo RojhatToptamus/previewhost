@@ -28,7 +28,7 @@ The CI helper removes its WSL distribution and terminates its transport children
 Some sandbox environments require explicit permission for local listeners and
 process inspection.
 
-Real database and Compose tests require a local Docker Engine, Docker Compose, and cached test images.
+Real database and Compose tests require a local Docker Engine, Docker Compose, Docker Buildx, and cached test images.
 If images are absent, pull them before the checks:
 
 ```sh

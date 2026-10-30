@@ -1,11 +1,12 @@
 // Bounded Compose source validation derives from Task Monki (MIT); see NOTICE.
-import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isAlias, parseDocument, visit, type Node } from 'yaml';
 import type { ComposeSpec } from './contracts.js';
 import { isWithin } from './spec.js';
 import { ComposeCli } from './compose-cli.js';
+import { PreviewError } from './errors.js';
+import { openContained } from './contained-file.js';
 
 const MAX_COMPOSE_FILE_BYTES = 1024 * 1024;
 const MAX_HOST_INPUT_BYTES = 64 * 1024;
@@ -59,32 +60,67 @@ export interface ComposeInspection {
 
 export interface PreparedCompose {
   description: ComposeInspection;
+  /** The normalized model Compose executes. Env and secret files name private copies in the command directory. */
   configuration: Record<string, unknown>;
   redactions: string[];
-  secretFiles: Record<string, string>;
 }
 
-/** Normalize once, authorize its safe description, then execute these exact private bytes. */
-export async function prepareCompose(spec: ComposeSpec, cli: ComposeCli, signal: AbortSignal): Promise<PreparedCompose> {
+/** Read each host file once into private copies, normalize only those copies, authorize their safe description, then execute the same model. */
+export async function prepareCompose(spec: ComposeSpec, cli: ComposeCli, signal: AbortSignal, options: { build: boolean } = { build: true }): Promise<PreparedCompose> {
   const root = await fs.realpath(spec.cwd);
-  const files = await Promise.all(spec.files.map(file => resolveContainedFile(root, path.resolve(root, file), MAX_COMPOSE_FILE_BYTES)));
-  const before = await Promise.all(files.map(readFileIdentity));
-  const hostInputs: ComposeHostInput[] = [];
-  for (const file of files) {
-    hostInputs.push({ kind: 'COMPOSE_FILE', path: relativePath(root, file) });
-    for (const reference of scanComposeSource(await fs.readFile(file, 'utf8'), relativePath(root, file)).hostInputs) {
-      const absolute = path.resolve(root, reference.path);
-      if (reference.kind === 'BUILD_CONTEXT') await resolveContainedDirectory(root, relativePath(root, absolute));
-      else await resolveContainedFile(root, absolute, MAX_HOST_INPUT_BYTES);
-      hostInputs.push({ ...reference, path: relativePath(root, absolute) });
+  const sources: Array<{ path: string; text: string }> = [];
+  for (const file of spec.files) {
+    const relative = containedPath(root, file);
+    sources.push({ path: relative, text: (await readContainedFile(root, relative, MAX_COMPOSE_FILE_BYTES)).toString('utf8') });
+  }
+  const inputs = dedupeHostInputs([
+    ...sources.map(source => ({ kind: 'COMPOSE_FILE' as const, path: source.path })),
+    ...sources.flatMap(source => scanComposeSource(source.text, source.path).hostInputs
+      .map(reference => ({ ...reference, path: containedPath(root, reference.path, reference.kind === 'BUILD_CONTEXT') }))),
+  ]);
+  if (inputs.length > 64) throw new Error('Compose configuration reads too many repository files.');
+  // Compose would read env and secret files again by path. It reads these private copies instead.
+  const copies = new Map<string, { file: string; text: string }>();
+  for (const input of inputs) {
+    // Dockerfiles are read once, without blocking, when a selected service builds (pinBuilds).
+    if (input.kind === 'BUILD_CONTEXT') await resolveContainedDirectory(root, input.path);
+    else if ((input.kind === 'ENV_FILE' || input.kind === 'SECRET_FILE') && !copies.has(input.path)) {
+      const bytes = await readContainedFile(root, input.path, MAX_HOST_INPUT_BYTES);
+      const file = path.join(cli.directory, `input-${copies.size}`);
+      await fs.writeFile(file, bytes, { mode: 0o600, flag: 'wx' });
+      copies.set(input.path, { file, text: bytes.toString('utf8') });
     }
   }
-  const inputs = dedupeHostInputs(hostInputs);
-  if (inputs.length > 64) throw new Error('Compose configuration reads too many repository files.');
+  const files: string[] = [];
+  for (const [index, source] of sources.entries()) {
+    files.push(path.join(cli.directory, `source-${index}.yaml`));
+    await fs.writeFile(files[index], source.text, { mode: 0o600, flag: 'wx' });
+  }
+  const copied = (value: unknown) => {
+    const copy = typeof value === 'string' ? copies.get(containedPath(root, value)) : undefined;
+    if (!copy) throw new Error('Compose configuration names a file that inspection did not read.');
+    return copy;
+  };
   const composeVersion = await cli.probe(signal);
-  const structural = requiredRecord(JSON.parse(await cli.config(spec, false, signal)), 'Compose configuration');
-  const configuration = requiredRecord(JSON.parse(await cli.config(spec, true, signal)), 'Compose configuration');
-  if (canonicalJson(before) !== canonicalJson(await Promise.all(files.map(readFileIdentity)))) throw new Error('Compose files changed during inspection.');
+  const structural = requiredRecord(JSON.parse(await cli.config(spec, files, false, signal)), 'Compose configuration');
+  const model = structuredClone(structural);
+  for (const [id, candidate] of Object.entries(optionalRecord(model.services))) {
+    const service = requiredRecord(candidate, `Compose service ${id}`);
+    if (service.env_file === undefined || service.env_file === null) continue;
+    service.env_file = asList(service.env_file).map(entry => {
+      const reference = typeof entry === 'string' ? { path: entry } : { ...requiredRecord(entry, `Compose service ${id} env_file`) };
+      return { ...reference, path: composeLiteral(copied(reference.path).file) };
+    });
+  }
+  const secrets = new Map<string, { file: string; text: string }>();
+  for (const [name, candidate] of Object.entries(optionalRecord(model.secrets))) {
+    const secret = requiredRecord(candidate, `Compose secret ${name}`);
+    secrets.set(name, copied(secret.file));
+    secret.file = composeLiteral(secrets.get(name)!.file);
+  }
+  const normalized = path.join(cli.directory, 'normalized.json');
+  await fs.writeFile(normalized, JSON.stringify(model), { mode: 0o600, flag: 'wx' });
+  const configuration = requiredRecord(JSON.parse(await cli.config(spec, [normalized], true, signal)), 'Compose configuration');
   const publicConfig = sanitizeComposeConfig(configuration, spec);
   assertNonEnvironmentAuthorityStable(sanitizeComposeConfig(structural, spec), publicConfig);
   const selected = new Set<string>();
@@ -97,6 +133,10 @@ export async function prepareCompose(spec: ComposeSpec, cli: ComposeCli, signal:
   if (spec.services.some(service => !selected.has(service.id))) throw new Error('Every exposed Compose service must belong to the selected roots or their dependencies.');
   publicConfig.services = publicConfig.services.filter(service => selected.has(service.id));
   configuration.services = Object.fromEntries(Object.entries(requiredRecord(configuration.services, 'Compose services')).filter(([id]) => selected.has(id)));
+  // Compose 5 builds with BuildKit only through the Buildx plugin and otherwise falls back to the legacy builder.
+  // Compose 2 falls back to its own BuildKit client instead.
+  const legacyBuilder = async () => Number.parseInt(composeVersion, 10) >= 5 && !(await cli.buildx(signal));
+  await pinBuilds(root, configuration.services as Record<string, unknown>, cli.directory, options.build, legacyBuilder);
   const usedVolumes = new Set(publicConfig.services.flatMap(service => service.namedVolumes.map(volume => volume.source)));
   const usedNetworks = new Set(publicConfig.services.flatMap(service => service.networks));
   const usedSecrets = new Set(publicConfig.services.flatMap(service => service.secretSources));
@@ -111,13 +151,59 @@ export async function prepareCompose(spec: ComposeSpec, cli: ComposeCli, signal:
       if (value != null) redactions.push(String(value));
     }
   }
-  const secretFiles: Record<string, string> = {};
-  for (const [name, secret] of Object.entries(optionalRecord(configuration.secrets))) {
-    const value = await fs.readFile(path.resolve(root, String(requiredRecord(secret, 'Compose secret').file)), 'utf8');
-    secretFiles[name] = value;
-    redactions.push(value);
+  const used = optionalRecord(configuration.secrets);
+  for (const name of Object.keys(used)) {
+    const copy = secrets.get(name);
+    if (!copy) throw new Error(`Compose secret ${name} was not read during inspection.`);
+    used[name] = { file: composeLiteral(copy.file) };
+    redactions.push(copy.text);
   }
-  return { configuration, redactions, secretFiles, description: { composeVersion, supportsNoEnvResolution: true, hostInputs: inputs, ...publicConfig } };
+  return { configuration, redactions, description: { composeVersion, supportsNoEnvResolution: true, hostInputs: inputs, ...publicConfig } };
+}
+
+/** Compose interpolates paths too; a private directory name must stay literal. */
+function composeLiteral(value: string): string {
+  return value.replace(/\$/g, () => '$$');
+}
+
+/**
+ * Docker reads a build context by path while it builds, after authorization. Pin the verified absolute
+ * directory and give Docker a Dockerfile read once. Where application commands run as another user, who
+ * could replace the directory before Docker reads it, builds are refused. A Dockerfile-specific ignore
+ * file is applied only by BuildKit; Compose's legacy builder would put what it excludes into the image, so a
+ * build that would use it is refused.
+ */
+async function pinBuilds(root: string, services: Record<string, unknown>, directory: string, allowed: boolean, legacyBuilder: () => Promise<boolean>): Promise<void> {
+  let copies = 0;
+  let legacy: boolean | undefined;
+  for (const [id, candidate] of Object.entries(services)) {
+    const service = requiredRecord(candidate, `Compose service ${id}`);
+    if (service.build === undefined || service.build === null) continue;
+    if (!allowed) {
+      throw new PreviewError('INVALID_INPUT', `Compose service ${id} builds an image. Builds are unavailable while application commands run through applicationProcesses; use image: instead.`);
+    }
+    const build = requiredRecord(service.build, `Compose service ${id} build`);
+    assertOnlyKeys(build, ['context', 'dockerfile'], `Compose service ${id} build`);
+    const dockerfile = build.dockerfile ?? 'Dockerfile';
+    if (typeof build.context !== 'string' || typeof dockerfile !== 'string') throw new Error(`Compose service ${id} build is invalid.`);
+    const context = await resolveContainedDirectory(root, containedPath(root, localContext(build.context, `Compose service ${id} build context`), true));
+    const source = containedPath(root, path.resolve(context, safeStaticPath(dockerfile, `Compose service ${id} dockerfile`)));
+    const file = path.join(directory, `dockerfile-${copies++}`);
+    await fs.writeFile(file, await readContainedFile(root, source, MAX_HOST_INPUT_BYTES), { mode: 0o600, flag: 'wx' });
+    // BuildKit reads `<Dockerfile>.dockerignore` beside the Dockerfile, even an empty one, instead of the context's `.dockerignore`.
+    const ignore = await readContainedFile(root, `${source}.dockerignore`, MAX_HOST_INPUT_BYTES).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (ignore !== undefined) {
+      legacy ??= await legacyBuilder();
+      if (legacy) {
+        throw new PreviewError('START_FAILED', `Compose service ${id} has ${path.basename(source)}.dockerignore, which only BuildKit applies. Install Docker Buildx so Compose builds with BuildKit.`);
+      }
+      await fs.writeFile(`${file}.dockerignore`, ignore, { mode: 0o600, flag: 'wx' });
+    }
+    service.build = { context: composeLiteral(context), dockerfile: composeLiteral(file) };
+  }
 }
 
 function scanComposeSource(source: string, sourceName: string): { hostInputs: ComposeHostInput[] } {
@@ -167,11 +253,11 @@ function scanComposeSource(source: string, sourceName: string): { hostInputs: Co
     const build = service.build;
     if (build !== undefined) {
       if (typeof build === 'string') {
-        hostInputs.push({ kind: 'BUILD_CONTEXT', path: safeStaticPath(build, `service ${serviceId} build context`) });
+        hostInputs.push({ kind: 'BUILD_CONTEXT', path: localContext(build, `service ${serviceId} build context`) });
       } else {
         const buildRecord = requiredRecord(build, `service ${serviceId} build`);
         assertOnlyKeys(buildRecord, ['context', 'dockerfile'], `service ${serviceId} build`);
-        const context = safeStaticPath(String(buildRecord.context ?? '.'), `service ${serviceId} build context`);
+        const context = localContext(String(buildRecord.context ?? '.'), `service ${serviceId} build context`);
         hostInputs.push({ kind: 'BUILD_CONTEXT', path: context });
         if (buildRecord.dockerfile !== undefined) {
           hostInputs.push({
@@ -459,6 +545,13 @@ function isHostPath(value: string): boolean {
   return value.startsWith('.') || value.startsWith('/') || value.startsWith('~') || value.includes('\\');
 }
 
+/** `:` would name a remote (Git or URL) context, and a leading `~` the Docker CLI's home. */
+function localContext(value: string, context: string): string {
+  const relative = safeStaticPath(value, context);
+  if (relative.includes(':') || relative.startsWith('~')) throw new Error(`${context} must be a local directory inside the source.`);
+  return relative;
+}
+
 function safeStaticPath(value: string, context: string): string {
   if (
     !value || value.includes('\0') || /[\r\n$]/.test(value) || path.posix.isAbsolute(value) ||
@@ -477,29 +570,29 @@ async function resolveContainedDirectory(root: string, relative: string): Promis
   return real;
 }
 
-async function resolveContainedFile(root: string, candidate: string, maxBytes: number): Promise<string> {
-  const lexical = path.resolve(candidate);
-  if (!isWithin(root, lexical)) throw new Error('Compose host input escapes the source directory.');
-  const stat = await fs.lstat(lexical);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes) {
-    throw new Error('Compose host input must be a bounded regular file, not a symlink.');
-  }
-  const real = await fs.realpath(lexical);
-  if (!isWithin(root, real)) throw new Error('Compose host input escapes the source directory.');
-  const handle = await fs.open(real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  await handle.close();
-  return real;
-}
-
-async function readFileIdentity(file: string): Promise<Record<string, string>> {
-  const stat = await fs.lstat(file, { bigint: true });
-  return {
-    dev: String(stat.dev),
-    ino: String(stat.ino),
-    size: String(stat.size),
-    mtimeNs: String(stat.mtimeNs),
-    ctimeNs: String(stat.ctimeNs)
-  };
+/** Reads a regular file once: no link in any path component, no hard link, nothing past the size limit. */
+async function readContainedFile(root: string, relative: string, maxBytes: number): Promise<Buffer> {
+  const handle = await openContained(root, path.resolve(root, relative)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ELOOP') throw new Error('Compose host input must be a bounded regular file, not a symlink.');
+    throw error;
+  });
+  try {
+    const stat = await handle.stat({ bigint: true });
+    if (!stat.isFile() || stat.nlink !== 1n || stat.size > BigInt(maxBytes)) {
+      throw new Error('Compose host input must be a bounded regular file, not a symlink or hard link.');
+    }
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+    if (length > maxBytes) throw new Error('Compose host input must be a bounded regular file, not a symlink.');
+    // A link made and removed while the path was checked shows in the open file's link count.
+    if ((await handle.stat({ bigint: true })).nlink !== 1n) throw new Error('Compose host input changed while it was read.');
+    return buffer.subarray(0, length);
+  } finally { await handle.close(); }
 }
 
 function dedupeHostInputs(inputs: ComposeHostInput[]): ComposeHostInput[] {
@@ -508,9 +601,11 @@ function dedupeHostInputs(inputs: ComposeHostInput[]): ComposeHostInput[] {
   return [...byKey.values()].sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b)));
 }
 
-function relativePath(root: string, candidate: string): string {
-  const relative = path.relative(root, candidate).replace(/\\/g, '/');
-  if (relative.startsWith('../')) throw new Error('Compose path is outside source directory.');
+/** A source-relative path inside the root; the root itself only for a build context. */
+function containedPath(root: string, candidate: string, allowRoot = false): string {
+  const absolute = path.resolve(root, candidate);
+  const relative = path.relative(root, absolute).replace(/\\/g, '/');
+  if (!isWithin(root, absolute) || !relative && !allowRoot) throw new Error('Compose host input escapes the source directory.');
   return relative || '.';
 }
 

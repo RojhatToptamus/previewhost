@@ -4,7 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createPreviewRuntime, connectPreviewDaemon, loadPreviewSpec, savePreviewSpec } from 'previewhost';
+import { applicationSupervisorFiles, createPreviewRuntime, connectPreviewDaemon, loadPreviewSpec, savePreviewSpec } from 'previewhost';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const root = join(directory, 'node_modules/previewhost');
@@ -62,6 +62,9 @@ try {
     execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--all-architectures', keychain]);
   }
   for (const file of ['dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/supervisor.js', 'dist/previewhost.svg', 'dist/favicon.png', 'examples/static.json', 'examples/command.json', 'examples/server.mjs', 'examples/site/index.html', 'LICENSE', 'NOTICE']) assert(inventory.includes(file), `Missing packaged file: ${file}`);
+  const supervisor = applicationSupervisorFiles();
+  assert.equal(supervisor.module, join(root, 'dist/supervisor.js'));
+  for (const file of supervisor.files) assert(inventory.includes(file.slice(root.length + 1).replaceAll('\\', '/')), `Missing supervisor file: ${file}`);
   assert.match(await readFile(join(root, 'dist/fonts/LICENSE.txt'), 'utf8'), /SIL OPEN FONT LICENSE Version 1.1/);
   const { startDashboard } = await import(pathToFileURL(join(root, 'dist/dashboard.js')).href);
   const dashboard = await startDashboard({ discover: async () => [] });
