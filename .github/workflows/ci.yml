@@ -100,7 +100,7 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: Install Docker tools
-        run: brew install lima docker docker-compose
+        run: brew install lima docker docker-compose docker-buildx
       - name: Start local Docker
         run: |
           limactl start --name=previewhost --tty=false --vm-type=vz --cpus=2 --memory=4 --mount-none template:docker-rootful

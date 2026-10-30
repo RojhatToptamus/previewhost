@@ -4,7 +4,7 @@ import { access, mkdtemp, writeFile, rm, realpath, stat } from 'node:fs/promises
 import { join, dirname, delimiter, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import type { ComposeSpec, RuntimeOptions } from './contracts.js';
-import { PreviewError } from './errors.js';
+import { PreviewError, throwIfAborted } from './errors.js';
 import { runNativeJob, startNative, type NativeOwnership } from './native.js';
 import type { Resource } from './resources.js';
 
@@ -68,6 +68,16 @@ export class ComposeCli {
       throw new PreviewError('START_FAILED', 'Install Docker Compose with config normalization and bounded up/wait support.');
     }
     return version.trim().replace(/^v/, '');
+  }
+
+  /**
+   * Whether Compose builds with BuildKit, through Bake. Without the Buildx plugin, Compose falls back to the legacy
+   * builder, which reads only the context's `.dockerignore`.
+   */
+  async buildx(signal: AbortSignal): Promise<boolean> {
+    const found = await this.read([...this.dockerArgs().slice(0, -1), 'buildx', 'version'], signal).then(() => true, () => false);
+    throwIfAborted(signal);
+    return found;
   }
 
   /** `files` are private copies; relative paths in them still resolve from the source directory (`--project-directory`). */

@@ -74,7 +74,12 @@ test('Compose replacements, failures, cancellation and restart keep exact volume
   await write('ignored', false, true);
   const candidate = await runtime.start(spec('one'));
   const cancelDeadline = Date.now() + 10000;
-  while (!(await runtime.logs('one', candidate.candidate!.id)).text.includes('Started')) { assert.ok(Date.now() < cancelDeadline, 'The candidate container did not start'); await delay(50); }
+  while (!(await runtime.logs('one', candidate.candidate!.id)).text.includes('Started')) {
+    if (Date.now() >= cancelDeadline) {
+      assert.fail(`The candidate container did not start: ${JSON.stringify({ status: await runtime.get('one'), logs: await runtime.logs('one', candidate.candidate!.id) })}`);
+    }
+    await delay(50);
+  }
   await runtime.cancel('one', candidate.candidate!.id);
   assert.equal((await runtime.get('one')).latest?.state, 'canceled');
   await write('ignored');
@@ -184,6 +189,32 @@ test('Compose pins build contexts to verified absolute directories and Dockerfil
   assert.ok(build.dockerfile.startsWith(cli.directory), build.dockerfile);
   assert.equal(await readFile(build.dockerfile, 'utf8'), 'FROM busybox:1.37\n');
   assert.deepEqual(prepared.description.services[0].build, { context: 'github.com/x/y', dockerfile: 'Dockerfile' });
+});
+
+test('a Dockerfile-specific ignore file, even an empty one, is kept for BuildKit and refused without Buildx', {
+  skip: !dockerSocket && 'Requires PREVIEWHOST_TEST_DOCKER_SOCKET, the Docker Compose CLI and Docker Buildx',
+}, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-compose-ignore-'));
+  const source = join(directory, 'source');
+  await mkdir(source);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(source, 'Dockerfile'), 'FROM busybox:1.37\n');
+  await writeFile(join(source, 'compose.yaml'), 'services:\n  web:\n    build: .\n    expose: [8080]\n');
+  const spec: ComposeSpec = { name: 'ignore', type: 'compose', cwd: source, files: ['compose.yaml'], profiles: [], rootServices: ['web'],
+    services: [{ id: 'web', ports: { http: { target: 8080 } } }], primary: { service: 'web', port: 'http' }, routes: {}, timeoutMs: 120000 };
+  // Each preparation writes its copies into a command directory of its own.
+  const commandDirectory = async (legacy = false) => {
+    const cli = await ComposeCli.create(directory, dockerSocket!);
+    t.after(() => cli.close());
+    return legacy ? Object.assign(Object.create(cli), { buildx: async () => false }) as ComposeCli : cli;
+  };
+  // Without an ignore file of its own, either builder applies the context's .dockerignore.
+  await prepareCompose(spec, await commandDirectory(true), t.signal);
+  await writeFile(join(source, 'Dockerfile.dockerignore'), '');
+  await assert.rejects(prepareCompose(spec, await commandDirectory(true), t.signal), /Install Docker Buildx/);
+  const prepared = await prepareCompose(spec, await commandDirectory(), t.signal);
+  const build = (prepared.configuration.services as Record<string, { build: { dockerfile: string } }>).web.build;
+  assert.equal(await readFile(`${build.dockerfile}.dockerignore`, 'utf8'), '');
 });
 
 test('Compose image builds are refused while application commands run through an embedder', {
