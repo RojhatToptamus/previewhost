@@ -1,7 +1,7 @@
 import { Socket } from 'node:net';
 import { setImmediate } from 'node:timers/promises';
-import { Client } from 'pg';
-import { createClient } from 'redis';
+import { Client, DatabaseError } from 'pg';
+import { createClient, ErrorReply } from 'redis';
 import { PreviewError, throwIfAborted } from './errors.js';
 
 type DatabaseType = 'postgres' | 'redis';
@@ -36,13 +36,13 @@ export function databaseRedactions(value: string): string[] {
 }
 
 /**
- * Whether the server answered and refused the credentials: PostgreSQL's SQLSTATE class 28, or
- * Redis's WRONGPASS or NOAUTH. Only the class is read, never the driver's message.
+ * The code a database answered with: PostgreSQL's SQLSTATE, or the first word of Redis's error reply.
+ * Only the code is read, never the driver's message.
  */
-function credentialsRefused(error: unknown): boolean {
-  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
-  return (typeof code === 'string' && /^28[0-9A-Z]{3}$/.test(code))
-    || (typeof message === 'string' && /^(WRONGPASS|NOAUTH)\b/.test(message));
+function answerCode(error: unknown): string | undefined {
+  if (error instanceof DatabaseError) return error.code;
+  if (error instanceof ErrorReply) return /^[A-Z]+/.exec(error.message)?.[0];
+  return undefined;
 }
 
 /** One authenticated protocol query. Driver errors never cross the credential boundary. */
@@ -52,6 +52,7 @@ export async function probeDatabase(type: DatabaseType, value: string, options: 
   const signal = AbortSignal.any([options.signal, AbortSignal.timeout(Math.max(1, options.timeoutMs))]);
   let dispose: () => void = () => {};
   let joined: Promise<unknown> = Promise.resolve();
+  let connected = false;
   const abort = () => dispose();
   signal.addEventListener('abort', abort, { once: true });
   try {
@@ -70,6 +71,7 @@ export async function probeDatabase(type: DatabaseType, value: string, options: 
       dispose = () => { socket.destroy(); };
       joined = closed;
       await client.connect();
+      connected = true;
       const result = await client.query('SELECT 1 AS ready');
       if (result.rows[0]?.ready !== 1) throw new Error();
     } else {
@@ -85,15 +87,18 @@ export async function probeDatabase(type: DatabaseType, value: string, options: 
       // The client joins connection initialization; destroy rejects any pending command.
       joined = client.connect();
       await joined;
+      connected = true;
       if (await client.ping() !== 'PONG') throw new Error();
     }
     throwIfAborted(signal);
   } catch (error) {
     if (options.signal.aborted) throw new PreviewError('CLOSED', 'The database check was canceled.');
     const address = `127.0.0.1:${url.port}`;
-    throw new PreviewError(signal.aborted ? 'TIMEOUT' : 'START_FAILED', credentialsRefused(error)
-      ? `The database on ${address} refused the credentials.`
-      : signal.aborted ? `The database on ${address} did not answer within ${options.timeoutMs} ms.` : `No database accepted a connection on ${address}.`);
+    const answer = answerCode(error);
+    throw new PreviewError(signal.aborted ? 'TIMEOUT' : 'START_FAILED', answer !== undefined
+      ? /^(28|WRONGPASS$|NOAUTH$)/.test(answer) ? `The database on ${address} refused the credentials (${answer}).` : `The database on ${address} answered ${answer}.`
+      : signal.aborted ? `The database on ${address} did not answer within ${options.timeoutMs} ms.`
+        : connected ? `The database on ${address} did not pass the check.` : `No database accepted a connection on ${address}.`);
   } finally {
     signal.removeEventListener('abort', abort);
     dispose();
