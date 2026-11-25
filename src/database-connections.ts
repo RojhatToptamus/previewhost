@@ -35,6 +35,16 @@ export function databaseRedactions(value: string): string[] {
     decodeURIComponent(url.username), decodeURIComponent(url.password)].filter(Boolean))];
 }
 
+/**
+ * Whether the server answered and refused the credentials: PostgreSQL's SQLSTATE class 28, or
+ * Redis's WRONGPASS or NOAUTH. Only the class is read, never the driver's message.
+ */
+function credentialsRefused(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  return (typeof code === 'string' && /^28[0-9A-Z]{3}$/.test(code))
+    || (typeof message === 'string' && /^(WRONGPASS|NOAUTH)\b/.test(message));
+}
+
 /** One authenticated protocol query. Driver errors never cross the credential boundary. */
 export async function probeDatabase(type: DatabaseType, value: string, options: { signal: AbortSignal; timeoutMs: number }): Promise<void> {
   const url = new URL(validateDatabaseUrl(type, value));
@@ -78,9 +88,12 @@ export async function probeDatabase(type: DatabaseType, value: string, options: 
       if (await client.ping() !== 'PONG') throw new Error();
     }
     throwIfAborted(signal);
-  } catch {
-    throw new PreviewError(options.signal.aborted ? 'CLOSED' : signal.aborted ? 'TIMEOUT' : 'START_FAILED',
-      options.signal.aborted ? 'The database check was canceled.' : 'The authenticated database check failed.');
+  } catch (error) {
+    if (options.signal.aborted) throw new PreviewError('CLOSED', 'The database check was canceled.');
+    const address = `127.0.0.1:${url.port}`;
+    throw new PreviewError(signal.aborted ? 'TIMEOUT' : 'START_FAILED', credentialsRefused(error)
+      ? `The database on ${address} refused the credentials.`
+      : signal.aborted ? `The database on ${address} did not answer within ${options.timeoutMs} ms.` : `No database accepted a connection on ${address}.`);
   } finally {
     signal.removeEventListener('abort', abort);
     dispose();

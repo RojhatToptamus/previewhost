@@ -81,3 +81,33 @@ test('PostgreSQL startup cannot inherit host credentials, TLS or connection opti
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('a failed check says whether no database answered or the database refused the credentials, never the credentials', async () => {
+  const closed = net.createServer();
+  await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve));
+  const unused = (closed.address() as net.AddressInfo).port;
+  await new Promise<void>((resolve) => closed.close(() => resolve()));
+  // A server that answers every startup or command with a refusal of the credentials.
+  const refusing = net.createServer((socket) => {
+    socket.on('error', () => {});
+    socket.once('data', (chunk) => {
+      if (chunk[0] === 0x2a) { socket.end('-WRONGPASS invalid username-password pair or user is disabled.\r\n'); return; }
+      const fields = Buffer.from('SFATAL\0VFATAL\0C28P01\0Mpassword authentication failed for user "alice"\0\0');
+      const header = Buffer.alloc(5); header.write('E'); header.writeInt32BE(fields.length + 4, 1);
+      socket.end(Buffer.concat([header, fields]));
+    });
+  });
+  await new Promise<void>((resolve) => refusing.listen(0, '127.0.0.1', resolve));
+  const port = (refusing.address() as net.AddressInfo).port;
+  try {
+    for (const type of ['postgres', 'redis'] as const) {
+      const url = (at: number) => type === 'postgres' ? `postgresql://alice:never-expose@127.0.0.1:${at}/app` : `redis://:never-expose@127.0.0.1:${at}/0`;
+      await assert.rejects(probeDatabase(type, url(unused), { signal: new AbortController().signal, timeoutMs: 1500 }),
+        { code: 'START_FAILED', message: `No database accepted a connection on 127.0.0.1:${unused}.` });
+      await assert.rejects(probeDatabase(type, url(port), { signal: new AbortController().signal, timeoutMs: 1500 }),
+        { code: 'START_FAILED', message: `The database on 127.0.0.1:${port} refused the credentials.` });
+    }
+  } finally {
+    await new Promise<void>((resolve) => refusing.close(() => resolve()));
+  }
+});
