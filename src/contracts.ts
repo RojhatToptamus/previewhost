@@ -350,6 +350,12 @@ export interface RuntimeOptions {
    */
   applicationProcesses?: ApplicationProcessLauncher;
   dockerSocket?: string;
+  /**
+   * The IPv4 address a preview's numeric URL and browser aliases listen on; 127.0.0.1 by default. An embedder
+   * that runs Previewhost in a network namespace of its own names 0.0.0.0, so the host outside reaches its
+   * previews on the namespace's address. Requests still name the loopback authority as `Host`.
+   */
+  gatewayHost?: string;
   authorize?: (request: AuthorizationRequest) => boolean | Promise<boolean>;
 }
 

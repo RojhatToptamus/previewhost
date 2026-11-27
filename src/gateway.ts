@@ -29,8 +29,11 @@ interface TargetWork {
   resolveIdle(): void;
 }
 
-/** An IPv4 loopback HTTP gateway. Target object identity owns its in-flight work. */
-export async function createGateway(options: { onError?: (error: Error) => void; resolveTarget?: () => HttpTarget | undefined; publicPort?: number } = {}): Promise<Gateway> {
+/**
+ * An HTTP gateway on IPv4 loopback, or on `host` as well where the embedder names one. Requests name its
+ * loopback authority either way. Target object identity owns its in-flight work.
+ */
+export async function createGateway(options: { onError?: (error: Error) => void; resolveTarget?: () => HttpTarget | undefined; publicPort?: number; host?: string } = {}): Promise<Gateway> {
   let active: ReadonlyMap<string, HttpTarget> | undefined;
   let knownAuthorities = new Set<string>();
   let authority = '';
@@ -64,7 +67,7 @@ export async function createGateway(options: { onError?: (error: Error) => void;
     };
     server.once('error', onError);
     server.once('listening', onListening);
-    server.listen(0, '127.0.0.1');
+    server.listen(0, options.host ?? '127.0.0.1');
   });
   authority = `127.0.0.1:${port}`;
   knownAuthorities.add(authority);
