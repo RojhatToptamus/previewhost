@@ -428,3 +428,31 @@ test('additional source approval preserves roots on denial and cancellation', as
   await runtime.close();
   await assert.rejects(runtime.allowSources([outside], new AbortController().signal), code('CLOSED'));
 });
+
+test('a gateway host serves previews on that address too, where a default runtime serves loopback alone', async (t) => {
+  const outside = Object.values(os.networkInterfaces()).flat().find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
+  if (!outside) {
+    t.skip('This machine has no non-loopback IPv4 address.');
+    return;
+  }
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'previewhost gateway host '));
+  await fs.writeFile(path.join(directory, 'index.html'), '<h1>outside</h1>');
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await assert.rejects(createPreviewRuntime({ allowedRoots: [directory], gatewayHost: 'localhost' }), code('INVALID_INPUT'));
+  // From outside loopback, as an embedder's host reaches a namespace: the Host still names the loopback authority.
+  const fromOutside = (url: string) => new Promise<number>((resolve, reject) => {
+    const authority = new URL(url);
+    http.get({ host: outside, port: authority.port, path: '/', headers: { host: authority.host }, agent: false }, (res) => {
+      res.resume();
+      resolve(res.statusCode!);
+    }).once('error', reject);
+  });
+  for (const gatewayHost of ['0.0.0.0', undefined]) {
+    const runtime = await createPreviewRuntime({ allowedRoots: [directory], ...(gatewayHost ? { gatewayHost } : {}) });
+    t.after(() => runtime.close());
+    const served = await ready(runtime, await runtime.start({ name: 'page', type: 'static', directory }));
+    assert.match((await request(served.url!, '/')).body, /outside/);
+    if (gatewayHost) assert.equal(await fromOutside(served.url!), 200);
+    else await assert.rejects(fromOutside(served.url!), { code: 'ECONNREFUSED' });
+  }
+});

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isIPv4 } from 'node:net';
 import { isAbsolute, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { AttemptLog } from './logs.js';
@@ -98,6 +99,7 @@ export interface PreparedSecretSetup {
 
 export async function createPreviewRuntime(options: RuntimeOptions): Promise<PreviewRuntime> {
   const { roots, inputs, secretIds, applicationProcesses } = await runtimeContext(options);
+  if (options.gatewayHost !== undefined && !isIPv4(options.gatewayHost)) throw new PreviewError('INVALID_INPUT', 'Name the gateway host as an IPv4 address.');
   let keystoreDirectory = options.keystoreDirectory;
   if (keystoreDirectory) {
     if (!isAbsolute(keystoreDirectory)) throw new PreviewError('INVALID_INPUT', 'The keystore directory must be absolute.');
@@ -111,7 +113,7 @@ export async function createPreviewRuntime(options: RuntimeOptions): Promise<Pre
   try {
     data = options.dataDirectory ? await createDataOwner({ directory: options.dataDirectory, dockerSocket: options.dockerSocket, keystore }) : undefined;
     compose = options.dataDirectory ? await ComposeOwner.open(`${data!.directory}-compose`, options.dockerSocket) : undefined;
-    const runtime = new Runtime(roots, options.authorize, inputs, secretIds, data, keystore, { dataDirectory: options.dataDirectory, dockerSocket: options.dockerSocket }, options.supervisor, applicationProcesses, records, compose);
+    const runtime = new Runtime(roots, options.authorize, inputs, secretIds, data, keystore, { dataDirectory: options.dataDirectory, dockerSocket: options.dockerSocket }, options.supervisor, applicationProcesses, options.gatewayHost, records, compose);
     await runtime.recover();
     return runtime;
   } catch (error) {
@@ -134,6 +136,7 @@ class Runtime implements PreviewRuntime {
     private readonly storage: Pick<RuntimeOptions, 'dataDirectory' | 'dockerSocket'>,
     private readonly supervisor: RuntimeOptions['supervisor'],
     private readonly applicationProcesses: RuntimeOptions['applicationProcesses'],
+    private readonly gatewayHost: string | undefined,
     private readonly records?: RuntimeRecords,
     private readonly compose?: ComposeOwner,
   ) {
@@ -684,7 +687,7 @@ class Runtime implements PreviewRuntime {
       attempt.retained = !!this.records;
       this.admitted(slot, attempt);
       if (!slot.gateway) {
-        slot.gateway = await createGateway({ onError: (error) => this.gatewayFailed(slot, error) });
+        slot.gateway = await createGateway({ host: this.gatewayHost, onError: (error) => this.gatewayFailed(slot, error) });
       }
       this.admitted(slot, attempt);
       let verifyListener: (() => Promise<void>) | undefined;
@@ -764,7 +767,7 @@ class Runtime implements PreviewRuntime {
       resource.assertRunning?.();
       if (resource.exited) void resource.exited.then((error) => this.resourceFailed(slot, attempt, error));
       if (attempt.held) {
-        attempt.candidateGateway = await createGateway({ publicPort: Number(new URL(slot.gateway.url).port), onError: error => { void this.resourceFailed(slot, attempt, error); } });
+        attempt.candidateGateway = await createGateway({ host: this.gatewayHost, publicPort: Number(new URL(slot.gateway.url).port), onError: error => { void this.resourceFailed(slot, attempt, error); } });
         this.admitted(slot, attempt);
         attempt.candidateGateway.setRoutes(resource.routes ?? { '127.0.0.1': resource.target });
         attempt.summary.state = 'ready';

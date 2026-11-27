@@ -35,6 +35,10 @@ No input map or data directory exists by default.
 `dockerSocket` selects an explicit local Engine socket and requires `dataDirectory`.
 The default is `~/.docker/run/docker.sock` on macOS, `/var/run/docker.sock` on Linux,
 and `\\.\pipe\docker_engine` on Windows.
+`gatewayHost` is the IPv4 address a preview's numeric URL and browser aliases listen on.
+The default is `127.0.0.1`. An embedder that runs Previewhost in a network namespace of its own
+can pass `0.0.0.0`, so the host outside reaches its previews on the namespace's address.
+Requests still name the loopback authority as `Host`.
 
 For `start` and `replace`, the callback receives `operation`, a validated copy of
 `spec`, and `signal`. Changes to this copy do not affect execution.
