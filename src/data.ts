@@ -348,11 +348,18 @@ export async function createDataOwner(options: { directory: string; dockerSocket
               const port = publishedPort(found, resource);
               const url = resource.type === 'postgres' ? `postgresql://previewhost:${password}@127.0.0.1:${port}/previewhost`
                 : `redis://:${password}@127.0.0.1:${port}/0`;
-              const deadline = performance.now() + 30_000;
+              const checkSeconds = 30;
+              const deadline = performance.now() + checkSeconds * 1000;
               while (true) {
                 throwIfAborted(startOptions.signal);
                 try { await probeDatabase(resource.type, url, { signal: startOptions.signal, timeoutMs: 1500 }); break; }
-                catch (error) { if (startOptions.signal.aborted || performance.now() >= deadline) throw error; }
+                catch (error) {
+                  if (startOptions.signal.aborted) throw error;
+                  if (performance.now() >= deadline) {
+                    throw new PreviewError(error instanceof PreviewError ? error.code : 'START_FAILED',
+                      `The owned ${resource.type === 'postgres' ? 'PostgreSQL' : 'Redis'} database "${resource.name}" did not pass its check within ${checkSeconds} seconds of its container starting. ${error instanceof Error ? error.message : ''}`.trim());
+                  }
+                }
                 await pause(100, undefined, { signal: startOptions.signal });
               }
               current.bindings[resource.name] = { url, redactions: databaseRedactions(url) };
