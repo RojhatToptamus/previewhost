@@ -535,6 +535,7 @@ class Runtime implements PreviewRuntime {
       await this.cleanupAttempt(slot, candidate);
       slot.candidate = undefined;
       if (!slot.active) await this.closeGateway(slot);
+      if (!slot.active && !slot.cleanup.size && this.dataStatus(slot.name)) await this.stopData(slot, [candidate]);
     }
     return this.status(slot);
   }
@@ -816,7 +817,8 @@ class Runtime implements PreviewRuntime {
           attempt.summary.state = 'cleanup-incomplete';
         });
       }
-      if (!slot.active && !slot.cleanup.size && this.dataStatus(slot.name)) {
+      // A held candidate that became ready keeps its databases until it is promoted, canceled or stopped.
+      if (!slot.active && !slot.candidate && !slot.cleanup.size && this.dataStatus(slot.name)) {
         await this.stopData(slot, [attempt]).catch((error) => {
           attempt.summary.error = failure(error, 'CLEANUP_INCOMPLETE');
           attempt.summary.state = 'cleanup-incomplete';

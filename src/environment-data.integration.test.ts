@@ -165,3 +165,34 @@ test('persistent-data authorization reserves the name and stop cancels pending d
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('a held candidate keeps its owned database until it is canceled', enabled, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'previewhost-held-data-'));
+  const runtime = await createPreviewRuntime({ allowedRoots: [directory], dataDirectory: join(directory, 'data'), dockerSocket, authorize: () => true });
+  // The application exits once its database is gone, as a server that holds a connection does.
+  const script = `
+    import http from 'node:http';
+    import {createClient} from ${JSON.stringify(import.meta.resolve('redis'))};
+    const redis=createClient({url:process.env.REDIS_URL,socket:{reconnectStrategy:false}});redis.on('error',()=>process.exit(1));await redis.connect();
+    http.createServer(async(_req,res)=>res.end(await redis.ping())).listen(Number(process.env.PORT),process.env.HOST);
+  `;
+  try {
+    const held = await runtime.prepareCandidate({ name: 'held', type: 'environment', primary: 'web', services: {
+      cache: { type: 'redis' },
+      web: { type: 'command', cwd: directory, command: [process.execPath, '--input-type=module', '-e', script], env: { REDIS_URL: { service: 'cache' } } },
+    } });
+    const id = held.candidate!.id;
+    assert.equal((await runtime.wait('held', id)).state, 'ready');
+    await until(async () => !(await runtime.get('held')).busy);
+    const status = await runtime.get('held');
+    assert.equal(status.active, undefined, 'nothing else serves this name');
+    assert.equal(status.data?.running, true);
+    assert.equal(status.candidate?.services?.cache.state, 'ready');
+    assert.equal(await (await fetch(runtime.candidateUrl('held', id))).text(), 'PONG');
+    await runtime.cancel('held', id);
+    assert.equal((await runtime.get('held')).data?.running, false);
+  } finally {
+    await runtime.stop('held').catch(() => {}); await runtime.deleteData('held').catch(() => {}); await runtime.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
